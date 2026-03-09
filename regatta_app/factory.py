@@ -14,7 +14,8 @@ def build_redis_client(app: Flask) -> Redis | None:
     redis_url = app.config.get("REDIS_URL")
     if not redis_url:
         return None
-    return Redis.from_url(redis_url, decode_responses=True)
+    # Flask-Session stores binary payloads in Redis, so responses must stay as bytes.
+    return Redis.from_url(redis_url, decode_responses=False)
 
 
 def create_app() -> Flask:
