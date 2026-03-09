@@ -1,4 +1,4 @@
-# Regatta v2
+# Курс на знак
 
 Flask-only релиз браузерной регаты с обновлённым control deck, комнатами для мультиплеера и Redis-backed sessions.
 

@@ -8,7 +8,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 
 class Config:
-    APP_NAME = "Regatta v2"
+    APP_NAME = "Курс на знак"
     APP_VERSION = os.getenv("APP_VERSION", "2.0.0")
     SECRET_KEY = os.getenv("SECRET_KEY", "regatta-v2-dev-secret")
 
