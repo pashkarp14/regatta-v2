@@ -211,10 +211,17 @@ document.addEventListener("DOMContentLoaded", () => {
   const BOAT_COLORS = ["#e53935","#1e88e5","#43a047","#fdd835","#8e24aa","#ff8f00","#00acc1","#6d4c41"];
 
   const STEP_RADIUS_BASE = 1.0;
-  const BOAT_RADIUS = 0.25;
-  const BOAT_PICK_RADIUS = 0.7;
-  const MARK_RADIUS = 0.35;                 // "столкновение"/запрет встать в знак
-  const ROUND_PASS_RADIUS = MARK_RADIUS * 2; // зона огибания (как просил — 2×)
+  const BOAT_RULE_LENGTH = 0.85;
+  const BOAT_FOOTPRINT_LENGTH = 1.70;
+  const BOAT_FOOTPRINT_BEAM = 0.90;
+  const BOAT_COLLISION_RADIUS = BOAT_FOOTPRINT_BEAM / 2;
+  const BOAT_CAPSULE_HALF_SEGMENT = Math.max(0, (BOAT_FOOTPRINT_LENGTH - BOAT_FOOTPRINT_BEAM) / 2);
+  const BOAT_SWEEP_RADIUS = BOAT_CAPSULE_HALF_SEGMENT + BOAT_COLLISION_RADIUS;
+  const BOAT_PICK_PAD = 0.18;
+  const BOAT_CLEARANCE_MARGIN = 0.25;
+  const MARK_CLEARANCE_MARGIN = 0.25;
+  const MARK_RADIUS = 0.35;                 // геометрический радиус знака
+  const ROUND_PASS_RADIUS = BOAT_RULE_LENGTH * 3; // огибание засчитывается в радиусе трех длин корпуса
   const ROUNDING_MIN_SWEEP = Math.PI / 3;
   const ROUNDING_SWEEP_BIN_RAD = Math.PI / 12;
 
@@ -368,6 +375,116 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function segDistToPoint(a,b,p){
     return pointToSegment(p,a,b).d;
+  }
+
+  function dot(a,b){
+    return a.x*b.x + a.y*b.y;
+  }
+
+  function boatAxisUnit(heading, hasHeading){
+    if (hasHeading && Number.isFinite(heading)){
+      return { x: Math.cos(heading), y: Math.sin(heading) };
+    }
+    return { x: 0, y: 1 };
+  }
+
+  function boatCapsuleAt(pos, heading, hasHeading){
+    const axis = boatAxisUnit(heading, hasHeading);
+    return {
+      a: {
+        x: pos.x - axis.x * BOAT_CAPSULE_HALF_SEGMENT,
+        y: pos.y - axis.y * BOAT_CAPSULE_HALF_SEGMENT
+      },
+      b: {
+        x: pos.x + axis.x * BOAT_CAPSULE_HALF_SEGMENT,
+        y: pos.y + axis.y * BOAT_CAPSULE_HALF_SEGMENT
+      },
+      r: BOAT_COLLISION_RADIUS
+    };
+  }
+
+  function boatCapsuleForIndex(boatIdx, posOverride=null, headingOverride=null, hasHeadingOverride=null){
+    const boat = boats[boatIdx];
+    const pos = posOverride || { x: boat?.x || 0, y: boat?.y || 0 };
+    const heading = Number.isFinite(headingOverride) ? headingOverride : (Number.isFinite(boat?.heading) ? boat.heading : 0);
+    const hasHeading = (typeof hasHeadingOverride === "boolean") ? hasHeadingOverride : !!boat?.hasHeading;
+    return boatCapsuleAt(pos, heading, hasHeading);
+  }
+
+  function capsuleDistanceToPoint(capsule, point){
+    return pointToSegment(point, capsule.a, capsule.b).d - capsule.r;
+  }
+
+  function segmentSegmentDistance(a0, a1, b0, b1){
+    const EPS = 1e-9;
+    const u = { x: a1.x - a0.x, y: a1.y - a0.y };
+    const v = { x: b1.x - b0.x, y: b1.y - b0.y };
+    const w = { x: a0.x - b0.x, y: a0.y - b0.y };
+
+    const a = dot(u, u);
+    const b = dot(u, v);
+    const c = dot(v, v);
+    const d = dot(u, w);
+    const e = dot(v, w);
+    const D = a * c - b * b;
+
+    let sN, sD = D;
+    let tN, tD = D;
+
+    if (D < EPS){
+      sN = 0;
+      sD = 1;
+      tN = e;
+      tD = c;
+    } else {
+      sN = b * e - c * d;
+      tN = a * e - b * d;
+      if (sN < 0){
+        sN = 0;
+        tN = e;
+        tD = c;
+      } else if (sN > sD){
+        sN = sD;
+        tN = e + b;
+        tD = c;
+      }
+    }
+
+    if (tN < 0){
+      tN = 0;
+      if (-d < 0){
+        sN = 0;
+      } else if (-d > a){
+        sN = sD;
+      } else {
+        sN = -d;
+        sD = a;
+      }
+    } else if (tN > tD){
+      tN = tD;
+      if ((-d + b) < 0){
+        sN = 0;
+      } else if ((-d + b) > a){
+        sN = sD;
+      } else {
+        sN = -d + b;
+        sD = a;
+      }
+    }
+
+    const sc = Math.abs(sN) < EPS ? 0 : sN / sD;
+    const tc = Math.abs(tN) < EPS ? 0 : tN / tD;
+    const dx = w.x + sc * u.x - tc * v.x;
+    const dy = w.y + sc * u.y - tc * v.y;
+    return Math.hypot(dx, dy);
+  }
+
+  function capsulesOverlap(left, right, extra=0){
+    return segmentSegmentDistance(left.a, left.b, right.a, right.b) < (left.r + right.r + extra - 1e-9);
+  }
+
+  function capsuleIntersectsMark(capsule, markPos, extra=0){
+    return pointToSegment(markPos, capsule.a, capsule.b).d < (capsule.r + MARK_RADIUS + extra - 1e-9);
   }
 
   // -----------------------------
@@ -541,40 +658,44 @@ document.addEventListener("DOMContentLoaded", () => {
   // -----------------------------
   function getBoatAtPoint(p){
     for (let i=0;i<boats.length;i++){
-      if (dist(p, {x:boats[i].x,y:boats[i].y}) <= BOAT_PICK_RADIUS) return i;
+      const capsule = boatCapsuleForIndex(i);
+      if (capsuleDistanceToPoint(capsule, p) <= BOAT_PICK_PAD + 1e-9) return i;
     }
     return -1;
   }
 
-  function isTooCloseToMarks(p){
+  function isTooCloseToMarks(p, boatIdx=-1, headingOverride=null, hasHeadingOverride=null){
+    const capsule = boatIdx >= 0
+      ? boatCapsuleForIndex(boatIdx, p, headingOverride, hasHeadingOverride)
+      : boatCapsuleAt(p, headingOverride, hasHeadingOverride);
     for (let i=0;i<markCount;i++){
-      if (dist(p, marks[i]) < MARK_RADIUS) return true;
+      if (capsuleIntersectsMark(capsule, marks[i], MARK_CLEARANCE_MARGIN)) return true;
     }
     return false;
   }
 
-  function isTooCloseToBoats(p, exceptIdx){
+  function isTooCloseToBoats(p, exceptIdx, headingOverride=null, hasHeadingOverride=null){
+    const candidate = boatCapsuleForIndex(exceptIdx, p, headingOverride, hasHeadingOverride);
     for (let i=0;i<boats.length;i++){
       if (i===exceptIdx) continue;
-      if (dist(p, {x:boats[i].x,y:boats[i].y}) < BOAT_RADIUS*2) return true;
+      if (capsulesOverlap(candidate, boatCapsuleForIndex(i), BOAT_CLEARANCE_MARGIN)) return true;
     }
     return false;
   }
 
   function pathIntersectsOtherBoat(prevPos, nextPos, movingIdx){
-    const minD = BOAT_RADIUS*2;
     for (let i=0;i<boats.length;i++){
       if (i===movingIdx) continue;
-      const c = {x:boats[i].x,y:boats[i].y};
-      const d = segDistToPoint(prevPos, nextPos, c);
-      if (d < minD - 1e-9) return true;
+      const other = boatCapsuleForIndex(i);
+      const d = segmentSegmentDistance(prevPos, nextPos, other.a, other.b);
+      if (d < (BOAT_SWEEP_RADIUS + other.r + BOAT_CLEARANCE_MARGIN - 1e-9)) return true;
     }
     return false;
   }
 
   function pathIntersectsAnyMark(prevPos, nextPos){
     for (let i=0;i<markCount;i++){
-      if (segDistToPoint(prevPos, nextPos, marks[i]) < MARK_RADIUS - 1e-9) return true;
+      if (segDistToPoint(prevPos, nextPos, marks[i]) < (MARK_RADIUS + BOAT_SWEEP_RADIUS + MARK_CLEARANCE_MARGIN - 1e-9)) return true;
     }
     return false;
   }
@@ -695,8 +816,9 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     if (!pointInField(dest)) return null;
-    if (isTooCloseToMarks(dest)) return null;
-    if (isTooCloseToBoats(dest, boatIdx)) return null;
+    const headingAng = Math.atan2(dir.y, dir.x);
+    if (isTooCloseToMarks(dest, boatIdx, headingAng, true)) return null;
+    if (isTooCloseToBoats(dest, boatIdx, headingAng, true)) return null;
 
     const dd = dist(dest, {x:b.x,y:b.y});
     if (dd > R + 1e-6) return null;
@@ -829,20 +951,22 @@ document.addEventListener("DOMContentLoaded", () => {
     const L = Math.hypot(mv.x,mv.y);
     if (L < 1e-9) return;
     const dir = { x: mv.x/L, y: mv.y/L };
+    const headingAng = Math.atan2(dir.y, dir.x);
 
+    if (isTooCloseToMarks(dest, boatIdx, headingAng, true)) return;
+    if (isTooCloseToBoats(dest, boatIdx, headingAng, true)) return;
     if (pathIntersectsAnyMark(prev, dest)) return;
     if (pathIntersectsOtherBoat(prev, dest, boatIdx)) return;
 
     b.distance += L;
 
-    const heading = Math.atan2(dir.y, dir.x);
     const newTack = tackSignFromHeadingVec(dir);
     if (b.hasHeading){
-      const da = Math.abs(angleWrap(heading - b.heading));
+      const da = Math.abs(angleWrap(headingAng - b.heading));
       const tackChanged = (b.tack !== 0 && newTack !== 0 && b.tack !== newTack);
       if (tackChanged || da >= (60*Math.PI/180)) b.turns += 1;
     }
-    b.heading = heading;
+    b.heading = headingAng;
     b.tack = newTack;
     b.hasHeading = true;
 
@@ -1006,7 +1130,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const sPos = { x: clamp(startPos.x,0,worldW), y: clamp(startPos.y,0,worldH) };
     const q0 = quantize(sPos, RES);
 
-    if (isTooCloseToMarks(sPos)) return null;
+    if (isTooCloseToMarks(sPos, movingBoatIdx ?? -1)) return null;
     if (movingBoatIdx !== null && isTooCloseToBoats(sPos, movingBoatIdx)) return null;
 
     const [fa, fb] = finishLine();
@@ -1091,15 +1215,15 @@ document.addEventListener("DOMContentLoaded", () => {
         const L = Math.hypot(moveVec.x, moveVec.y);
         if (L < 1e-6) continue;
         if (L > stepLen + 1e-6) continue;
+        const headingAng = Math.atan2(moveVec.y, moveVec.x);
         if (isMoveInDeadZone(moveVec)) continue;
-        if (isTooCloseToMarks(nextPos)) continue;
+        if (isTooCloseToMarks(nextPos, movingBoatIdx ?? -1, headingAng, true)) continue;
         if (pathIntersectsAnyMark(curPos, nextPos)) continue;
         if (movingBoatIdx !== null){
-          if (isTooCloseToBoats(nextPos, movingBoatIdx)) continue;
+          if (isTooCloseToBoats(nextPos, movingBoatIdx, headingAng, true)) continue;
           if (pathIntersectsOtherBoat(curPos, nextPos, movingBoatIdx)) continue;
         }
 
-        const headingAng = Math.atan2(moveVec.y, moveVec.x);
         const newTack = tackSignFromHeadingVec({x:moveVec.x/L,y:moveVec.y/L});
         const addTurns = plannerTurnIncrement(cur.h, cur.tack, headingAng, newTack);
 
@@ -1911,6 +2035,29 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  function drawCapsuleOverlay(capsule, fillStyle, strokeStyle, extraRadius=0){
+    const a = worldToScreen(capsule.a);
+    const b = worldToScreen(capsule.b);
+    const r = (capsule.r + extraRadius) * PX;
+
+    ctx.save();
+    ctx.lineCap = "round";
+    ctx.strokeStyle = fillStyle;
+    ctx.lineWidth = Math.max(4, r * 2);
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+
+    ctx.strokeStyle = strokeStyle;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+    ctx.restore();
+  }
+
   function drawBoatPlacementOverlay(){
     if (mode !== "boats" && mode !== "model") return;
 
@@ -1976,16 +2123,17 @@ document.addEventListener("DOMContentLoaded", () => {
 
     for (let i=0;i<boats.length;i++){
       if (placementSelectedBoat === i) continue;
-      const p = worldToScreen({x:boats[i].x,y:boats[i].y});
-      const r = (BOAT_RADIUS*2) * PX;
-      ctx.beginPath();
-      ctx.arc(p.x,p.y,r,0,Math.PI*2);
-      ctx.fill(); ctx.stroke();
+      drawCapsuleOverlay(
+        boatCapsuleForIndex(i),
+        "rgba(255, 0, 0, 0.18)",
+        "rgba(255, 0, 0, 0.30)",
+        BOAT_CLEARANCE_MARGIN
+      );
     }
 
     for (let i=0;i<markCount;i++){
       const p = worldToScreen(marks[i]);
-      const r = MARK_RADIUS * PX;
+      const r = (MARK_RADIUS + BOAT_COLLISION_RADIUS + MARK_CLEARANCE_MARGIN) * PX;
       ctx.beginPath();
       ctx.arc(p.x,p.y,r,0,Math.PI*2);
       ctx.fill(); ctx.stroke();
