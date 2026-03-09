@@ -1,7 +1,8 @@
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PORT=5001
 
 WORKDIR /app
 
@@ -13,6 +14,6 @@ COPY regatta_app ./regatta_app
 COPY templates ./templates
 COPY static ./static
 
-EXPOSE 5000
+EXPOSE 5001
 
-CMD ["gunicorn", "--worker-class", "gthread", "--threads", "8", "--bind", "0.0.0.0:5000", "app:app"]
+CMD ["sh", "-c", "gunicorn --worker-class gthread --threads 8 --bind 0.0.0.0:${PORT:-5001} app:app"]
