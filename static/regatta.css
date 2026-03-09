@@ -58,8 +58,6 @@ textarea{
   backdrop-filter:blur(12px);
 }
 
-.eyebrow,
-.panel-kicker,
 .meta-label{
   display:inline-block;
   font-size:12px;
@@ -77,6 +75,7 @@ textarea{
 }
 
 .hero h1{
+  margin:0;
   font-size:clamp(2rem, 4vw, 3.2rem);
 }
 
@@ -306,6 +305,11 @@ textarea{
   line-height:1.45;
 }
 
+.panel-note:empty,
+.room-notice:empty{
+  display:none;
+}
+
 .room-summary{
   display:grid;
   gap:10px;
@@ -339,11 +343,13 @@ textarea{
 .room-notice-neutral{
   background:rgba(15,124,130,0.08);
   border-color:rgba(15,124,130,0.14);
+  display:none;
 }
 
 .room-notice-success{
   background:rgba(47,125,50,0.08);
   border-color:rgba(47,125,50,0.14);
+  display:none;
 }
 
 .room-notice-warning{

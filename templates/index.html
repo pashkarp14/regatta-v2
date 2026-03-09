@@ -11,12 +11,7 @@
   <div class="app-shell">
     <header class="hero">
       <div class="hero-copy">
-        <span class="eyebrow">Release {{ version }}</span>
         <h1>{{ app_name }}</h1>
-        <p>
-          Flask-only edition: одна кодовая база, комнаты для совместной игры, Redis-backed
-          sessions и обновлённый cockpit для настройки дистанции.
-        </p>
       </div>
 
       <div class="hero-status">
@@ -30,7 +25,6 @@
         <section class="panel">
           <div class="panel-head">
             <div>
-              <span class="panel-kicker">Multiplayer</span>
               <h2>Комната</h2>
             </div>
           </div>
@@ -69,13 +63,8 @@
             </div>
 
             <button type="button" id="startRoom" class="action-primary">Запустить матч</button>
-            <p class="panel-note" id="roomHint">
-              Размер комнаты берётся из настройки «Лодок». Хост настраивает дистанцию,
-              остальные игроки подключаются по коду и ждут старта.
-            </p>
-            <div id="roomNotice" class="room-notice room-notice-neutral">
-              Сетевой слой не активен, пока ты не создашь комнату.
-            </div>
+            <p class="panel-note hidden" id="roomHint"></p>
+            <div id="roomNotice" class="room-notice room-notice-neutral hidden"></div>
             <ul id="roomPlayers" class="room-roster"></ul>
           </div>
         </section>
@@ -83,7 +72,6 @@
         <section class="panel">
           <div class="panel-head">
             <div>
-              <span class="panel-kicker">Course</span>
               <h2>Дистанция</h2>
             </div>
           </div>
@@ -159,7 +147,6 @@
         <section class="panel">
           <div class="panel-head">
             <div>
-              <span class="panel-kicker">Controls</span>
               <h2>Режимы</h2>
             </div>
           </div>
@@ -193,7 +180,6 @@
         <section class="panel">
           <div class="panel-head">
             <div>
-              <span class="panel-kicker">Wind</span>
               <h2>Погодный блок</h2>
             </div>
             <span class="pill" id="windInfo">Ветер: 0°</span>
@@ -232,7 +218,6 @@
         <section class="panel">
           <div class="panel-head">
             <div>
-              <span class="panel-kicker">Analysis</span>
               <h2>Подсказки</h2>
             </div>
           </div>
@@ -246,7 +231,6 @@
         <section class="panel">
           <div class="panel-head">
             <div>
-              <span class="panel-kicker">View</span>
               <h2>Камера</h2>
             </div>
           </div>

@@ -70,8 +70,15 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function setNotice(message, tone = "neutral") {
-    roomNoticeEl.textContent = message;
-    roomNoticeEl.className = `room-notice room-notice-${tone}`;
+    const text = typeof message === "string" ? message.trim() : "";
+    roomNoticeEl.textContent = text;
+    roomNoticeEl.className = text ? `room-notice room-notice-${tone}` : "room-notice hidden";
+  }
+
+  function setHint(message = "") {
+    const text = typeof message === "string" ? message.trim() : "";
+    roomHintEl.textContent = text;
+    roomHintEl.classList.toggle("hidden", !text);
   }
 
   function setSyncLabel(text, accent = false) {
