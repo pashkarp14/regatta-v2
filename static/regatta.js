@@ -212,6 +212,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const STEP_RADIUS_BASE = 1.0;
   const BOAT_RADIUS = 0.25;
+  const BOAT_PICK_RADIUS = 0.7;
   const MARK_RADIUS = 0.35;                 // "столкновение"/запрет встать в знак
   const ROUND_PASS_RADIUS = MARK_RADIUS * 2; // зона огибания (как просил — 2×)
   const ROUNDING_MIN_SWEEP = Math.PI / 3;
@@ -540,7 +541,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // -----------------------------
   function getBoatAtPoint(p){
     for (let i=0;i<boats.length;i++){
-      if (dist(p, {x:boats[i].x,y:boats[i].y}) <= BOAT_RADIUS*1.2) return i;
+      if (dist(p, {x:boats[i].x,y:boats[i].y}) <= BOAT_PICK_RADIUS) return i;
     }
     return -1;
   }
@@ -1858,7 +1859,6 @@ document.addEventListener("DOMContentLoaded", () => {
     ctx.closePath();
     ctx.fill();
 
-    ctx.restore();
     ctx.restore();
   }
 
