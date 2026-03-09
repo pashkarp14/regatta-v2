@@ -134,6 +134,10 @@ textarea{
   box-shadow:var(--shadow);
 }
 
+.panel:has(#zoomSlider){
+  display:none;
+}
+
 .panel-head{
   display:flex;
   justify-content:space-between;
@@ -456,6 +460,7 @@ textarea{
     linear-gradient(135deg, rgba(15,124,130,0.08), rgba(239,131,84,0.08));
   box-shadow:var(--shadow);
   overflow:hidden;
+  overscroll-behavior:contain;
 }
 
 canvas{
@@ -466,6 +471,7 @@ canvas{
   border-radius:18px;
   border:1px solid rgba(23,48,66,0.14);
   background:#fffdf9;
+  user-select:none;
 }
 
 .interaction-lock{

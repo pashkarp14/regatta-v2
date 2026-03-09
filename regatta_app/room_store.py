@@ -72,8 +72,10 @@ def public_room_view(room: dict[str, Any], player_token: str | None) -> dict[str
     viewer = player_for_token(room, player_token)
     game_state = room.get("game_state")
     current_player = None
+    play_mode = "turns"
     if isinstance(game_state, dict):
         current_player = (game_state.get("race") or {}).get("currentPlayer")
+        play_mode = ((game_state.get("settings") or {}).get("playMode") or "turns")
 
     return {
         "code": room["code"],
@@ -82,6 +84,7 @@ def public_room_view(room: dict[str, Any], player_token: str | None) -> dict[str
         "joined_count": len(room["players"]),
         "revision": room["revision"],
         "current_player": current_player,
+        "play_mode": "hybrid" if play_mode == "hybrid" else "turns",
         "is_host": room.get("host_token") == player_token,
         "players": [
             {
@@ -122,6 +125,11 @@ def validate_game_state(room: dict[str, Any], game_state: Any) -> dict[str, Any]
     current_player = (game_state.get("race") or {}).get("currentPlayer")
     if not isinstance(current_player, int) or not (0 <= current_player < room["max_players"]):
         raise RoomValidationError("Current player is out of range.")
+
+    hybrid_moves_left = (game_state.get("race") or {}).get("hybridMovesLeft")
+    if hybrid_moves_left is not None:
+        if not isinstance(hybrid_moves_left, list) or len(hybrid_moves_left) != room["max_players"]:
+            raise RoomValidationError("Hybrid move budget is out of range.")
 
     return game_state
 

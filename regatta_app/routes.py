@@ -170,7 +170,7 @@ def start_room(room_code: str):
     room_store().save_room(room)
     current_app.extensions["socketio"].emit(
         "room:snapshot",
-        {"room": public_room_view(room, player_token)},
+        {"room": public_room_view(room, None)},
         to=room["code"],
     )
     return {"room": public_room_view(room, player_token)}

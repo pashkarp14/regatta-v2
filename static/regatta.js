@@ -11,6 +11,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const markToEditSelect  = document.getElementById("markToEdit");
 
   const roundingSideSelect = document.getElementById("roundingSide");
+  const playModeSelect = document.getElementById("playMode");
   const finishSeparateSelect = document.getElementById("finishSeparate");
   const prestartRoundsInp = document.getElementById("prestartRounds");
 
@@ -35,10 +36,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const movesPerTurnInp  = document.getElementById("movesPerTurn");
   const tackPenaltyInp   = document.getElementById("tackPenalty");
 
-  const zoomSlider = document.getElementById("zoomSlider");
-  const zoomLabel  = document.getElementById("zoomLabel");
-  const panXSlider = document.getElementById("panXSlider");
-  const panYSlider = document.getElementById("panYSlider");
+  const cameraPanel = document.getElementById("zoomSlider")?.closest(".panel");
+  cameraPanel?.remove();
 
   const btnWindLeft  = document.getElementById("windLeft");
   const btnWindRight = document.getElementById("windRight");
@@ -55,6 +54,9 @@ document.addEventListener("DOMContentLoaded", () => {
   let worldH = parseFloat(gridRowsInput.value);
 
   const PX_PER_UNIT_BASE = 30;
+  const MIN_ZOOM = 0.4;
+  const MAX_ZOOM = 2.0;
+  const WHEEL_ZOOM_SENSITIVITY = 0.0015;
   let zoom = 1.0;
   let PX = PX_PER_UNIT_BASE * zoom;
 
@@ -69,21 +71,51 @@ document.addEventListener("DOMContentLoaded", () => {
     return { x: cx - fieldPixelW()/2, y: cy - fieldPixelH()/2 };
   }
 
-  function updateZoomFromSlider(){
-    zoom = parseInt(zoomSlider.value,10)/100;
-    PX = PX_PER_UNIT_BASE * zoom;
-    zoomLabel.textContent = `${Math.round(zoom*100)}%`;
-  }
-
-  function updatePanFromSliders(){
+  function clampCameraPan(){
     const extraW = Math.max(0, fieldPixelW() - canvas.width);
     const extraH = Math.max(0, fieldPixelH() - canvas.height);
+    panX = clamp(panX, -extraW/2, extraW/2);
+    panY = clamp(panY, -extraH/2, extraH/2);
+  }
 
-    const fx = parseInt(panXSlider.value,10)/100;
-    const fy = parseInt(panYSlider.value,10)/100;
+  function clientToCanvas(clientX, clientY){
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (clientX - rect.left) * (canvas.width / rect.width),
+      y: (clientY - rect.top)  * (canvas.height / rect.height)
+    };
+  }
 
-    panX = (fx - 0.5) * extraW;
-    panY = (fy - 0.5) * extraH;
+  function resetCamera({ keepZoom=false } = {}){
+    if (!keepZoom){
+      zoom = 1.0;
+    }
+    PX = PX_PER_UNIT_BASE * zoom;
+    panX = 0;
+    panY = 0;
+    clampCameraPan();
+  }
+
+  function setZoom(nextZoom, anchorClientX=null, anchorClientY=null){
+    const targetZoom = clamp(nextZoom, MIN_ZOOM, MAX_ZOOM);
+    const anchorCanvas = (Number.isFinite(anchorClientX) && Number.isFinite(anchorClientY))
+      ? clientToCanvas(anchorClientX, anchorClientY)
+      : { x: canvas.width/2, y: canvas.height/2 };
+    const anchorWorld = (Number.isFinite(anchorClientX) && Number.isFinite(anchorClientY))
+      ? (screenToWorld(anchorClientX, anchorClientY) || { x: worldW/2, y: worldH/2 })
+      : { x: worldW/2, y: worldH/2 };
+
+    zoom = targetZoom;
+    PX = PX_PER_UNIT_BASE * zoom;
+    panX = anchorCanvas.x - canvas.width/2 + fieldPixelW()/2 - anchorWorld.x * PX;
+    panY = anchorCanvas.y - canvas.height/2 + fieldPixelH()/2 - (worldH - anchorWorld.y) * PX;
+    clampCameraPan();
+  }
+
+  function panCameraBy(deltaX, deltaY){
+    panX += deltaX;
+    panY += deltaY;
+    clampCameraPan();
   }
 
   function worldToScreen(p){
@@ -92,9 +124,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function screenToWorld(clientX, clientY){
-    const rect = canvas.getBoundingClientRect();
-    const sx = (clientX - rect.left) * (canvas.width / rect.width);
-    const sy = (clientY - rect.top)  * (canvas.height/ rect.height);
+    const { x:sx, y:sy } = clientToCanvas(clientX, clientY);
 
     const tl = fieldTopLeft();
     const lx = sx - tl.x;
@@ -157,6 +187,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let snapThreshold = parseFloat(snapThresholdInp.value); // 0..1
   let movesPerTurn  = parseInt(movesPerTurnInp.value,10) || 1;
   let roundingSide  = roundingSideSelect.value; // "port" | "starboard"
+  let playMode = (playModeSelect?.value === "hybrid") ? "hybrid" : "turns"; // "turns" | "hybrid"
   let tackPenaltyFactor = parseFloat(tackPenaltyInp.value); // 0.5..1
 
   function updateWindInfo(){ windInfoEl.textContent = `Ветер: ${windAngleDeg.toFixed(0)}°`; }
@@ -203,6 +234,9 @@ document.addEventListener("DOMContentLoaded", () => {
   let raceFinishedCount = 0;
 
   let subMovesLeft = 1;
+  let hybridRound = 1;
+  let hybridMovesLeft = [];
+  let multiplayerSeatIndex = null;
 
   let prestartRoundsSetting = parseInt(prestartRoundsInp.value,10) || 0;
   let prestartRoundsLeft = prestartRoundsSetting;
@@ -889,6 +923,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     currentPlayer = 0;
     subMovesLeft = movesPerTurn;
+    resetHybridState();
 
     statusEl.textContent = "СТАРТ! Продолжаем гонку с текущих позиций.";
   }
@@ -924,6 +959,21 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (!boats.length){
       subMovesLeft = movesPerTurn;
+      hybridMovesLeft = [];
+      return;
+    }
+
+    if (isHybridPlayMode()){
+      hybridMovesLeft = boats.map((boat, idx) => {
+        if (boat.finished) return 0;
+        const prevLeft = clamp(parseInt(hybridMovesLeft[idx],10) || previousMovesPerTurn, 0, previousMovesPerTurn);
+        const spent = Math.max(0, previousMovesPerTurn - prevLeft);
+        return clamp(movesPerTurn - spent, 0, movesPerTurn);
+      });
+      if (phase === "race" && allHybridMovesSpent() && !boats.every((boat) => boat.finished)){
+        advanceHybridRound();
+      }
+      emitStateChanged();
       return;
     }
 
@@ -939,6 +989,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (subMovesLeft === 0){
       selectedBoatIndex = null;
     }
+    emitStateChanged();
   }
 
   function performMove(boatIdx, dest){
@@ -975,31 +1026,50 @@ document.addEventListener("DOMContentLoaded", () => {
     const curPos = {x:b.x,y:b.y};
     updateBoatMarkAndFinish(b, prev, curPos, dir);
 
-    subMovesLeft = Math.max(0, subMovesLeft - 1);
-    if (b.finished) subMovesLeft = 0;
+    if (isHybridRaceMode()){
+      hybridMovesLeft[boatIdx] = Math.max(0, (hybridMovesLeft[boatIdx] || 0) - 1);
+      if (b.finished) hybridMovesLeft[boatIdx] = 0;
+    } else {
+      subMovesLeft = Math.max(0, subMovesLeft - 1);
+      if (b.finished) subMovesLeft = 0;
+    }
 
     if (boats.every(bb => bb.finished) && phase==="race"){
       selectedBoatIndex = null;
       updateStatus();
       updateStats();
       render();
+      emitStateChanged();
       return;
     }
 
-    if (subMovesLeft > 0){
-      selectedBoatIndex = currentPlayer;
-      updateStatus();
-      updateStats();
-      render();
-      return;
-    }
+    if (isHybridRaceMode()){
+      if (allHybridMovesSpent()){
+        advanceHybridRound();
+        selectedBoatIndex = null;
+      } else if ((multiplayerSeatIndex !== null && boatIdx === multiplayerSeatIndex && (hybridMovesLeft[boatIdx] || 0) > 0) || (multiplayerSeatIndex === null && (hybridMovesLeft[boatIdx] || 0) > 0)){
+        selectedBoatIndex = boatIdx;
+      } else {
+        selectedBoatIndex = null;
+      }
+    } else {
+      if (subMovesLeft > 0){
+        selectedBoatIndex = currentPlayer;
+        updateStatus();
+        updateStats();
+        render();
+        emitStateChanged();
+        return;
+      }
 
-    advanceTurnToNext();
-    selectedBoatIndex = null;
+      advanceTurnToNext();
+      selectedBoatIndex = null;
+    }
 
     updateStatus();
     updateStats();
     render();
+    emitStateChanged();
   }
 
   // -----------------------------
@@ -1416,6 +1486,14 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
+    if (isHybridRaceMode()){
+      const seat = (multiplayerSeatIndex !== null && boats[multiplayerSeatIndex]) ? multiplayerSeatIndex : selectedBoatIndex;
+      const ownBoat = Number.isInteger(seat) ? boats[seat] : null;
+      const ownInfo = ownBoat ? `Твоя лодка: ${seat+1}. Шагов в раунде: ${stepsLeftForBoat(seat)} / ${movesPerTurn}.` : "";
+      statusEl.textContent = `ГОНКА. Гибридный раунд ${hybridRound}. Все экипажи ходят одновременно. ${ownInfo} Клик по своей лодке → клик в разрешенную область.`;
+      return;
+    }
+
     const b = boats[currentPlayer];
     const who = currentPlayer+1;
 
@@ -1442,6 +1520,7 @@ document.addEventListener("DOMContentLoaded", () => {
           <div><b style="color:${b.color};">Лодка ${i+1}</b> — ${fin}</div>
           <div>Дистанция: <b>${b.distance.toFixed(2)}</b></div>
           <div>Повороты: <b>${b.turns}</b></div>
+          <div>Шагов: <b>${stepsLeftForBoat(i)}</b>${isHybridRaceMode() ? ` / ${movesPerTurn}` : ""}</div>
           <div>Знаки: <b>${Math.min(b.nextMark, markCount)}</b> / ${markCount}</div>
         </div>
       `);
@@ -1519,6 +1598,7 @@ document.addEventListener("DOMContentLoaded", () => {
     selectedBoatIndex = null;
     placementSelectedBoat = null;
     subMovesLeft = movesPerTurn;
+    resetHybridState();
 
     ensureNextPlayerOptions();
     invalidateSolutions();
@@ -1526,6 +1606,53 @@ document.addEventListener("DOMContentLoaded", () => {
     updateStatus();
     updateStats();
     updateOptInfo();
+  }
+
+  function emitStateChanged(){
+    window.dispatchEvent(new CustomEvent("regatta:state-changed"));
+  }
+
+  function isHybridPlayMode(){
+    return playMode === "hybrid";
+  }
+
+  function isHybridRaceMode(){
+    return phase === "race" && isHybridPlayMode();
+  }
+
+  function resetHybridState(){
+    hybridRound = 1;
+    hybridMovesLeft = boats.map((boat) => boat.finished ? 0 : movesPerTurn);
+  }
+
+  function allHybridMovesSpent(){
+    return boats.every((boat, idx) => boat.finished || (hybridMovesLeft[idx] || 0) <= 0);
+  }
+
+  function advanceHybridRound(){
+    hybridRound += 1;
+    hybridMovesLeft = boats.map((boat) => boat.finished ? 0 : movesPerTurn);
+  }
+
+  function stepsLeftForBoat(boatIdx){
+    if (boatIdx < 0 || boatIdx >= boats.length) return 0;
+    if (isHybridRaceMode()) return hybridMovesLeft[boatIdx] || 0;
+    return (boatIdx === currentPlayer) ? subMovesLeft : 0;
+  }
+
+  function canBoatMoveNow(boatIdx){
+    if (boatIdx < 0 || boatIdx >= boats.length) return false;
+    if (boats[boatIdx].finished) return false;
+    if (isHybridRaceMode()) return stepsLeftForBoat(boatIdx) > 0;
+    return boatIdx === currentPlayer && subMovesLeft > 0;
+  }
+
+  function canSelectBoatForPlay(boatIdx){
+    if (!Number.isInteger(boatIdx)) return false;
+    if (!canBoatMoveNow(boatIdx)) return false;
+    if (!isHybridRaceMode()) return boatIdx === currentPlayer;
+    if (multiplayerSeatIndex !== null) return boatIdx === multiplayerSeatIndex;
+    return true;
   }
 
   function clonePoint(rawPoint, fallbackPoint){
@@ -1567,6 +1694,7 @@ document.addEventListener("DOMContentLoaded", () => {
         snapThreshold,
         movesPerTurn,
         roundingSide,
+        playMode,
         tackPenaltyFactor,
         finishSeparate,
         prestartRoundsSetting
@@ -1584,6 +1712,8 @@ document.addEventListener("DOMContentLoaded", () => {
         currentPlayer,
         raceFinishedCount,
         subMovesLeft,
+        hybridRound,
+        hybridMovesLeft: hybridMovesLeft.slice(),
         prestartRoundsLeft,
         phase
       },
@@ -1659,6 +1789,7 @@ document.addEventListener("DOMContentLoaded", () => {
     snapThreshold = clamp(parseFloat(settings.snapThreshold) || snapThreshold, 0, 1);
     movesPerTurn = clamp(parseInt(settings.movesPerTurn,10) || movesPerTurn, 1, 10);
     roundingSide = (settings.roundingSide === "starboard") ? "starboard" : "port";
+    playMode = (settings.playMode === "hybrid") ? "hybrid" : "turns";
     tackPenaltyFactor = clamp(parseFloat(settings.tackPenaltyFactor) || tackPenaltyFactor, 0.5, 1.0);
     prestartRoundsSetting = Math.max(0, parseInt(settings.prestartRoundsSetting,10) || 0);
 
@@ -1666,6 +1797,7 @@ document.addEventListener("DOMContentLoaded", () => {
     snapThresholdInp.value = String(snapThreshold);
     movesPerTurnInp.value = String(movesPerTurn);
     roundingSideSelect.value = roundingSide;
+    playModeSelect.value = playMode;
     tackPenaltyInp.value = String(tackPenaltyFactor);
     prestartRoundsInp.value = String(prestartRoundsSetting);
 
@@ -1687,6 +1819,15 @@ document.addEventListener("DOMContentLoaded", () => {
     raceFinishedCount = Math.max(0, parseInt(race.raceFinishedCount,10) || boats.filter((boat) => boat.finished).length);
     const importedSubMovesLeft = parseInt(race.subMovesLeft,10);
     subMovesLeft = clamp(Number.isFinite(importedSubMovesLeft) ? importedSubMovesLeft : movesPerTurn, 0, movesPerTurn);
+    hybridRound = Math.max(1, parseInt(race.hybridRound,10) || 1);
+    if (Array.isArray(race.hybridMovesLeft) && race.hybridMovesLeft.length === boats.length){
+      hybridMovesLeft = race.hybridMovesLeft.map((value, idx) => {
+        if (boats[idx]?.finished) return 0;
+        return clamp(parseInt(value,10) || 0, 0, movesPerTurn);
+      });
+    } else {
+      hybridMovesLeft = boats.map((boat) => boat.finished ? 0 : movesPerTurn);
+    }
 
     selectedBoatIndex = null;
     placementSelectedBoat = null;
@@ -1718,10 +1859,7 @@ document.addEventListener("DOMContentLoaded", () => {
     worldH = h;
 
     cellLikeDefaultPlacement();
-
-    panXSlider.value = 50;
-    panYSlider.value = 50;
-    updatePanFromSliders();
+    resetCamera({ keepZoom:true });
 
     resetBoats();
     ensureScenarioLegOptions();
@@ -2264,6 +2402,29 @@ document.addEventListener("DOMContentLoaded", () => {
   // -----------------------------
   // Клики по canvas
   // -----------------------------
+  canvas.addEventListener("wheel", (e) => {
+    if (e.ctrlKey || e.metaKey){
+      e.preventDefault();
+      const zoomFactor = Math.exp(-e.deltaY * WHEEL_ZOOM_SENSITIVITY);
+      setZoom(zoom * zoomFactor, e.clientX, e.clientY);
+      render();
+      return;
+    }
+
+    if (e.deltaX === 0 && e.deltaY === 0) return;
+    e.preventDefault();
+
+    let deltaX = -e.deltaX;
+    let deltaY = -e.deltaY;
+    if (e.shiftKey && Math.abs(e.deltaX) < 0.01){
+      deltaX = -e.deltaY;
+      deltaY = 0;
+    }
+
+    panCameraBy(deltaX, deltaY);
+    render();
+  }, { passive:false });
+
   canvas.addEventListener("click", (e) => {
     const p = screenToWorld(e.clientX, e.clientY);
     if (!p) return;
@@ -2394,16 +2555,16 @@ document.addEventListener("DOMContentLoaded", () => {
     // play
     const clickedBoat = getBoatAtPoint(p);
 
-    if (clickedBoat === currentPlayer && !boats[currentPlayer].finished){
-      selectedBoatIndex = currentPlayer;
+    if (clickedBoat >= 0 && canSelectBoatForPlay(clickedBoat)){
+      selectedBoatIndex = clickedBoat;
       render();
       return;
     }
 
-    if (selectedBoatIndex === currentPlayer && selectedBoatIndex !== null){
-      const dest = proposeDestination(currentPlayer, p);
+    if (selectedBoatIndex !== null && canSelectBoatForPlay(selectedBoatIndex)){
+      const dest = proposeDestination(selectedBoatIndex, p);
       if (dest){
-        performMove(currentPlayer, dest);
+        performMove(selectedBoatIndex, dest);
         maybeStartGunIfNeeded();
         invalidateSolutions();
         updateStatus();
@@ -2480,6 +2641,17 @@ document.addEventListener("DOMContentLoaded", () => {
     invalidateSolutions();
     updateOptInfo();
     render();
+  });
+
+  playModeSelect.addEventListener("change", () => {
+    playMode = (playModeSelect.value === "hybrid") ? "hybrid" : "turns";
+    resetHybridState();
+    selectedBoatIndex = null;
+    updateStatus();
+    updateStats();
+    updateOptInfo();
+    render();
+    emitStateChanged();
   });
 
   finishSeparateSelect.addEventListener("change", () => {
@@ -2573,8 +2745,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
   btnOptimal.addEventListener("click", () => {
     if (mode !== "play") setMode("play");
+    const targetBoat = (isHybridRaceMode() && multiplayerSeatIndex !== null)
+      ? multiplayerSeatIndex
+      : currentPlayer;
 
-    if (showOptimal && optimalForBoat === currentPlayer){
+    if (showOptimal && optimalForBoat === targetBoat){
       showOptimal = false;
       optimalPath = [];
       optimalStats = null;
@@ -2584,7 +2759,7 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    computeOptimalForBoat(currentPlayer);
+    computeOptimalForBoat(targetBoat);
     showOptimal = true;
     updateOptInfo();
     render();
@@ -2622,23 +2797,28 @@ document.addEventListener("DOMContentLoaded", () => {
     updateOptInfo();
   });
 
-  zoomSlider.addEventListener("input", () => {
-    updateZoomFromSlider();
-    updatePanFromSliders();
-    render();
-  });
-  panXSlider.addEventListener("input", () => { updatePanFromSliders(); render(); });
-  panYSlider.addEventListener("input", () => { updatePanFromSliders(); render(); });
-
   window.RegattaApp = {
     exportState: exportGameState,
     importState: importGameState,
     fingerprintState: fingerprintGameState,
     render,
     setMode,
+    setMultiplayerContext: ({ seatIndex=null } = {}) => {
+      multiplayerSeatIndex = Number.isInteger(seatIndex) ? seatIndex : null;
+      const candidateBoat = Number.isInteger(selectedBoatIndex) ? selectedBoatIndex : multiplayerSeatIndex;
+      if (multiplayerSeatIndex !== null && isHybridRaceMode() && !canSelectBoatForPlay(candidateBoat)){
+        selectedBoatIndex = null;
+      }
+      updateStatus();
+      updateStats();
+      render();
+    },
     getMeta: () => ({
       mode,
       currentPlayer,
+      playMode,
+      hybridRound,
+      hybridMovesLeft: hybridMovesLeft.slice(),
       playerCount: boats.length,
       phase,
       markCount
@@ -2649,8 +2829,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // Старт приложения
   // -----------------------------
   function init(){
-    updateZoomFromSlider();
-    updatePanFromSliders();
+    resetCamera();
 
     markCount = parseInt(markCountSelect.value,10);
     ensureMarkOptions();
@@ -2662,6 +2841,7 @@ document.addEventListener("DOMContentLoaded", () => {
     tackPenaltyFactor = clamp(parseFloat(tackPenaltyInp.value)||0.95, 0.5, 1.0);
 
     roundingSide = roundingSideSelect.value;
+    playMode = (playModeSelect.value === "hybrid") ? "hybrid" : "turns";
     finishSeparate = (finishSeparateSelect.value === "yes");
     prestartRoundsSetting = Math.max(0, parseInt(prestartRoundsInp.value,10) || 0);
 

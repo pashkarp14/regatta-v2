@@ -46,6 +46,22 @@ document.addEventListener("DOMContentLoaded", () => {
     return !!(player && roomState.room && roomState.room.current_player === player.seat_index);
   }
 
+  function roomPlayMode() {
+    if (!roomState.room) return regatta.getMeta?.().playMode || "turns";
+    return roomState.room.play_mode || roomState.room.game_state?.settings?.playMode || "turns";
+  }
+
+  function roomRacePhase() {
+    return roomState.room?.game_state?.race?.phase || null;
+  }
+
+  function isHybridRoom() {
+    return !!roomState.room
+      && roomState.room.status === "live"
+      && roomPlayMode() === "hybrid"
+      && roomRacePhase() === "race";
+  }
+
   function canEditSetup() {
     if (!roomState.room) return true;
     return roomState.room.status === "lobby" && isRoomHost();
@@ -54,18 +70,21 @@ document.addEventListener("DOMContentLoaded", () => {
   function canEditTurnBudget() {
     if (!roomState.room) return true;
     if (roomState.room.status === "lobby") return isRoomHost();
+    if (isHybridRoom()) return isRoomHost();
     return isMyTurn();
   }
 
   function canPushState() {
     if (!roomState.room) return false;
     if (roomState.room.status === "lobby") return isRoomHost();
+    if (isHybridRoom()) return !!roomPlayer();
     return isMyTurn();
   }
 
   function canInteractWithBoard() {
     if (!roomState.room) return true;
     if (roomState.room.status === "lobby") return isRoomHost();
+    if (isHybridRoom()) return !!roomPlayer();
     return isMyTurn();
   }
 
@@ -156,7 +175,10 @@ document.addEventListener("DOMContentLoaded", () => {
     joinRoomCodeInput.disabled = !!roomState.room;
     leaveRoomBtn.disabled = !roomState.room;
     copyRoomCodeBtn.disabled = !roomState.room;
-    startRoomBtn.disabled = !roomState.room || !isRoomHost() || roomState.room.status !== "lobby" || roomState.room.joined_count !== roomState.room.max_players;
+    startRoomBtn.disabled = !roomState.room
+      || !isRoomHost()
+      || roomState.room.status !== "lobby"
+      || roomState.room.joined_count !== roomState.room.max_players;
 
     if (!roomState.room) {
       interactionLockEl.classList.add("hidden");
@@ -173,18 +195,21 @@ document.addEventListener("DOMContentLoaded", () => {
     interactionLockEl.classList.remove("hidden");
     interactionLockEl.textContent = roomState.room.status === "lobby"
       ? "Хост настраивает дистанцию. Пока можно следить за курсом и готовиться к старту."
-      : `Сейчас ход лодки ${roomState.room.current_player + 1}. Твоя лодка активируется, когда очередь дойдёт до тебя.`;
+      : isHybridRoom()
+        ? "Идёт гибридный раунд. Этот браузер сейчас не привязан к лодке, поэтому управление заблокировано."
+        : `Сейчас ход лодки ${roomState.room.current_player + 1}. Твоя лодка активируется, когда очередь дойдёт до тебя.`;
   }
 
   function renderRoom(room) {
     roomState.room = hydrateRoom(room);
+    regatta.setMultiplayerContext({ seatIndex: roomState.room ? roomState.selfSeatIndex : null });
     renderRoster(roomState.room);
 
     if (!roomState.room) {
       roomCodeValueEl.textContent = "-";
       roomStatusEl.textContent = "Готов к локальной игре";
       roomPhaseLabelEl.textContent = "Соло";
-      roomHintEl.textContent = "Размер комнаты берётся из настройки «Лодок». Хост настраивает дистанцию, остальные игроки подключаются по коду и ждут старта.";
+      setHint("Размер комнаты берётся из настройки «Лодок». Хост настраивает дистанцию, остальные игроки подключаются по коду и ждут старта.");
       setNotice("Сетевой слой не активен, пока ты не создашь комнату.", "neutral");
       setSyncLabel("Локальный режим", false);
       applyPermissions();
@@ -192,21 +217,30 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     roomCodeValueEl.textContent = roomState.room.code;
-    roomHintEl.textContent = roomState.room.status === "lobby"
-      ? `Ожидаем подключение всех экипажей: ${roomState.room.joined_count} из ${roomState.room.max_players}.`
-      : `Матч запущен. Активная лодка: ${roomState.room.current_player + 1}.`;
-    roomStatusEl.textContent = roomState.room.status === "lobby"
-      ? `Лобби · ${roomState.room.joined_count}/${roomState.room.max_players}`
-      : `Гонка · ход лодки ${roomState.room.current_player + 1}`;
-    roomPhaseLabelEl.textContent = roomState.room.status === "lobby" ? `Лобби ${roomState.room.code}` : `Матч ${roomState.room.code}`;
+    roomPhaseLabelEl.textContent = roomState.room.status === "lobby"
+      ? `Лобби ${roomState.room.code}`
+      : `Матч ${roomState.room.code}`;
+
     if (roomState.room.status === "lobby") {
+      setHint(`Ожидаем подключение всех экипажей: ${roomState.room.joined_count} из ${roomState.room.max_players}.`);
+      roomStatusEl.textContent = `Лобби · ${roomState.room.joined_count}/${roomState.room.max_players}`;
       setNotice(
         isRoomHost()
           ? "Комната создана. Настраивай дистанцию и запускай матч, когда соберётся весь состав."
           : "Ты подключился к комнате. Хост готовит дистанцию и запустит матч после сбора экипажа.",
         "success",
       );
+    } else if (isHybridRoom()) {
+      const hybridRound = roomState.room.game_state?.race?.hybridRound || 1;
+      setHint(`Матч запущен. Гибридный раунд ${hybridRound}: экипажи ходят одновременно.`);
+      roomStatusEl.textContent = `Гонка · гибридный раунд ${hybridRound}`;
+      setNotice(
+        "Гибридный режим активен. Каждый экипаж делает свои ходы параллельно, а состояние синхронизируется для всей комнаты.",
+        "neutral",
+      );
     } else {
+      setHint(`Матч запущен. Активная лодка: ${roomState.room.current_player + 1}.`);
+      roomStatusEl.textContent = `Гонка · ход лодки ${roomState.room.current_player + 1}`;
       setNotice(
         isMyTurn()
           ? "Твой ход. Маршрут и движение будут синхронизированы для всей комнаты."
@@ -214,6 +248,7 @@ document.addEventListener("DOMContentLoaded", () => {
         "neutral",
       );
     }
+
     applyPermissions();
   }
 
@@ -421,6 +456,10 @@ document.addEventListener("DOMContentLoaded", () => {
   setInterval(() => {
     void tryPushState();
   }, 350);
+
+  window.addEventListener("regatta:state-changed", () => {
+    void tryPushState(true);
+  });
 
   bootstrapRoom();
 });
