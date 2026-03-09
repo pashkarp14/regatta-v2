@@ -6,16 +6,16 @@ services:
       - "5001:5001"
     environment:
       SECRET_KEY: ${SECRET_KEY:-change-me-for-production}
-      REDIS_URL: redis://redis:6379/0
+      REDIS_URL: redis://keydb:6379/0
       PORT: 5001
       APP_VERSION: 2.0.0
     depends_on:
-      - redis
+      - keydb
     restart: unless-stopped
 
-  redis:
-    image: redis:7-alpine
-    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+  keydb:
+    image: eqalpha/keydb:alpine_x86_64_v6.3.4
+    command: ["keydb-server", "--save", "60", "1", "--loglevel", "warning"]
     volumes:
       - redis_data:/data
     restart: unless-stopped
