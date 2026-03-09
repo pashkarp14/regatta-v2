@@ -1754,12 +1754,14 @@ document.addEventListener("DOMContentLoaded", () => {
     ctx.strokeRect(x,y,w,h);
   }
 
-  // Yacht styling adapted from the MIT-licensed Tabler Icons sailboat.
+  // Large top-down yacht icon with a clear bow orientation.
   function drawYachtIcon(size, color, tack){
     const sailSide = (tack === -1) ? -1 : 1;
-    const hullColor = mixHexColor(color, "black", 0.18);
-    const trimColor = mixHexColor(color, "white", 0.36);
-    const wakeColor = rgbaHex(color, 0.15);
+    const hullColor = mixHexColor(color, "black", 0.12);
+    const deckColor = mixHexColor(color, "white", 0.55);
+    const trimColor = mixHexColor(color, "white", 0.20);
+    const sailShade = rgbaHex(color, 0.22);
+    const wakeColor = rgbaHex(color, 0.14);
     const outlineColor = "#142133";
 
     ctx.save();
@@ -1767,45 +1769,51 @@ document.addEventListener("DOMContentLoaded", () => {
 
     ctx.fillStyle = wakeColor;
     ctx.beginPath();
-    ctx.moveTo(-10.5, 11.0);
-    ctx.quadraticCurveTo(-5.0, 13.8, 0.5, 12.2);
-    ctx.quadraticCurveTo(5.5, 10.8, 10.5, 12.0);
-    ctx.quadraticCurveTo(5.5, 13.6, 0.0, 14.0);
-    ctx.quadraticCurveTo(-5.8, 14.2, -10.5, 11.0);
+    ctx.moveTo(-5.8, 10.2);
+    ctx.quadraticCurveTo(-2.6, 13.5, 0.0, 12.4);
+    ctx.quadraticCurveTo(2.6, 13.5, 5.8, 10.2);
+    ctx.quadraticCurveTo(2.5, 11.8, 0.0, 11.6);
+    ctx.quadraticCurveTo(-2.5, 11.8, -5.8, 10.2);
     ctx.closePath();
     ctx.fill();
 
     ctx.fillStyle = hullColor;
     ctx.strokeStyle = outlineColor;
-    ctx.lineWidth = 1.4;
+    ctx.lineWidth = 1.2;
     ctx.beginPath();
-    ctx.moveTo(-10.0, 5.0);
-    ctx.quadraticCurveTo(-2.0, 9.0, 10.0, 4.3);
-    ctx.lineTo(6.8, 1.1);
-    ctx.quadraticCurveTo(-1.2, -0.6, -9.7, 2.4);
+    ctx.moveTo(0.0, -11.1);
+    ctx.bezierCurveTo(4.8, -8.8, 5.7, -2.0, 5.4, 6.8);
+    ctx.quadraticCurveTo(4.4, 10.2, 0.0, 11.3);
+    ctx.quadraticCurveTo(-4.4, 10.2, -5.4, 6.8);
+    ctx.bezierCurveTo(-5.7, -2.0, -4.8, -8.8, 0.0, -11.1);
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
 
-    ctx.strokeStyle = trimColor;
-    ctx.lineWidth = 1.1;
+    ctx.fillStyle = deckColor;
     ctx.beginPath();
-    ctx.moveTo(-7.4, 3.7);
-    ctx.quadraticCurveTo(-1.0, 5.7, 6.6, 2.8);
-    ctx.stroke();
+    ctx.moveTo(0.0, -8.2);
+    ctx.bezierCurveTo(2.9, -6.7, 3.4, -1.4, 3.2, 5.1);
+    ctx.quadraticCurveTo(2.5, 7.7, 0.0, 8.4);
+    ctx.quadraticCurveTo(-2.5, 7.7, -3.2, 5.1);
+    ctx.bezierCurveTo(-3.4, -1.4, -2.9, -6.7, 0.0, -8.2);
+    ctx.closePath();
+    ctx.fill();
 
-    ctx.strokeStyle = "rgba(255,255,255,0.9)";
-    ctx.lineWidth = 0.9;
+    ctx.strokeStyle = trimColor;
+    ctx.lineWidth = 1.0;
     ctx.beginPath();
-    ctx.moveTo(-4.4, 1.8);
-    ctx.lineTo(2.2, 0.9);
+    ctx.moveTo(0.0, -7.5);
+    ctx.lineTo(0.0, 8.1);
+    ctx.moveTo(-2.2, 4.2);
+    ctx.lineTo(2.2, 4.2);
     ctx.stroke();
 
     ctx.strokeStyle = outlineColor;
-    ctx.lineWidth = 1.3;
+    ctx.lineWidth = 1.1;
     ctx.beginPath();
-    ctx.moveTo(-0.5, 1.8);
-    ctx.lineTo(-0.5, -11.2);
+    ctx.moveTo(0.0, -8.8);
+    ctx.lineTo(0.0, 6.3);
     ctx.stroke();
 
     ctx.save();
@@ -1813,29 +1821,40 @@ document.addEventListener("DOMContentLoaded", () => {
 
     ctx.fillStyle = "rgba(255,255,255,0.96)";
     ctx.strokeStyle = "rgba(15,23,42,0.20)";
-    ctx.lineWidth = 0.9;
+    ctx.lineWidth = 0.8;
     ctx.beginPath();
-    ctx.moveTo(0.0, -11.1);
-    ctx.lineTo(0.0, 1.6);
-    ctx.quadraticCurveTo(7.1, -0.3, 5.8, -9.1);
+    ctx.moveTo(0.0, -8.2);
+    ctx.lineTo(0.0, 3.0);
+    ctx.quadraticCurveTo(7.6, 1.0, 5.3, -6.8);
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
 
-    ctx.fillStyle = rgbaHex(color, 0.22);
+    ctx.fillStyle = sailShade;
     ctx.beginPath();
-    ctx.moveTo(-0.2, -8.2);
-    ctx.lineTo(-0.2, 0.4);
-    ctx.quadraticCurveTo(-4.9, -1.0, -3.7, -7.2);
+    ctx.moveTo(-0.1, -5.1);
+    ctx.lineTo(-0.1, 4.8);
+    ctx.quadraticCurveTo(-4.3, 3.5, -3.0, -3.5);
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
 
-    ctx.fillStyle = trimColor;
+    ctx.fillStyle = "rgba(255,255,255,0.96)";
     ctx.beginPath();
-    ctx.moveTo(0.0, -11.1);
-    ctx.lineTo(3.3, -10.2);
-    ctx.lineTo(0.0, -9.2);
+    ctx.moveTo(0.0, -8.8);
+    ctx.lineTo(2.4, -8.0);
+    ctx.lineTo(0.0, -7.2);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.restore();
+
+    ctx.fillStyle = mixHexColor(color, "black", 0.24);
+    ctx.beginPath();
+    ctx.moveTo(-0.8, 7.5);
+    ctx.lineTo(0.8, 7.5);
+    ctx.lineTo(0.45, 10.2);
+    ctx.lineTo(-0.45, 10.2);
     ctx.closePath();
     ctx.fill();
 
@@ -1851,7 +1870,7 @@ document.addEventListener("DOMContentLoaded", () => {
       ctx.save();
       ctx.translate(p.x,p.y);
 
-      let ang = Math.PI;
+      let ang = 0;
       if (b.hasHeading){
         const vx = Math.cos(b.heading);
         const vy = -Math.sin(b.heading);
@@ -1859,25 +1878,18 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       ctx.rotate(ang);
 
-      const size = Math.max(18, PX*0.72);
+      const size = Math.max(44, PX*2.0);
       drawYachtIcon(size, b.color, b.tack);
 
       ctx.rotate(-ang);
-      const badgeR = Math.max(8, size*0.34);
-      const badgeY = size*0.92;
-      ctx.fillStyle = "rgba(255,255,255,0.96)";
-      ctx.strokeStyle = "rgba(15,23,42,0.12)";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.arc(0, badgeY, badgeR, 0, Math.PI*2);
-      ctx.fill();
-      ctx.stroke();
-
+      ctx.strokeStyle = "rgba(255,255,255,0.92)";
+      ctx.lineWidth = Math.max(2, size*0.07);
       ctx.fillStyle = "#102033";
-      ctx.font = `700 ${Math.max(10, size*0.44)}px system-ui`;
+      ctx.font = `700 ${Math.max(11, size*0.28)}px system-ui`;
       ctx.textAlign="center";
       ctx.textBaseline="middle";
-      ctx.fillText(String(i+1), 0, badgeY);
+      ctx.strokeText(String(i+1), 0, size*0.05);
+      ctx.fillText(String(i+1), 0, size*0.05);
 
       if (b.finished){
         ctx.strokeStyle = "#00c853";
