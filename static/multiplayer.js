@@ -1,0 +1,419 @@
+document.addEventListener("DOMContentLoaded", () => {
+  const regatta = window.RegattaApp;
+  if (!regatta) return;
+
+  const displayNameInput = document.getElementById("displayName");
+  const createRoomBtn = document.getElementById("createRoom");
+  const joinRoomCodeInput = document.getElementById("joinRoomCode");
+  const joinRoomBtn = document.getElementById("joinRoom");
+  const leaveRoomBtn = document.getElementById("leaveRoom");
+  const startRoomBtn = document.getElementById("startRoom");
+  const copyRoomCodeBtn = document.getElementById("copyRoomCode");
+  const roomCodeValueEl = document.getElementById("roomCodeValue");
+  const roomStatusEl = document.getElementById("roomStatus");
+  const roomPlayersEl = document.getElementById("roomPlayers");
+  const roomNoticeEl = document.getElementById("roomNotice");
+  const roomHintEl = document.getElementById("roomHint");
+  const syncIndicatorEl = document.getElementById("syncIndicator");
+  const roomPhaseLabelEl = document.getElementById("roomPhaseLabel");
+  const interactionLockEl = document.getElementById("interactionLock");
+  const playerCountSelect = document.getElementById("playerCount");
+  const movesPerTurnInput = document.getElementById("movesPerTurn");
+
+  const setupLockedControls = Array.from(document.querySelectorAll("[data-room-lock='setup']"));
+  const originalDisabledState = new Map(setupLockedControls.map((node) => [node, !!node.disabled]));
+  const originalMovesPerTurnDisabled = !!movesPerTurnInput?.disabled;
+
+  const roomState = {
+    room: null,
+    socket: null,
+    applyingRemote: false,
+    lastFingerprint: regatta.fingerprintState(),
+    selfSeatIndex: null,
+  };
+
+  function roomPlayer() {
+    if (!roomState.room || roomState.selfSeatIndex === null) return null;
+    return roomState.room.players?.find((player) => player.seat_index === roomState.selfSeatIndex) || null;
+  }
+
+  function isRoomHost() {
+    return !!roomPlayer()?.is_host;
+  }
+
+  function isMyTurn() {
+    const player = roomPlayer();
+    return !!(player && roomState.room && roomState.room.current_player === player.seat_index);
+  }
+
+  function canEditSetup() {
+    if (!roomState.room) return true;
+    return roomState.room.status === "lobby" && isRoomHost();
+  }
+
+  function canEditTurnBudget() {
+    if (!roomState.room) return true;
+    if (roomState.room.status === "lobby") return isRoomHost();
+    return isMyTurn();
+  }
+
+  function canPushState() {
+    if (!roomState.room) return false;
+    if (roomState.room.status === "lobby") return isRoomHost();
+    return isMyTurn();
+  }
+
+  function canInteractWithBoard() {
+    if (!roomState.room) return true;
+    if (roomState.room.status === "lobby") return isRoomHost();
+    return isMyTurn();
+  }
+
+  function setNotice(message, tone = "neutral") {
+    roomNoticeEl.textContent = message;
+    roomNoticeEl.className = `room-notice room-notice-${tone}`;
+  }
+
+  function setSyncLabel(text, accent = false) {
+    syncIndicatorEl.textContent = text;
+    syncIndicatorEl.classList.toggle("hero-badge-muted", !accent);
+  }
+
+  async function apiRequest(url, options = {}) {
+    const response = await fetch(url, {
+      method: options.method || "GET",
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json",
+        ...(options.headers || {}),
+      },
+      body: options.body ? JSON.stringify(options.body) : undefined,
+    });
+
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.error || "Request failed");
+    }
+    return payload;
+  }
+
+  function renderRoster(room) {
+    if (!room) {
+      roomPlayersEl.innerHTML = "";
+      return;
+    }
+
+    const players = [...room.players].sort((left, right) => left.seat_index - right.seat_index);
+    roomPlayersEl.innerHTML = players.map((player) => `
+      <li class="room-player">
+        <strong>
+          <span class="room-seat">${player.seat_index + 1}</span>
+          <span>${player.name}</span>
+        </strong>
+        <span class="room-tags">
+          ${player.is_host ? '<span class="room-tag room-tag-host">Host</span>' : ""}
+          ${player.is_self ? '<span class="room-tag room-tag-self">Вы</span>' : ""}
+        </span>
+      </li>
+    `).join("");
+  }
+
+  function hydrateRoom(room) {
+    if (!room) return null;
+
+    if (roomState.selfSeatIndex === null && Number.isInteger(room.self?.seat_index)) {
+      roomState.selfSeatIndex = room.self.seat_index;
+    }
+
+    return {
+      ...room,
+      players: (room.players || []).map((player) => ({
+        ...player,
+        is_self: roomState.selfSeatIndex !== null && player.seat_index === roomState.selfSeatIndex,
+      })),
+    };
+  }
+
+  function applyPermissions() {
+    const setupDisabled = !canEditSetup();
+    for (const control of setupLockedControls) {
+      const originalDisabled = originalDisabledState.get(control) === true;
+      control.disabled = originalDisabled || setupDisabled;
+    }
+    if (movesPerTurnInput) {
+      movesPerTurnInput.disabled = originalMovesPerTurnDisabled || !canEditTurnBudget();
+    }
+
+    createRoomBtn.disabled = !!roomState.room;
+    joinRoomBtn.disabled = !!roomState.room;
+    joinRoomCodeInput.disabled = !!roomState.room;
+    leaveRoomBtn.disabled = !roomState.room;
+    copyRoomCodeBtn.disabled = !roomState.room;
+    startRoomBtn.disabled = !roomState.room || !isRoomHost() || roomState.room.status !== "lobby" || roomState.room.joined_count !== roomState.room.max_players;
+
+    if (!roomState.room) {
+      interactionLockEl.classList.add("hidden");
+      interactionLockEl.textContent = "";
+      return;
+    }
+
+    if (canInteractWithBoard()) {
+      interactionLockEl.classList.add("hidden");
+      interactionLockEl.textContent = "";
+      return;
+    }
+
+    interactionLockEl.classList.remove("hidden");
+    interactionLockEl.textContent = roomState.room.status === "lobby"
+      ? "Хост настраивает дистанцию. Пока можно следить за курсом и готовиться к старту."
+      : `Сейчас ход лодки ${roomState.room.current_player + 1}. Твоя лодка активируется, когда очередь дойдёт до тебя.`;
+  }
+
+  function renderRoom(room) {
+    roomState.room = hydrateRoom(room);
+    renderRoster(roomState.room);
+
+    if (!roomState.room) {
+      roomCodeValueEl.textContent = "-";
+      roomStatusEl.textContent = "Готов к локальной игре";
+      roomPhaseLabelEl.textContent = "Соло";
+      roomHintEl.textContent = "Размер комнаты берётся из настройки «Лодок». Хост настраивает дистанцию, остальные игроки подключаются по коду и ждут старта.";
+      setNotice("Сетевой слой не активен, пока ты не создашь комнату.", "neutral");
+      setSyncLabel("Локальный режим", false);
+      applyPermissions();
+      return;
+    }
+
+    roomCodeValueEl.textContent = roomState.room.code;
+    roomHintEl.textContent = roomState.room.status === "lobby"
+      ? `Ожидаем подключение всех экипажей: ${roomState.room.joined_count} из ${roomState.room.max_players}.`
+      : `Матч запущен. Активная лодка: ${roomState.room.current_player + 1}.`;
+    roomStatusEl.textContent = roomState.room.status === "lobby"
+      ? `Лобби · ${roomState.room.joined_count}/${roomState.room.max_players}`
+      : `Гонка · ход лодки ${roomState.room.current_player + 1}`;
+    roomPhaseLabelEl.textContent = roomState.room.status === "lobby" ? `Лобби ${roomState.room.code}` : `Матч ${roomState.room.code}`;
+    if (roomState.room.status === "lobby") {
+      setNotice(
+        isRoomHost()
+          ? "Комната создана. Настраивай дистанцию и запускай матч, когда соберётся весь состав."
+          : "Ты подключился к комнате. Хост готовит дистанцию и запустит матч после сбора экипажа.",
+        "success",
+      );
+    } else {
+      setNotice(
+        isMyTurn()
+          ? "Твой ход. Маршрут и движение будут синхронизированы для всей комнаты."
+          : `Матч в эфире. Сейчас играет лодка ${roomState.room.current_player + 1}.`,
+        "neutral",
+      );
+    }
+    applyPermissions();
+  }
+
+  function ensureSocket() {
+    if (!roomState.room || roomState.socket || typeof window.io !== "function") return;
+
+    roomState.socket = window.io({
+      transports: ["websocket", "polling"],
+    });
+
+    roomState.socket.on("connect", () => {
+      setSyncLabel("Комната подключена", true);
+      roomState.socket.emit("room:join_socket", { room_code: roomState.room.code });
+      void tryPushState(true);
+    });
+
+    roomState.socket.on("disconnect", () => {
+      setSyncLabel("Соединение потеряно", false);
+    });
+
+    roomState.socket.on("room:error", (payload) => {
+      setNotice(payload?.error || "Не удалось синхронизировать комнату.", "danger");
+    });
+
+    roomState.socket.on("room:presence", (payload) => {
+      if (payload?.room) {
+        renderRoom(payload.room);
+      }
+    });
+
+    roomState.socket.on("room:snapshot", (payload) => {
+      handleIncomingRoom(payload?.room);
+    });
+
+    roomState.socket.on("room:state_updated", (payload) => {
+      handleIncomingRoom(payload?.room);
+    });
+  }
+
+  function disconnectSocket() {
+    if (!roomState.socket) return;
+    roomState.socket.disconnect();
+    roomState.socket = null;
+  }
+
+  function handleIncomingRoom(room) {
+    if (!room) return;
+
+    const incomingState = room.game_state;
+    if (incomingState) {
+      const incomingFingerprint = JSON.stringify(incomingState);
+      if (incomingFingerprint !== roomState.lastFingerprint) {
+        roomState.applyingRemote = true;
+        try {
+          regatta.importState(incomingState);
+          roomState.lastFingerprint = regatta.fingerprintState();
+        } finally {
+          roomState.applyingRemote = false;
+        }
+      }
+    }
+
+    renderRoom(room);
+  }
+
+  async function createRoom() {
+    const payload = await apiRequest("/api/rooms", {
+      method: "POST",
+      body: {
+        display_name: displayNameInput.value.trim(),
+        max_players: parseInt(playerCountSelect.value, 10) || 2,
+        game_state: regatta.exportState(),
+      },
+    });
+
+    roomState.lastFingerprint = regatta.fingerprintState();
+    renderRoom(payload.room);
+    ensureSocket();
+  }
+
+  async function joinRoom() {
+    const payload = await apiRequest("/api/rooms/join", {
+      method: "POST",
+      body: {
+        display_name: displayNameInput.value.trim(),
+        room_code: joinRoomCodeInput.value.trim(),
+      },
+    });
+
+    if (payload.room?.game_state) {
+      roomState.applyingRemote = true;
+      try {
+        regatta.importState(payload.room.game_state);
+        roomState.lastFingerprint = regatta.fingerprintState();
+      } finally {
+        roomState.applyingRemote = false;
+      }
+    }
+
+    renderRoom(payload.room);
+    ensureSocket();
+  }
+
+  async function startRoom() {
+    if (!roomState.room) return;
+    const payload = await apiRequest(`/api/rooms/${roomState.room.code}/start`, {
+      method: "POST",
+      body: {
+        game_state: regatta.exportState(),
+      },
+    });
+
+    roomState.lastFingerprint = regatta.fingerprintState();
+    renderRoom(payload.room);
+  }
+
+  async function leaveRoom() {
+    await apiRequest("/api/rooms/leave", { method: "POST" });
+    disconnectSocket();
+    roomState.room = null;
+    roomState.selfSeatIndex = null;
+    roomState.lastFingerprint = regatta.fingerprintState();
+    renderRoom(null);
+  }
+
+  async function bootstrapRoom() {
+    try {
+      const payload = await apiRequest("/api/bootstrap");
+      if (payload.display_name) {
+        displayNameInput.value = payload.display_name;
+      }
+      if (payload.room) {
+        handleIncomingRoom(payload.room);
+        ensureSocket();
+      } else {
+        renderRoom(null);
+      }
+    } catch (error) {
+      setNotice(error.message, "danger");
+      renderRoom(null);
+    }
+  }
+
+  async function copyRoomCode() {
+    if (!roomState.room) return;
+    try {
+      await navigator.clipboard.writeText(roomState.room.code);
+      setNotice(`Код ${roomState.room.code} скопирован.`, "success");
+    } catch (error) {
+      setNotice("Не удалось скопировать код комнаты.", "warning");
+    }
+  }
+
+  async function tryPushState(force = false) {
+    if (!roomState.socket || !roomState.socket.connected || !canPushState() || roomState.applyingRemote) return;
+
+    const nextFingerprint = regatta.fingerprintState();
+    if (!force && nextFingerprint === roomState.lastFingerprint) return;
+
+    roomState.lastFingerprint = nextFingerprint;
+    roomState.socket.emit("room:push_state", {
+      room_code: roomState.room.code,
+      state: regatta.exportState(),
+    });
+  }
+
+  createRoomBtn.addEventListener("click", async () => {
+    try {
+      await createRoom();
+    } catch (error) {
+      setNotice(error.message, "danger");
+    }
+  });
+
+  joinRoomBtn.addEventListener("click", async () => {
+    try {
+      await joinRoom();
+    } catch (error) {
+      setNotice(error.message, "danger");
+    }
+  });
+
+  leaveRoomBtn.addEventListener("click", async () => {
+    try {
+      await leaveRoom();
+    } catch (error) {
+      setNotice(error.message, "danger");
+    }
+  });
+
+  startRoomBtn.addEventListener("click", async () => {
+    try {
+      await startRoom();
+    } catch (error) {
+      setNotice(error.message, "danger");
+    }
+  });
+
+  copyRoomCodeBtn.addEventListener("click", copyRoomCode);
+
+  joinRoomCodeInput.addEventListener("input", () => {
+    joinRoomCodeInput.value = joinRoomCodeInput.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6);
+  });
+
+  setInterval(() => {
+    void tryPushState();
+  }, 350);
+
+  bootstrapRoom();
+});

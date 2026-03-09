@@ -1,0 +1,23 @@
+services:
+  app:
+    build:
+      context: .
+    ports:
+      - "5000:5000"
+    environment:
+      SECRET_KEY: ${SECRET_KEY:-change-me-for-production}
+      REDIS_URL: redis://redis:6379/0
+      APP_VERSION: 2.0.0
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+volumes:
+  redis_data:

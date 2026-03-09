@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ app_name }}</title>
+  <link rel="icon" href="data:," />
+  <link rel="stylesheet" href="{{ url_for('static', filename='regatta.css') }}?v={{ version }}" />
+</head>
+<body>
+  <div class="app-shell">
+    <header class="hero">
+      <div class="hero-copy">
+        <span class="eyebrow">Release {{ version }}</span>
+        <h1>{{ app_name }}</h1>
+        <p>
+          Flask-only edition: одна кодовая база, комнаты для совместной игры, Redis-backed
+          sessions и обновлённый cockpit для настройки дистанции.
+        </p>
+      </div>
+
+      <div class="hero-status">
+        <div class="hero-badge" id="syncIndicator">Локальный режим</div>
+        <div class="hero-badge hero-badge-muted" id="roomPhaseLabel">Соло</div>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <aside class="control-rail">
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <span class="panel-kicker">Multiplayer</span>
+              <h2>Комната</h2>
+            </div>
+          </div>
+
+          <div class="stack">
+            <label class="control">
+              <span>Позывной</span>
+              <input id="displayName" type="text" maxlength="24" placeholder="Например, Pavel" />
+            </label>
+
+            <div class="action-row">
+              <button type="button" id="createRoom" class="action-primary">Создать комнату</button>
+              <button type="button" id="leaveRoom" class="action-secondary">Выйти</button>
+            </div>
+
+            <div class="join-row">
+              <label class="control grow">
+                <span>Код комнаты</span>
+                <input id="joinRoomCode" type="text" maxlength="6" placeholder="ABC123" />
+              </label>
+              <button type="button" id="joinRoom" class="action-secondary">Войти</button>
+            </div>
+
+            <div class="room-summary">
+              <div>
+                <span class="meta-label">Код</span>
+                <div class="room-code-row">
+                  <strong id="roomCodeValue">-</strong>
+                  <button type="button" id="copyRoomCode" class="ghost-btn">Копировать</button>
+                </div>
+              </div>
+              <div>
+                <span class="meta-label">Статус</span>
+                <strong id="roomStatus">Готов к локальной игре</strong>
+              </div>
+            </div>
+
+            <button type="button" id="startRoom" class="action-primary">Запустить матч</button>
+            <p class="panel-note" id="roomHint">
+              Размер комнаты берётся из настройки «Лодок». Хост настраивает дистанцию,
+              остальные игроки подключаются по коду и ждут старта.
+            </p>
+            <div id="roomNotice" class="room-notice room-notice-neutral">
+              Сетевой слой не активен, пока ты не создашь комнату.
+            </div>
+            <ul id="roomPlayers" class="room-roster"></ul>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <span class="panel-kicker">Course</span>
+              <h2>Дистанция</h2>
+            </div>
+          </div>
+
+          <div class="field-grid">
+            <label class="control">
+              <span>Лодок</span>
+              <select id="playerCount" data-room-lock="setup">
+                <option value="2">2</option>
+                <option value="3">3</option>
+                <option value="4">4</option>
+                <option value="5">5</option>
+                <option value="6">6</option>
+                <option value="7">7</option>
+                <option value="8">8</option>
+              </select>
+            </label>
+
+            <label class="control">
+              <span>Знаков</span>
+              <select id="markCount" data-room-lock="setup">
+                <option value="1">1</option>
+                <option value="2" selected>2</option>
+                <option value="3">3</option>
+                <option value="4">4</option>
+                <option value="5">5</option>
+              </select>
+            </label>
+
+            <label class="control">
+              <span>Огибание</span>
+              <select id="roundingSide" data-room-lock="setup">
+                <option value="port" selected>Левая дистанция</option>
+                <option value="starboard">Правая дистанция</option>
+              </select>
+            </label>
+
+            <label class="control">
+              <span>Финиш</span>
+              <select id="finishSeparate" data-room-lock="setup">
+                <option value="no" selected>По стартовой линии</option>
+                <option value="yes">Отдельная линия</option>
+              </select>
+            </label>
+
+            <label class="control">
+              <span>Кругов до старта</span>
+              <input id="prestartRounds" type="number" min="0" max="20" step="1" value="0" data-room-lock="setup" />
+            </label>
+
+            <label class="control">
+              <span>Выбранный знак</span>
+              <select id="markToEdit" data-room-lock="setup"></select>
+            </label>
+
+            <label class="control">
+              <span>Поле X</span>
+              <input id="gridCols" type="number" min="8" max="120" value="18" data-room-lock="setup" />
+            </label>
+
+            <label class="control">
+              <span>Поле Y</span>
+              <input id="gridRows" type="number" min="8" max="120" value="24" data-room-lock="setup" />
+            </label>
+          </div>
+
+          <div class="action-row">
+            <button type="button" id="applyGrid" class="action-secondary" data-room-lock="setup">Перестроить поле</button>
+            <button type="button" id="resetGame" class="action-secondary" data-room-lock="setup">Новая гонка</button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <span class="panel-kicker">Controls</span>
+              <h2>Режимы</h2>
+            </div>
+          </div>
+
+          <div class="chip-group">
+            <button type="button" id="modePlay">Гонка</button>
+            <button type="button" id="modeMarks" data-room-lock="setup">Знаки</button>
+            <button type="button" id="modeStart" data-room-lock="setup">Старт</button>
+            <button type="button" id="modeFinish" data-room-lock="setup">Финиш</button>
+            <button type="button" id="modeBoats" data-room-lock="setup">Лодки</button>
+            <button type="button" id="modeModel" data-room-lock="setup">Моделирование</button>
+          </div>
+
+          <div class="field-grid compact-grid">
+            <label class="control">
+              <span>Лег</span>
+              <select id="scenarioLeg" data-room-lock="setup"></select>
+            </label>
+
+            <label class="control">
+              <span>Следующий ход</span>
+              <select id="nextPlayer" data-room-lock="setup"></select>
+            </label>
+          </div>
+
+          <button type="button" id="resumeFromModel" class="action-secondary" data-room-lock="setup">
+            Продолжить из ситуации
+          </button>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <span class="panel-kicker">Wind</span>
+              <h2>Погодный блок</h2>
+            </div>
+            <span class="pill" id="windInfo">Ветер: 0°</span>
+          </div>
+
+          <div class="field-grid">
+            <label class="control">
+              <span>Мёртвая зона</span>
+              <input id="deadZone" type="number" min="0" max="180" step="1" value="40" data-room-lock="setup" />
+            </label>
+
+            <label class="control">
+              <span>Дотягивание</span>
+              <input id="snapThreshold" type="number" min="0" max="1" step="0.05" value="0.8" data-room-lock="setup" />
+            </label>
+
+            <label class="control">
+              <span>Ходов за раз</span>
+              <input id="movesPerTurn" type="number" min="1" max="10" step="1" value="1" />
+            </label>
+
+            <label class="control">
+              <span>Штраф смены галса</span>
+              <input id="tackPenalty" type="number" min="0.50" max="1.00" step="0.01" value="0.95" data-room-lock="setup" />
+            </label>
+          </div>
+
+          <div class="action-row wrap-row">
+            <button type="button" id="windLeft" class="action-secondary" data-room-lock="setup">Ветер −5°</button>
+            <button type="button" id="windRight" class="action-secondary" data-room-lock="setup">Ветер +5°</button>
+            <button type="button" id="randomGust" class="action-secondary" data-room-lock="setup">Случайный порыв</button>
+            <button type="button" id="clearGust" class="action-secondary" data-room-lock="setup">Убрать порыв</button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <span class="panel-kicker">Analysis</span>
+              <h2>Подсказки</h2>
+            </div>
+          </div>
+
+          <div class="action-row wrap-row">
+            <button type="button" id="toggleOptimal" class="action-secondary">Оптимум для текущей лодки</button>
+            <button type="button" id="bestStart" class="action-secondary">Лучший старт</button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <span class="panel-kicker">View</span>
+              <h2>Камера</h2>
+            </div>
+          </div>
+
+          <div class="field-grid">
+            <label class="control wide-control">
+              <span>Масштаб</span>
+              <div class="slider-row">
+                <input id="zoomSlider" type="range" min="40" max="200" value="100" />
+                <span id="zoomLabel">100%</span>
+              </div>
+            </label>
+
+            <label class="control wide-control">
+              <span>Сдвиг X</span>
+              <input id="panXSlider" type="range" min="0" max="100" value="50" />
+            </label>
+
+            <label class="control wide-control">
+              <span>Сдвиг Y</span>
+              <input id="panYSlider" type="range" min="0" max="100" value="50" />
+            </label>
+          </div>
+        </section>
+      </aside>
+
+      <section class="board-stage">
+        <div id="status" class="status-card"></div>
+        <div id="optinfo" class="info-card"></div>
+
+        <div class="board-wrap">
+          <canvas id="board" width="1050" height="680"></canvas>
+          <div id="interactionLock" class="interaction-lock hidden"></div>
+        </div>
+
+        <div id="stats" class="info-card"></div>
+      </section>
+    </main>
+  </div>
+
+  <script src="{{ url_for('static', filename='vendor/socket.io.min.js') }}?v={{ version }}"></script>
+  <script src="{{ url_for('static', filename='regatta.js') }}?v={{ version }}"></script>
+  <script src="{{ url_for('static', filename='multiplayer.js') }}?v={{ version }}"></script>
+</body>
+</html>
