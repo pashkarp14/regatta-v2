@@ -238,13 +238,48 @@ def clamp_along_ray_to_field(start_pos: dict[str, float], direction: dict[str, f
     }
 
 
+def normalize_gust_zone(gust_rect: dict[str, float] | None, world_w: float | None = None, world_h: float | None = None) -> dict[str, float] | None:
+    if not isinstance(gust_rect, dict):
+        return None
+
+    if all(isinstance(gust_rect.get(key), (int, float)) for key in ("cx", "cy", "rx", "ry")):
+        cx = float(gust_rect["cx"])
+        cy = float(gust_rect["cy"])
+        rx = max(0.8, float(gust_rect["rx"]))
+        ry = max(0.8, float(gust_rect["ry"]))
+        angle = float(gust_rect.get("angle") or 0.0)
+        if world_w is not None:
+            cx = clamp(cx, rx, max(rx, world_w - rx))
+        if world_h is not None:
+            cy = clamp(cy, ry, max(ry, world_h - ry))
+        return {"cx": cx, "cy": cy, "rx": rx, "ry": ry, "angle": angle}
+
+    if all(isinstance(gust_rect.get(key), (int, float)) for key in ("x", "y", "w", "h")):
+        width = max(1.6, float(gust_rect["w"]))
+        height = max(1.6, float(gust_rect["h"]))
+        return {
+            "cx": float(gust_rect["x"]) + width / 2.0,
+            "cy": float(gust_rect["y"]) + height / 2.0,
+            "rx": width / 2.0,
+            "ry": height / 2.0,
+            "angle": 0.0,
+        }
+
+    return None
+
+
 def point_in_gust(point: dict[str, float], gust_rect: dict[str, float] | None) -> bool:
-    if not gust_rect:
+    gust_zone = normalize_gust_zone(gust_rect)
+    if not gust_zone:
         return False
-    return (
-        gust_rect["x"] <= point["x"] <= gust_rect["x"] + gust_rect["w"]
-        and gust_rect["y"] <= point["y"] <= gust_rect["y"] + gust_rect["h"]
-    )
+
+    cos_a = math.cos(-gust_zone["angle"])
+    sin_a = math.sin(-gust_zone["angle"])
+    dx = point["x"] - gust_zone["cx"]
+    dy = point["y"] - gust_zone["cy"]
+    local_x = dx * cos_a - dy * sin_a
+    local_y = dx * sin_a + dy * cos_a
+    return ((local_x / gust_zone["rx"]) ** 2 + (local_y / gust_zone["ry"]) ** 2) <= 1.0
 
 
 def midpoint(left: dict[str, float], right: dict[str, float]) -> dict[str, float]:
@@ -330,7 +365,7 @@ def record_realtime_start_crossing(
     event_time_ms = start_line_crossing_time_ms(prev_pos, cur_pos, start_a, start_b, marks, tick_start_ms, tick_end_ms)
     delta_ms = int(event_time_ms - gun_at_ms)
     if delta_ms < 0:
-        if boat.get("falseStartDeltaMs") is None:
+        if delta_ms >= -3000 and boat.get("falseStartDeltaMs") is None:
             boat["falseStartDeltaMs"] = delta_ms
         return
     if boat.get("startDeltaMs") is None:
@@ -829,13 +864,14 @@ def normalize_boat(boat: dict[str, Any]) -> dict[str, Any]:
 
 
 def random_gust_rect(world_w: float, world_h: float) -> dict[str, float]:
-    width = clamp(world_w * (0.16 + random.random() * 0.12), 2.4, max(2.4, world_w * 0.35))
-    height = clamp(world_h * (0.14 + random.random() * 0.12), 2.2, max(2.2, world_h * 0.32))
+    rx = clamp(world_w * (0.08 + random.random() * 0.1), 1.4, max(1.4, world_w * 0.2))
+    ry = clamp(world_h * (0.06 + random.random() * 0.1), 1.2, max(1.2, world_h * 0.18))
     return {
-        "x": random.random() * max(0.0, world_w - width),
-        "y": random.random() * max(0.0, world_h - height),
-        "w": width,
-        "h": height,
+        "cx": random.random() * max(0.0, world_w - rx * 2.0) + rx,
+        "cy": random.random() * max(0.0, world_h - ry * 2.0) + ry,
+        "rx": rx,
+        "ry": ry,
+        "angle": random.random() * math.pi,
     }
 
 
@@ -853,10 +889,13 @@ def simulate_weather_tick(game_state: dict[str, Any], now_ms: int) -> bool:
     world_w = float(world.get("width") or 18.0)
     world_h = float(world.get("height") or 24.0)
     auto_enabled = bool(settings.get("autoGustsEnabled"))
-    gust_rect = course.get("gustRect")
+    changed = False
+    gust_rect = normalize_gust_zone(course.get("gustRect"), world_w, world_h)
+    if course.get("gustRect") != gust_rect:
+        course["gustRect"] = gust_rect
+        changed = True
     gust_expires_at = int(race.get("gustExpiresAt") or 0)
     next_auto_gust_at = int(race.get("nextAutoGustAt") or 0)
-    changed = False
 
     if gust_rect and gust_expires_at > 0 and now_ms >= gust_expires_at:
         course["gustRect"] = None
@@ -891,6 +930,16 @@ def control_direction_for_boat(control: dict[str, Any] | None, boat: dict[str, A
     if not isinstance(control, dict) or not control.get("active"):
         return None
 
+    target = control.get("target")
+    if isinstance(target, dict):
+        x = target.get("x")
+        y = target.get("y")
+        if isinstance(x, (int, float)) and isinstance(y, (int, float)):
+            target_point = {"x": clamp(float(x), 0.0, world_w), "y": clamp(float(y), 0.0, world_h)}
+            normalized = normalize({"x": target_point["x"] - float(boat["x"]), "y": target_point["y"] - float(boat["y"])})
+            if normalized["length"] > REALTIME_TARGET_EPS:
+                return {"x": normalized["x"], "y": normalized["y"]}
+
     direction = control.get("direction")
     if isinstance(direction, dict):
         dx = direction.get("x")
@@ -900,19 +949,7 @@ def control_direction_for_boat(control: dict[str, Any] | None, boat: dict[str, A
             if normalized["length"] > 1e-6:
                 return {"x": normalized["x"], "y": normalized["y"]}
 
-    target = control.get("target")
-    if not isinstance(target, dict):
-        return None
-    x = target.get("x")
-    y = target.get("y")
-    if not isinstance(x, (int, float)) or not isinstance(y, (int, float)):
-        return None
-
-    target_point = {"x": clamp(float(x), 0.0, world_w), "y": clamp(float(y), 0.0, world_h)}
-    normalized = normalize({"x": target_point["x"] - float(boat["x"]), "y": target_point["y"] - float(boat["y"])})
-    if normalized["length"] <= REALTIME_TARGET_EPS:
-        return None
-    return {"x": normalized["x"], "y": normalized["y"]}
+    return None
 
 
 def simulate_realtime_tick(game_state: dict[str, Any], controls: dict[int, dict[str, Any]], dt_seconds: float, now_ms: int) -> bool:

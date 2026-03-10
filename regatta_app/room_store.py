@@ -40,6 +40,10 @@ def now_ts() -> int:
     return int(time.time())
 
 
+def now_ms() -> int:
+    return int(time.time() * 1000)
+
+
 def normalize_name(raw_name: str | None) -> str:
     cleaned = (raw_name or "").strip()
     if not cleaned:
@@ -80,6 +84,7 @@ def public_room_view(room: dict[str, Any], player_token: str | None) -> dict[str
     return {
         "code": room["code"],
         "status": room["status"],
+        "server_time_ms": now_ms(),
         "max_players": room["max_players"],
         "joined_count": len(room["players"]),
         "revision": room["revision"],

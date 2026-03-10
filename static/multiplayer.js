@@ -43,6 +43,7 @@ document.addEventListener("DOMContentLoaded", () => {
     selfSeatIndex: null,
     lastRealtimeIntentKey: "",
     lastRealtimeIntentSentAt: 0,
+    serverClockOffsetMs: 0,
   };
   let toastTimer = 0;
   let roomStartPending = false;
@@ -78,21 +79,23 @@ document.addEventListener("DOMContentLoaded", () => {
     return isRealtimeRoom() && roomRacePhase() === "countdown";
   }
 
+  function roomNowMs() {
+    return Date.now() + roomState.serverClockOffsetMs;
+  }
+
   function roomCountdownState() {
     if (!isRealtimeCountdownRoom()) {
       return { active: false, totalMsLeft: 0, prepMsLeft: 0, finalMsLeft: 0, inFinal: false };
     }
 
     const countdownEndsAt = roomState.room?.game_state?.race?.realtimeCountdownEndsAt || 0;
-    const totalMsLeft = Math.max(0, countdownEndsAt - Date.now());
-    const prepSeconds = Math.max(0, Number(roomState.room?.game_state?.settings?.realtimePrepSeconds) || 0);
-    const finalWindowMs = Math.min(3000, Math.round(prepSeconds * 1000));
+    const totalMsLeft = Math.max(0, countdownEndsAt - roomNowMs());
     return {
       active: totalMsLeft > 0,
       totalMsLeft,
-      prepMsLeft: Math.max(0, totalMsLeft - finalWindowMs),
-      finalMsLeft: Math.min(totalMsLeft, finalWindowMs),
-      inFinal: totalMsLeft > 0 && totalMsLeft <= finalWindowMs,
+      prepMsLeft: totalMsLeft,
+      finalMsLeft: 0,
+      inFinal: false,
     };
   }
 
@@ -148,15 +151,17 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    if (roomState.room.status !== "lobby" || !isRoomHost()) {
+    if (!isRoomHost()) {
       regatta.setBoardStartActionOverride(null);
       return;
     }
 
     const roomReady = roomState.room.joined_count === roomState.room.max_players;
     regatta.setBoardStartActionOverride({
-      label: "Старт гонки",
-      title: roomReady ? "Запустить матч" : "Дождись всех участников",
+      label: roomState.room.status === "lobby" ? "Старт гонки" : "Новая гонка",
+      title: roomState.room.status === "lobby"
+        ? (roomReady ? "Запустить матч" : "Дождись всех участников")
+        : "Перезапустить матч с текущей дистанцией",
       disabled: !roomReady,
       onTrigger: handleRoomStartAction,
     });
@@ -256,6 +261,11 @@ document.addEventListener("DOMContentLoaded", () => {
   function hydrateRoom(room) {
     if (!room) return null;
 
+    if (Number.isFinite(room.server_time_ms)) {
+      roomState.serverClockOffsetMs = room.server_time_ms - Date.now();
+      regatta.setServerClockOffset?.(roomState.serverClockOffsetMs);
+    }
+
     if (roomState.selfSeatIndex === null && Number.isInteger(room.self?.seat_index)) {
       roomState.selfSeatIndex = room.self.seat_index;
     }
@@ -287,8 +297,10 @@ document.addEventListener("DOMContentLoaded", () => {
     startRoomBtn.disabled = !roomState.room
       || roomStartPending
       || !isRoomHost()
-      || roomState.room.status !== "lobby"
       || roomState.room.joined_count !== roomState.room.max_players;
+    if (startRoomBtn) {
+      startRoomBtn.textContent = roomState.room?.status === "lobby" ? "Запустить матч" : "Новая гонка";
+    }
 
     if (!roomState.room) {
       interactionLockEl.classList.add("hidden");
@@ -316,6 +328,8 @@ document.addEventListener("DOMContentLoaded", () => {
     renderRoster(roomState.room);
 
     if (!roomState.room) {
+      roomState.serverClockOffsetMs = 0;
+      regatta.setServerClockOffset?.(0);
       roomCodeValueEl.textContent = "-";
       roomStatusEl.textContent = "Готов к локальной игре";
       roomPhaseLabelEl.textContent = "Соло";
@@ -332,6 +346,9 @@ document.addEventListener("DOMContentLoaded", () => {
     roomPhaseLabelEl.textContent = roomState.room.status === "lobby"
       ? `Лобби ${roomState.room.code}`
       : `Матч ${roomState.room.code}`;
+    if (roomState.room.status === "live") {
+      regatta.setMode?.("play");
+    }
 
     if (roomState.room.status === "lobby") {
       setHint(`Ожидаем подключение всех экипажей: ${roomState.room.joined_count} из ${roomState.room.max_players}.`);
@@ -345,11 +362,7 @@ document.addEventListener("DOMContentLoaded", () => {
     } else if (isRealtimeRoom()) {
       if (isRealtimeCountdownRoom()) {
         const countdown = roomCountdownState();
-        if (countdown.prepMsLeft > 0) {
-          setHint(`Предстарт: ещё ${formatCountdownSeconds(countdown.prepMsLeft)} с на манёвры, затем общий отсчёт 3..2..1.`);
-        } else {
-          setHint(`Старт через ${formatCountdownSeconds(countdown.finalMsLeft)}. Поймай стартовую линию ровно в сигнал.`);
-        }
+        setHint(`Предстарт: до сигнала ${formatCountdownSeconds(countdown.totalMsLeft)} с. Фальстарт считается только в последние 3.0 с до старта.`);
         roomStatusEl.textContent = `Гонка · общий отсчет`;
         setNotice(
           "Realtime-режим активен. Управление идёт курсором мыши или касанием по полю, а сервер двигает обе лодки одновременно.",
@@ -517,6 +530,7 @@ document.addEventListener("DOMContentLoaded", () => {
     applyPermissions();
 
     try {
+      regatta.setMode?.("play");
       await regatta.requestBoardFullscreenIfAuto?.();
       await startRoom();
     } catch (error) {
