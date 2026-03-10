@@ -252,7 +252,16 @@
             <button type="button" id="toggleOptimal" class="action-secondary">Оптимум для текущей лодки</button>
             <button type="button" id="bestStart" class="action-secondary">Лучший старт</button>
             <button type="button" id="toggleLaylines" class="action-secondary">Лейлайны</button>
-            <button type="button" id="toggleFullscreen" class="action-secondary">На весь экран</button>
+          </div>
+
+          <div class="field-grid compact-grid">
+            <label class="control">
+              <span>Полный экран</span>
+              <select id="autoFullscreenMode">
+                <option value="off" selected>Только вручную</option>
+                <option value="race">Авто на старт и выход на финише</option>
+              </select>
+            </label>
           </div>
         </section>
 
@@ -299,7 +308,8 @@
         <div id="status" class="status-card"></div>
         <div id="optinfo" class="info-card"></div>
 
-        <div class="board-wrap">
+        <div id="boardViewport" class="board-wrap">
+          <button type="button" id="toggleFullscreen" class="board-fullscreen-btn" aria-label="Полный экран">⛶</button>
           <canvas id="board" width="1050" height="680"></canvas>
           <div id="interactionLock" class="interaction-lock hidden"></div>
         </div>

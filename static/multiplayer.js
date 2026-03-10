@@ -514,6 +514,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   startRoomBtn.addEventListener("click", async () => {
     try {
+      await regatta.requestBoardFullscreenIfAuto?.();
       await startRoom();
     } catch (error) {
       setNotice(error.message, "danger");

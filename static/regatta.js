@@ -38,7 +38,9 @@ document.addEventListener("DOMContentLoaded", () => {
   const autoGustsSelect = document.getElementById("autoGusts");
   const autoGustIntervalInp = document.getElementById("autoGustInterval");
   const autoGustDurationInp = document.getElementById("autoGustDuration");
+  const autoFullscreenModeSelect = document.getElementById("autoFullscreenMode");
   const boatTuningEl = document.getElementById("boatTuning");
+  const boardViewportEl = document.getElementById("boardViewport");
 
   const cameraPanel = document.getElementById("zoomSlider")?.closest(".panel");
   cameraPanel?.remove();
@@ -207,6 +209,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let autoGustsEnabled = autoGustsSelect?.value === "on";
   let autoGustIntervalSec = parseFloat(autoGustIntervalInp?.value) || 10;
   let autoGustDurationSec = parseFloat(autoGustDurationInp?.value) || 6;
+  let autoFullscreenMode = autoFullscreenModeSelect?.value === "race" ? "race" : "off";
   let showLaylines = false;
 
   function updateWindInfo(){
@@ -269,6 +272,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let prestartRoundsSetting = parseInt(prestartRoundsInp.value,10) || 0;
   let prestartRoundsLeft = prestartRoundsSetting;
   let phase = (prestartRoundsSetting > 0) ? "prestart" : "race"; // prestart | race
+  let lastPhaseForFullscreen = phase;
 
   const BOAT_COLORS = ["#e53935","#1e88e5","#43a047","#fdd835","#8e24aa","#ff8f00","#00acc1","#6d4c41"];
 
@@ -464,15 +468,80 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function isFullscreenActive(){
-    return !!document.fullscreenElement;
+    return document.fullscreenElement === boardViewportEl;
   }
 
   function updateViewButtons(){
     btnLaylines?.classList.toggle("mode-btn-active", showLaylines);
     btnFullscreen?.classList.toggle("mode-btn-active", isFullscreenActive());
     if (btnFullscreen){
-      btnFullscreen.textContent = isFullscreenActive() ? "Свернуть экран" : "На весь экран";
+      btnFullscreen.textContent = isFullscreenActive() ? "×" : "⛶";
+      btnFullscreen.title = isFullscreenActive() ? "Свернуть экран" : "На весь экран";
+      btnFullscreen.setAttribute("aria-label", isFullscreenActive() ? "Свернуть экран" : "На весь экран");
     }
+  }
+
+  async function requestBoardFullscreen(){
+    if (!boardViewportEl || isFullscreenActive()) return true;
+    try {
+      await boardViewportEl.requestFullscreen();
+      return true;
+    } catch (error){
+      return false;
+    }
+  }
+
+  async function exitBoardFullscreen(){
+    if (!isFullscreenActive()) return true;
+    try {
+      await document.exitFullscreen();
+      return true;
+    } catch (error){
+      return false;
+    }
+  }
+
+  function shouldAutoFullscreen(){
+    return autoFullscreenMode === "race";
+  }
+
+  function phaseIsRaceVisible(targetPhase){
+    return targetPhase === "countdown" || targetPhase === "race";
+  }
+
+  function isRaceComplete(targetPhase = phase){
+    return boats.length > 0
+      && boats.every((boat) => boat.finished)
+      && (targetPhase === "race" || targetPhase === "finished");
+  }
+
+  async function syncAutoFullscreenWithPhase(previousPhase, nextPhase, { preferEnter=false } = {}){
+    if (!shouldAutoFullscreen()) return;
+
+    if (isRaceComplete(nextPhase) || nextPhase === "finished"){
+      await exitBoardFullscreen();
+      return;
+    }
+
+    const enteringRace = !phaseIsRaceVisible(previousPhase) && phaseIsRaceVisible(nextPhase);
+    if ((preferEnter || enteringRace) && !isFullscreenActive()){
+      await requestBoardFullscreen();
+    }
+  }
+
+  function syncFullscreenPhaseWatch({ preferEnter=false } = {}){
+    const previousPhase = lastPhaseForFullscreen;
+    const phaseChanged = previousPhase !== phase;
+    lastPhaseForFullscreen = phase;
+    if (!phaseChanged && !preferEnter && !isRaceComplete()){
+      return;
+    }
+    void syncAutoFullscreenWithPhase(previousPhase, phase, { preferEnter });
+  }
+
+  async function requestBoardFullscreenIfAuto(){
+    if (!shouldAutoFullscreen()) return false;
+    return requestBoardFullscreen();
   }
 
   function renderBoatTuningControls(){
@@ -1798,6 +1867,8 @@ document.addEventListener("DOMContentLoaded", () => {
   // UI / статус / статистика
   // -----------------------------
   function updateStatus(){
+    syncFullscreenPhaseWatch();
+
     if (mode === "marks"){
       const idx = parseInt(markToEditSelect.value,10)+1;
       statusEl.textContent = `Режим: знаки. Клик по полю — поставить знак ${idx}.`;
@@ -1829,7 +1900,7 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    const allDone = boats.length>0 && boats.every(b=>b.finished) && (phase==="race" || phase==="finished");
+    const allDone = isRaceComplete();
     if (allDone){
       statusEl.textContent = "Гонка завершена: все лодки финишировали.";
       return;
@@ -2171,6 +2242,7 @@ document.addEventListener("DOMContentLoaded", () => {
         autoGustsEnabled,
         autoGustIntervalSec,
         autoGustDurationSec,
+        autoFullscreenMode,
         finishSeparate,
         prestartRoundsSetting
       },
@@ -2273,6 +2345,7 @@ document.addEventListener("DOMContentLoaded", () => {
     autoGustsEnabled = !!settings.autoGustsEnabled;
     autoGustIntervalSec = clamp(parseFloat(settings.autoGustIntervalSec) || autoGustIntervalSec, 3, 60);
     autoGustDurationSec = clamp(parseFloat(settings.autoGustDurationSec) || autoGustDurationSec, 2, 30);
+    autoFullscreenMode = settings.autoFullscreenMode === "race" ? "race" : "off";
     prestartRoundsSetting = Math.max(0, parseInt(settings.prestartRoundsSetting,10) || 0);
 
     deadZoneInp.value = String(deadZoneDeg);
@@ -2284,6 +2357,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (autoGustsSelect) autoGustsSelect.value = autoGustsEnabled ? "on" : "off";
     if (autoGustIntervalInp) autoGustIntervalInp.value = String(autoGustIntervalSec);
     if (autoGustDurationInp) autoGustDurationInp.value = String(autoGustDurationSec);
+    if (autoFullscreenModeSelect) autoFullscreenModeSelect.value = autoFullscreenMode;
     prestartRoundsInp.value = String(prestartRoundsSetting);
 
     const incomingBoats = Array.isArray(snapshot.boats) ? snapshot.boats : [];
@@ -3252,7 +3326,8 @@ document.addEventListener("DOMContentLoaded", () => {
   btnModeBoats.addEventListener("click", () => setMode("boats"));
   btnModeModel.addEventListener("click", () => { ensureNextPlayerOptions(); setMode("model"); });
 
-  btnResumeFromModel.addEventListener("click", () => {
+  btnResumeFromModel.addEventListener("click", async () => {
+    await requestBoardFullscreenIfAuto();
     const v = scenarioLegSelect.value;
     let nm = 0;
     if (v.startsWith("to")) nm = parseInt(v.slice(2),10);
@@ -3422,6 +3497,18 @@ document.addEventListener("DOMContentLoaded", () => {
     emitStateChanged();
   });
 
+  autoFullscreenModeSelect?.addEventListener("change", async () => {
+    autoFullscreenMode = autoFullscreenModeSelect.value === "race" ? "race" : "off";
+    if (!shouldAutoFullscreen()){
+      await exitBoardFullscreen();
+    } else if (phaseIsRaceVisible(phase)) {
+      await requestBoardFullscreen();
+    }
+    updateViewButtons();
+    render();
+    emitStateChanged();
+  });
+
   btnWindLeft.addEventListener("click", () => {
     windAngleDeg -= WIND_STEP;
     updateWindInfo();
@@ -3509,21 +3596,17 @@ document.addEventListener("DOMContentLoaded", () => {
   btnFullscreen?.addEventListener("click", async () => {
     try {
       if (isFullscreenActive()){
-        await document.exitFullscreen();
+        await exitBoardFullscreen();
       } else {
-        await document.documentElement.requestFullscreen();
+        await requestBoardFullscreen();
       }
-    } catch (error) {
-      console.error("Fullscreen toggle failed", error);
     } finally {
-      document.body.classList.toggle("app-fullscreen", isFullscreenActive());
       updateViewButtons();
       render();
     }
   });
 
   document.addEventListener("fullscreenchange", () => {
-    document.body.classList.toggle("app-fullscreen", isFullscreenActive());
     updateViewButtons();
     render();
   });
@@ -3543,7 +3626,8 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   // Новая гонка: не сбрасывает дистанцию — только лодки
-  btnReset.addEventListener("click", () => {
+  btnReset.addEventListener("click", async () => {
+    await requestBoardFullscreenIfAuto();
     resetBoats({ armRealtime: isLocalRealtimeMode() });
     invalidateSolutions();
     updateStatus();
@@ -3566,6 +3650,10 @@ document.addEventListener("DOMContentLoaded", () => {
     fingerprintState: fingerprintGameState,
     render,
     setMode,
+    requestBoardFullscreenIfAuto,
+    requestBoardFullscreen,
+    exitBoardFullscreen,
+    isBoardFullscreenActive: isFullscreenActive,
     setMultiplayerContext: ({ seatIndex=null } = {}) => {
       multiplayerSeatIndex = Number.isInteger(seatIndex) ? seatIndex : null;
       localRealtimeLastTickAt = 0;
@@ -3632,6 +3720,10 @@ document.addEventListener("DOMContentLoaded", () => {
     snapThreshold = clamp(parseFloat(snapThresholdInp.value)||0.8, 0, 1);
     movesPerTurn = clamp(parseInt(movesPerTurnInp.value,10)||1, 1, 10);
     tackPenaltyFactor = clamp(parseFloat(tackPenaltyInp.value)||0.95, 0.5, 1.0);
+    autoGustsEnabled = autoGustsSelect?.value === "on";
+    autoGustIntervalSec = clamp(parseFloat(autoGustIntervalInp?.value) || 10, 3, 60);
+    autoGustDurationSec = clamp(parseFloat(autoGustDurationInp?.value) || 6, 2, 30);
+    autoFullscreenMode = autoFullscreenModeSelect?.value === "race" ? "race" : "off";
 
     roundingSide = roundingSideSelect.value;
     playMode = normalizePlayModeValue(playModeSelect.value);

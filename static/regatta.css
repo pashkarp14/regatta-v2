@@ -487,6 +487,29 @@ textarea{
   overscroll-behavior:contain;
 }
 
+.board-fullscreen-btn{
+  position:absolute;
+  top:18px;
+  right:18px;
+  z-index:3;
+  width:40px;
+  min-width:40px;
+  min-height:40px;
+  padding:0;
+  border-radius:999px;
+  border:1px solid rgba(23,48,66,0.18);
+  background:rgba(255,255,255,0.86);
+  color:var(--accent-deep);
+  font-size:18px;
+  font-weight:700;
+  line-height:1;
+  box-shadow:0 12px 26px rgba(23,48,66,0.18);
+}
+
+.board-fullscreen-btn:hover{
+  transform:translateY(-1px);
+}
+
 canvas{
   display:block;
   width:min(100%, 1080px);
@@ -499,35 +522,25 @@ canvas{
   touch-action:none;
 }
 
-body.app-fullscreen{
-  overflow:hidden;
-}
-
-body.app-fullscreen .app-shell{
-  width:100%;
-  max-width:none;
+.board-wrap:fullscreen{
+  width:100vw;
+  height:100vh;
   min-height:100vh;
-  padding:14px;
-}
-
-body.app-fullscreen .workspace{
-  min-height:calc(100vh - 132px);
-}
-
-body.app-fullscreen .board-stage{
-  min-height:0;
-}
-
-body.app-fullscreen .board-wrap{
-  min-height:calc(100vh - 260px);
+  padding:18px;
   display:flex;
   align-items:center;
   justify-content:center;
+  border-radius:0;
+  border:none;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.98), rgba(247,241,229,0.94)),
+    linear-gradient(135deg, rgba(15,124,130,0.12), rgba(239,131,84,0.12));
 }
 
-body.app-fullscreen canvas{
-  width:min(100%, 1400px);
-  max-height:calc(100vh - 300px);
+.board-wrap:fullscreen canvas{
+  width:min(100%, calc(100vw - 36px));
+  max-width:none;
+  max-height:calc(100vh - 36px);
 }
 
 .interaction-lock{
@@ -597,23 +610,11 @@ body.app-fullscreen canvas{
     justify-content:flex-start;
   }
 
-  body.app-fullscreen{
-    overflow:auto;
+  .board-wrap:fullscreen{
+    padding:12px;
   }
 
-  body.app-fullscreen .app-shell{
-    min-height:auto;
-  }
-
-  body.app-fullscreen .workspace{
-    min-height:auto;
-  }
-
-  body.app-fullscreen .board-wrap{
-    min-height:auto;
-  }
-
-  body.app-fullscreen canvas{
-    max-height:none;
+  .board-wrap:fullscreen canvas{
+    max-height:calc(100vh - 24px);
   }
 }
