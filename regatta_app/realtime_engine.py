@@ -260,13 +260,32 @@ def classify_start_line_crossing(
     return None
 
 
+def start_line_crossing_time_ms(
+    prev_pos: dict[str, float],
+    cur_pos: dict[str, float],
+    start_a: dict[str, float],
+    start_b: dict[str, float],
+    marks: list[dict[str, float]],
+    tick_start_ms: int,
+    tick_end_ms: int,
+) -> int:
+    prev_side = start_line_side_value(prev_pos, start_a, start_b, marks)
+    cur_side = start_line_side_value(cur_pos, start_a, start_b, marks)
+    denom = prev_side - cur_side
+    if abs(denom) < 1e-9:
+        return tick_end_ms
+    fraction = clamp(prev_side / denom, 0.0, 1.0)
+    return int(tick_start_ms + (tick_end_ms - tick_start_ms) * fraction)
+
+
 def record_realtime_start_crossing(
     boat: dict[str, Any],
     prev_pos: dict[str, float],
     cur_pos: dict[str, float],
     course: dict[str, Any],
     gun_at_ms: int,
-    now_ms: int,
+    tick_start_ms: int,
+    tick_end_ms: int,
 ) -> None:
     if gun_at_ms <= 0:
         return
@@ -276,7 +295,8 @@ def record_realtime_start_crossing(
     crossing = classify_start_line_crossing(prev_pos, cur_pos, start_a, start_b, marks)
     if crossing != "to_course":
         return
-    delta_ms = int(now_ms - gun_at_ms)
+    event_time_ms = start_line_crossing_time_ms(prev_pos, cur_pos, start_a, start_b, marks, tick_start_ms, tick_end_ms)
+    delta_ms = int(event_time_ms - gun_at_ms)
     if delta_ms < 0:
         if boat.get("falseStartDeltaMs") is None:
             boat["falseStartDeltaMs"] = delta_ms
@@ -554,6 +574,7 @@ def simulate_realtime_tick(game_state: dict[str, Any], controls: dict[int, dict[
     wind_angle_deg = float(settings.get("windAngleDeg") or 0.0)
     dead_zone_deg = float(settings.get("deadZoneDeg") or 0.0)
     gust_rect = course.get("gustRect")
+    tick_start_ms = int(now_ms - dt_seconds * 1000.0)
 
     changed = simulate_weather_tick(game_state, now_ms)
     phase = race.get("phase") or "race"
@@ -576,6 +597,7 @@ def simulate_realtime_tick(game_state: dict[str, Any], controls: dict[int, dict[
             "heading": float(boat.get("heading") or 0.0),
             "hasHeading": bool(boat.get("hasHeading")),
             "direction": None,
+            "motionDirection": None,
             "distance": 0.0,
         }
         if boat.get("finished"):
@@ -597,25 +619,27 @@ def simulate_realtime_tick(game_state: dict[str, Any], controls: dict[int, dict[
         angle = angle_between({"x": normalized["x"], "y": normalized["y"]}, upwind)
         half_dead = math.radians(dead_zone_deg) / 2.0
         softness = math.radians(max(2.0, REALTIME_DEADZONE_SOFTNESS_DEG))
-        speed_factor = clamp((angle - half_dead) / softness, 0.0, 1.0)
-        if speed_factor <= 1e-4:
-            proposals.append(proposal)
-            continue
-
         heading_vec = {"x": normalized["x"], "y": normalized["y"]}
         heading = math.atan2(heading_vec["y"], heading_vec["x"])
         move_factor = move_factor_for_boat(boat, heading_vec, settings, gust_rect)
-        step_length = min(
-            normalized["length"],
-            REALTIME_SPEED_UNITS_PER_SEC * dt_seconds * speed_factor * move_factor,
+        speed_factor = clamp((angle - half_dead) / softness, 0.0, 1.0)
+        reverse_mode = speed_factor <= 1e-4
+        step_length = (
+            REALTIME_SPEED_UNITS_PER_SEC * dt_seconds * move_factor * 0.10
+            if reverse_mode
+            else min(
+                normalized["length"],
+                REALTIME_SPEED_UNITS_PER_SEC * dt_seconds * speed_factor * move_factor,
+            )
         )
         if step_length <= 1e-5:
             proposals.append(proposal)
             continue
 
+        motion_vec = {"x": -heading_vec["x"], "y": -heading_vec["y"]} if reverse_mode else heading_vec
         dest = {
-            "x": boat["x"] + heading_vec["x"] * step_length,
-            "y": boat["y"] + heading_vec["y"] * step_length,
+            "x": boat["x"] + motion_vec["x"] * step_length,
+            "y": boat["y"] + motion_vec["y"] * step_length,
         }
         proposal.update(
             {
@@ -624,6 +648,7 @@ def simulate_realtime_tick(game_state: dict[str, Any], controls: dict[int, dict[
                 "heading": heading,
                 "hasHeading": True,
                 "direction": heading_vec,
+                "motionDirection": motion_vec,
                 "distance": step_length,
             }
         )
@@ -704,7 +729,7 @@ def simulate_realtime_tick(game_state: dict[str, Any], controls: dict[int, dict[
                 boat["heading"] = proposal["heading"]
                 boat["hasHeading"] = proposal["hasHeading"]
                 boat["tack"] = tack_sign_from_heading_vec(proposal["direction"], wind_angle_deg)
-                record_realtime_start_crossing(boat, prev_pos, dest, course, countdown_ends_at, now_ms)
+                record_realtime_start_crossing(boat, prev_pos, dest, course, countdown_ends_at, tick_start_ms, now_ms)
                 update_boat_mark_and_finish(boat, prev_pos, dest, proposal["direction"], game_state)
         if not boat.get("finished"):
             any_unfinished = True

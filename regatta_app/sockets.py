@@ -14,8 +14,6 @@ from .room_store import RoomForbidden, RoomStoreError, public_room_view, validat
 
 
 REALTIME_TICK_HZ = 12
-REALTIME_CONTROL_STALE_MS = 1200
-
 _realtime_lock = threading.Lock()
 _realtime_loops: set[str] = set()
 _realtime_controls: dict[str, dict[int, dict[str, Any]]] = {}
@@ -91,19 +89,7 @@ def pop_realtime_control(room_code: str, seat_index: int | None = None) -> None:
 def realtime_controls_snapshot(room_code: str, now_ms: int) -> dict[int, dict[str, Any]]:
     with _realtime_lock:
         room_controls = _realtime_controls.get(room_code, {})
-        fresh: dict[int, dict[str, Any]] = {}
-        stale: list[int] = []
-        for seat_index, control in room_controls.items():
-            updated_at = int(control.get("updatedAt") or 0)
-            if now_ms - updated_at > REALTIME_CONTROL_STALE_MS:
-                stale.append(seat_index)
-                continue
-            fresh[seat_index] = deepcopy(control)
-        for seat_index in stale:
-            room_controls.pop(seat_index, None)
-        if not room_controls and room_code in _realtime_controls:
-            _realtime_controls.pop(room_code, None)
-        return fresh
+        return {seat_index: deepcopy(control) for seat_index, control in room_controls.items()}
 
 
 def ensure_realtime_room_loop(room_code: str) -> None:

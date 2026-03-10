@@ -1177,6 +1177,7 @@ document.addEventListener("DOMContentLoaded", () => {
   function simulateLocalRealtimeTick(dtSeconds){
     let changed = false;
     const now = Date.now();
+    const tickStartMs = now - dtSeconds * 1000;
     const countdownActive = phase === "countdown" && realtimeCountdownEndsAt > now;
 
     if (phase === "countdown" && realtimeCountdownEndsAt > 0 && now >= realtimeCountdownEndsAt){
@@ -1196,6 +1197,7 @@ document.addEventListener("DOMContentLoaded", () => {
         heading: Number.isFinite(boat.heading) ? boat.heading : 0,
         hasHeading: !!boat.hasHeading,
         direction: null,
+        motionDirection: null,
         distance: 0
       };
 
@@ -1218,30 +1220,35 @@ document.addEventListener("DOMContentLoaded", () => {
       const angle = angleBetween({ x: normalized.x, y: normalized.y }, upwind);
       const halfDead = (deadZoneDeg * Math.PI / 180) / 2;
       const softness = Math.max(2, REALTIME_DEADZONE_SOFTNESS_DEG) * Math.PI / 180;
-      const speedFactor = clamp((angle - halfDead) / softness, 0, 1);
-      if (speedFactor <= 1e-4){
-        return proposal;
-      }
-
       const direction = { x: normalized.x, y: normalized.y };
       const heading = Math.atan2(direction.y, direction.x);
       const moveFactor = stepFactorForMove(boat, direction);
-      const stepLength = Math.min(
-        normalized.L,
-        REALTIME_SPEED_UNITS_PER_SEC * dtSeconds * speedFactor * moveFactor
-      );
+      const speedFactor = clamp((angle - halfDead) / softness, 0, 1);
+      const reverseSpeed = REALTIME_SPEED_UNITS_PER_SEC * dtSeconds * moveFactor * 0.10;
+      const reverseMode = speedFactor <= 1e-4;
+      const stepLength = reverseMode
+        ? reverseSpeed
+        : Math.min(
+            normalized.L,
+            REALTIME_SPEED_UNITS_PER_SEC * dtSeconds * speedFactor * moveFactor
+          );
       if (stepLength <= 1e-5){
         return proposal;
       }
 
+      const motionDirection = reverseMode
+        ? { x: -direction.x, y: -direction.y }
+        : direction;
+
       proposal.accepted = true;
       proposal.dest = {
-        x: boat.x + direction.x * stepLength,
-        y: boat.y + direction.y * stepLength
+        x: boat.x + motionDirection.x * stepLength,
+        y: boat.y + motionDirection.y * stepLength
       };
       proposal.heading = heading;
       proposal.hasHeading = true;
       proposal.direction = direction;
+      proposal.motionDirection = motionDirection;
       proposal.distance = stepLength;
       return proposal;
     });
@@ -1328,7 +1335,7 @@ document.addEventListener("DOMContentLoaded", () => {
           boat.heading = proposal.heading;
           boat.hasHeading = proposal.hasHeading;
           boat.tack = tackSignFromHeadingVec(proposal.direction);
-          recordRealtimeStartCrossing(boat, proposal.prev, dest, now);
+          recordRealtimeStartCrossing(boat, proposal.prev, dest, tickStartMs, now);
           updateBoatMarkAndFinish(boat, proposal.prev, dest, proposal.direction);
         }
       }
@@ -2325,12 +2332,23 @@ document.addEventListener("DOMContentLoaded", () => {
     return null;
   }
 
-  function recordRealtimeStartCrossing(boat, prevPos, curPos, eventTimeMs=Date.now()){
+  function startLineCrossingTimeMs(prevPos, curPos, tickStartMs, tickEndMs){
+    if (!Number.isFinite(tickStartMs) || !Number.isFinite(tickEndMs)) return tickEndMs;
+    const prevSide = startLineSideValue(prevPos);
+    const curSide = startLineSideValue(curPos);
+    const denom = prevSide - curSide;
+    if (Math.abs(denom) < 1e-9) return tickEndMs;
+    const t = clamp(prevSide / denom, 0, 1);
+    return tickStartMs + (tickEndMs - tickStartMs) * t;
+  }
+
+  function recordRealtimeStartCrossing(boat, prevPos, curPos, tickStartMs=Date.now(), tickEndMs=tickStartMs){
     if (!isRealtimePlayMode()) return;
     const crossing = classifyStartLineCrossing(prevPos, curPos);
     if (crossing !== "toCourse") return;
     const gunAt = Number.isFinite(realtimeCountdownEndsAt) ? realtimeCountdownEndsAt : 0;
     if (!gunAt) return;
+    const eventTimeMs = startLineCrossingTimeMs(prevPos, curPos, tickStartMs, tickEndMs);
     const deltaMs = eventTimeMs - gunAt;
     if (deltaMs < 0){
       if (!Number.isFinite(boat.falseStartDeltaMs)){
