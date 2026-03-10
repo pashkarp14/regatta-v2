@@ -52,18 +52,32 @@ def room_requires_live_loop(room: dict[str, Any] | None) -> bool:
 
 
 def normalize_control_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
-    target = (payload or {}).get("target")
-    if not isinstance(target, dict):
-        return {"active": False, "target": None, "updatedAt": int(time.time() * 1000)}
-    x = target.get("x")
-    y = target.get("y")
-    if not isinstance(x, (int, float)) or not isinstance(y, (int, float)):
-        return {"active": False, "target": None, "updatedAt": int(time.time() * 1000)}
-    return {
-        "active": bool((payload or {}).get("active", True)),
-        "target": {"x": float(x), "y": float(y)},
-        "updatedAt": int(time.time() * 1000),
+    updated_at = int(time.time() * 1000)
+    normalized = {
+        "active": False,
+        "target": None,
+        "direction": None,
+        "updatedAt": updated_at,
     }
+
+    direction = (payload or {}).get("direction")
+    if isinstance(direction, dict):
+        dx = direction.get("x")
+        dy = direction.get("y")
+        if isinstance(dx, (int, float)) and isinstance(dy, (int, float)):
+            normalized["direction"] = {"x": float(dx), "y": float(dy)}
+
+    target = (payload or {}).get("target")
+    if isinstance(target, dict):
+        x = target.get("x")
+        y = target.get("y")
+        if isinstance(x, (int, float)) and isinstance(y, (int, float)):
+            normalized["target"] = {"x": float(x), "y": float(y)}
+
+    normalized["active"] = bool((payload or {}).get("active", True)) and (
+        normalized["direction"] is not None or normalized["target"] is not None
+    )
+    return normalized
 
 
 def set_realtime_control(room_code: str, seat_index: int, payload: dict[str, Any] | None) -> None:

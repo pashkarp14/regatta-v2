@@ -510,6 +510,36 @@ textarea{
   transform:translateY(-1px);
 }
 
+.board-start-btn{
+  position:absolute;
+  top:18px;
+  left:18px;
+  z-index:3;
+  min-width:132px;
+  min-height:40px;
+  padding:0 16px;
+  border-radius:999px;
+  border:1px solid rgba(23,48,66,0.14);
+  background:linear-gradient(135deg, var(--accent-deep), var(--accent));
+  color:#fffdf8;
+  font-size:13px;
+  font-weight:800;
+  letter-spacing:0.02em;
+  line-height:1;
+  box-shadow:0 14px 28px rgba(15,124,130,0.28);
+}
+
+.board-start-btn:hover{
+  transform:translateY(-1px);
+}
+
+.board-start-btn:disabled{
+  opacity:0.56;
+  cursor:not-allowed;
+  transform:none;
+  box-shadow:0 12px 24px rgba(23,48,66,0.14);
+}
+
 canvas{
   display:block;
   width:min(100%, 1080px);
@@ -518,6 +548,7 @@ canvas{
   border-radius:18px;
   border:1px solid rgba(23,48,66,0.14);
   background:#fffdf9;
+  box-shadow:0 18px 34px rgba(23,48,66,0.10);
   user-select:none;
   touch-action:none;
 }
@@ -526,21 +557,26 @@ canvas{
   width:100vw;
   height:100vh;
   min-height:100vh;
-  padding:18px;
-  display:flex;
-  align-items:center;
-  justify-content:center;
+  padding:20px;
   border-radius:0;
   border:none;
   background:
-    linear-gradient(180deg, rgba(255,255,255,0.98), rgba(247,241,229,0.94)),
-    linear-gradient(135deg, rgba(15,124,130,0.12), rgba(239,131,84,0.12));
+    radial-gradient(circle at top, rgba(255,255,255,0.28), transparent 36%),
+    linear-gradient(180deg, #edf5f3 0%, #d9e9e5 100%);
 }
 
 .board-wrap:fullscreen canvas{
-  width:min(100%, calc(100vw - 36px));
+  width:min(100%, calc(100vw - 40px));
   max-width:none;
-  max-height:calc(100vh - 36px);
+  max-height:none;
+  border-radius:28px;
+  border-color:rgba(23,48,66,0.16);
+  box-shadow:0 30px 60px rgba(23,48,66,0.18);
+}
+
+.board-wrap:fullscreen .board-fullscreen-btn,
+.board-wrap:fullscreen .board-start-btn{
+  background:rgba(255,255,255,0.92);
 }
 
 .interaction-lock{
@@ -556,7 +592,6 @@ canvas{
   font-size:1rem;
   font-weight:700;
   text-align:center;
-  backdrop-filter:blur(3px);
 }
 
 .app-toast{
@@ -635,6 +670,12 @@ canvas{
 
   .board-wrap:fullscreen canvas{
     max-height:calc(100vh - 24px);
+  }
+
+  .board-start-btn{
+    min-width:116px;
+    top:14px;
+    left:14px;
   }
 
   .app-toast{

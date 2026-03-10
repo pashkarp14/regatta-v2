@@ -213,6 +213,31 @@ def point_in_field(point: dict[str, float], world_w: float, world_h: float) -> b
     return 0.0 <= point["x"] <= world_w and 0.0 <= point["y"] <= world_h
 
 
+def clamp_along_ray_to_field(start_pos: dict[str, float], direction: dict[str, float], max_len: float, world_w: float, world_h: float) -> dict[str, float]:
+    t_max = max_len
+
+    if abs(direction["x"]) > 1e-9:
+        tx1 = (0.0 - start_pos["x"]) / direction["x"]
+        tx2 = (world_w - start_pos["x"]) / direction["x"]
+        t_max = min(t_max, max(tx1, tx2))
+        t_max = max(0.0, t_max)
+    elif start_pos["x"] < 0.0 or start_pos["x"] > world_w:
+        return {"x": start_pos["x"], "y": start_pos["y"]}
+
+    if abs(direction["y"]) > 1e-9:
+        ty1 = (0.0 - start_pos["y"]) / direction["y"]
+        ty2 = (world_h - start_pos["y"]) / direction["y"]
+        t_max = min(t_max, max(ty1, ty2))
+        t_max = max(0.0, t_max)
+    elif start_pos["y"] < 0.0 or start_pos["y"] > world_h:
+        return {"x": start_pos["x"], "y": start_pos["y"]}
+
+    return {
+        "x": start_pos["x"] + direction["x"] * t_max,
+        "y": start_pos["y"] + direction["y"] * t_max,
+    }
+
+
 def point_in_gust(point: dict[str, float], gust_rect: dict[str, float] | None) -> bool:
     if not gust_rect:
         return False
@@ -862,9 +887,19 @@ def simulate_weather_tick(game_state: dict[str, Any], now_ms: int) -> bool:
     return changed
 
 
-def control_target_for_boat(control: dict[str, Any] | None, world_w: float, world_h: float) -> dict[str, float] | None:
+def control_direction_for_boat(control: dict[str, Any] | None, boat: dict[str, Any], world_w: float, world_h: float) -> dict[str, float] | None:
     if not isinstance(control, dict) or not control.get("active"):
         return None
+
+    direction = control.get("direction")
+    if isinstance(direction, dict):
+        dx = direction.get("x")
+        dy = direction.get("y")
+        if isinstance(dx, (int, float)) and isinstance(dy, (int, float)):
+            normalized = normalize({"x": float(dx), "y": float(dy)})
+            if normalized["length"] > 1e-6:
+                return {"x": normalized["x"], "y": normalized["y"]}
+
     target = control.get("target")
     if not isinstance(target, dict):
         return None
@@ -872,7 +907,12 @@ def control_target_for_boat(control: dict[str, Any] | None, world_w: float, worl
     y = target.get("y")
     if not isinstance(x, (int, float)) or not isinstance(y, (int, float)):
         return None
-    return {"x": clamp(float(x), 0.0, world_w), "y": clamp(float(y), 0.0, world_h)}
+
+    target_point = {"x": clamp(float(x), 0.0, world_w), "y": clamp(float(y), 0.0, world_h)}
+    normalized = normalize({"x": target_point["x"] - float(boat["x"]), "y": target_point["y"] - float(boat["y"])})
+    if normalized["length"] <= REALTIME_TARGET_EPS:
+        return None
+    return {"x": normalized["x"], "y": normalized["y"]}
 
 
 def simulate_realtime_tick(game_state: dict[str, Any], controls: dict[int, dict[str, Any]], dt_seconds: float, now_ms: int) -> bool:
@@ -921,43 +961,38 @@ def simulate_realtime_tick(game_state: dict[str, Any], controls: dict[int, dict[
             proposals.append(proposal)
             continue
 
-        target = control_target_for_boat(controls.get(index), world_w, world_h)
-        if target is None:
-            proposals.append(proposal)
-            continue
-
-        to_target = {"x": target["x"] - boat["x"], "y": target["y"] - boat["y"]}
-        normalized = normalize(to_target)
-        if normalized["length"] <= REALTIME_TARGET_EPS:
+        heading_vec = control_direction_for_boat(controls.get(index), boat, world_w, world_h)
+        if heading_vec is None:
             proposals.append(proposal)
             continue
 
         upwind = upwind_vec(wind_angle_deg)
-        angle = angle_between({"x": normalized["x"], "y": normalized["y"]}, upwind)
+        angle = angle_between(heading_vec, upwind)
         half_dead = math.radians(dead_zone_deg) / 2.0
+        reverse_threshold = half_dead * 0.5
         softness = math.radians(max(2.0, REALTIME_DEADZONE_SOFTNESS_DEG))
-        heading_vec = {"x": normalized["x"], "y": normalized["y"]}
         heading = math.atan2(heading_vec["y"], heading_vec["x"])
         move_factor = move_factor_for_boat(boat, heading_vec, settings, gust_rect) * realtime_penalty_factor(boat, now_ms)
-        speed_factor = clamp((angle - half_dead) / softness, 0.0, 1.0)
-        reverse_mode = speed_factor <= 1e-4
+        speed_factor = 0.0 if angle <= half_dead else clamp((angle - half_dead) / softness, 0.0, 1.0)
+        reverse_mode = angle <= reverse_threshold
         step_length = (
             REALTIME_SPEED_UNITS_PER_SEC * dt_seconds * move_factor * 0.10
             if reverse_mode
-            else min(
-                normalized["length"],
-                REALTIME_SPEED_UNITS_PER_SEC * dt_seconds * speed_factor * move_factor,
-            )
+            else REALTIME_SPEED_UNITS_PER_SEC * dt_seconds * speed_factor * move_factor
         )
         if step_length <= 1e-5:
             proposals.append(proposal)
             continue
 
         motion_vec = {"x": -heading_vec["x"], "y": -heading_vec["y"]} if reverse_mode else heading_vec
-        dest = {
-            "x": boat["x"] + motion_vec["x"] * step_length,
-            "y": boat["y"] + motion_vec["y"] * step_length,
-        }
+        dest = clamp_along_ray_to_field(
+            {"x": float(boat["x"]), "y": float(boat["y"])},
+            motion_vec,
+            step_length,
+            world_w,
+            world_h,
+        )
+        travel_distance = dist({"x": float(boat["x"]), "y": float(boat["y"])}, dest)
         proposal.update(
             {
                 "accepted": True,
@@ -966,8 +1001,8 @@ def simulate_realtime_tick(game_state: dict[str, Any], controls: dict[int, dict[
                 "hasHeading": True,
                 "direction": heading_vec,
                 "motionDirection": motion_vec,
-                "distance": step_length,
-                "signedSpeedUnitsPerSec": ((-1.0 if reverse_mode else 1.0) * (step_length / dt_seconds)) if dt_seconds > 1e-6 else 0.0,
+                "distance": travel_distance,
+                "signedSpeedUnitsPerSec": ((-1.0 if reverse_mode else 1.0) * (travel_distance / dt_seconds)) if dt_seconds > 1e-6 else 0.0,
                 "reverseMode": reverse_mode,
             }
         )

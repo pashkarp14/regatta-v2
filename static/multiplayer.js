@@ -45,6 +45,7 @@ document.addEventListener("DOMContentLoaded", () => {
     lastRealtimeIntentSentAt: 0,
   };
   let toastTimer = 0;
+  let roomStartPending = false;
 
   function roomPlayer() {
     if (!roomState.room || roomState.selfSeatIndex === null) return null;
@@ -75,6 +76,30 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function isRealtimeCountdownRoom() {
     return isRealtimeRoom() && roomRacePhase() === "countdown";
+  }
+
+  function roomCountdownState() {
+    if (!isRealtimeCountdownRoom()) {
+      return { active: false, totalMsLeft: 0, prepMsLeft: 0, finalMsLeft: 0, inFinal: false };
+    }
+
+    const countdownEndsAt = roomState.room?.game_state?.race?.realtimeCountdownEndsAt || 0;
+    const totalMsLeft = Math.max(0, countdownEndsAt - Date.now());
+    const prepSeconds = Math.max(0, Number(roomState.room?.game_state?.settings?.realtimePrepSeconds) || 0);
+    const finalWindowMs = Math.min(3000, Math.round(prepSeconds * 1000));
+    return {
+      active: totalMsLeft > 0,
+      totalMsLeft,
+      prepMsLeft: Math.max(0, totalMsLeft - finalWindowMs),
+      finalMsLeft: Math.min(totalMsLeft, finalWindowMs),
+      inFinal: totalMsLeft > 0 && totalMsLeft <= finalWindowMs,
+    };
+  }
+
+  function formatCountdownSeconds(ms) {
+    if (!Number.isFinite(ms) || ms <= 0) return "0.0";
+    const seconds = ms / 1000;
+    return seconds >= 10 ? String(Math.ceil(seconds)) : seconds.toFixed(1);
   }
 
   function canEditSetup() {
@@ -113,6 +138,28 @@ document.addEventListener("DOMContentLoaded", () => {
     if (roomState.room.status === "lobby") return isRoomHost();
     if (isRealtimeRoom()) return !!roomPlayer();
     return isMyTurn();
+  }
+
+  function syncBoardStartAction() {
+    if (typeof regatta.setBoardStartActionOverride !== "function") return;
+
+    if (!roomState.room || roomStartPending) {
+      regatta.setBoardStartActionOverride(null);
+      return;
+    }
+
+    if (roomState.room.status !== "lobby" || !isRoomHost()) {
+      regatta.setBoardStartActionOverride(null);
+      return;
+    }
+
+    const roomReady = roomState.room.joined_count === roomState.room.max_players;
+    regatta.setBoardStartActionOverride({
+      label: "Старт гонки",
+      title: roomReady ? "Запустить матч" : "Дождись всех участников",
+      disabled: !roomReady,
+      onTrigger: handleRoomStartAction,
+    });
   }
 
   function setNotice(message, tone = "neutral") {
@@ -238,6 +285,7 @@ document.addEventListener("DOMContentLoaded", () => {
     leaveRoomBtn.disabled = !roomState.room;
     copyRoomCodeBtn.disabled = !roomState.room;
     startRoomBtn.disabled = !roomState.room
+      || roomStartPending
       || !isRoomHost()
       || roomState.room.status !== "lobby"
       || roomState.room.joined_count !== roomState.room.max_players;
@@ -275,6 +323,7 @@ document.addEventListener("DOMContentLoaded", () => {
       setNotice("Сетевой слой не активен, пока ты не создашь комнату.", "neutral");
       setSyncLabel("Локальный режим", false);
       roomState.lastRealtimeIntentKey = "";
+      syncBoardStartAction();
       applyPermissions();
       return;
     }
@@ -294,14 +343,12 @@ document.addEventListener("DOMContentLoaded", () => {
         "success",
       );
     } else if (isRealtimeRoom()) {
-      const countdownEndsAt = roomState.room.game_state?.race?.realtimeCountdownEndsAt || 0;
       if (isRealtimeCountdownRoom()) {
-        const msLeft = Math.max(0, countdownEndsAt - Date.now());
-        if (msLeft > 3000) {
-          setHint(`Предстарт: ещё ${Math.ceil((msLeft - 3000) / 1000)} с на маневры, затем общий отсчёт 3..2..1.`);
+        const countdown = roomCountdownState();
+        if (countdown.prepMsLeft > 0) {
+          setHint(`Предстарт: ещё ${formatCountdownSeconds(countdown.prepMsLeft)} с на манёвры, затем общий отсчёт 3..2..1.`);
         } else {
-          const secondsLeft = Math.max(1, Math.ceil(msLeft / 1000));
-          setHint(`Старт через ${secondsLeft}. Поймай стартовую линию ровно в сигнал.`);
+          setHint(`Старт через ${formatCountdownSeconds(countdown.finalMsLeft)}. Поймай стартовую линию ровно в сигнал.`);
         }
         roomStatusEl.textContent = `Гонка · общий отсчет`;
         setNotice(
@@ -331,6 +378,7 @@ document.addEventListener("DOMContentLoaded", () => {
       );
     }
 
+    syncBoardStartAction();
     applyPermissions();
   }
 
@@ -407,6 +455,7 @@ document.addEventListener("DOMContentLoaded", () => {
       },
     });
 
+    roomStartPending = false;
     roomState.lastFingerprint = regatta.fingerprintState();
     renderRoom(payload.room);
     ensureSocket();
@@ -431,6 +480,7 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     }
 
+    roomStartPending = false;
     renderRoom(payload.room);
     ensureSocket();
   }
@@ -459,6 +509,24 @@ document.addEventListener("DOMContentLoaded", () => {
     void trySendRealtimeControl(true);
   }
 
+  async function handleRoomStartAction() {
+    if (!roomState.room || roomStartPending) return;
+
+    roomStartPending = true;
+    syncBoardStartAction();
+    applyPermissions();
+
+    try {
+      await regatta.requestBoardFullscreenIfAuto?.();
+      await startRoom();
+    } catch (error) {
+      setNotice(error.message, "danger");
+    } finally {
+      roomStartPending = false;
+      renderRoom(roomState.room);
+    }
+  }
+
   async function leaveRoom() {
     await apiRequest("/api/rooms/leave", { method: "POST" });
     disconnectSocket();
@@ -466,12 +534,14 @@ document.addEventListener("DOMContentLoaded", () => {
     roomState.selfSeatIndex = null;
     roomState.lastFingerprint = regatta.fingerprintState();
     roomState.lastRealtimeIntentKey = "";
+    roomStartPending = false;
     renderRoom(null);
   }
 
   async function bootstrapRoom() {
     try {
       const payload = await apiRequest("/api/bootstrap");
+      roomStartPending = false;
       if (payload.display_name) {
         displayNameInput.value = payload.display_name;
       }
@@ -520,6 +590,7 @@ document.addEventListener("DOMContentLoaded", () => {
       room_code: roomState.room.code,
       active: !!intent?.active,
       target: intent?.target || null,
+      direction: intent?.direction || null,
     };
     const key = JSON.stringify(payload);
     const now = Date.now();
@@ -557,12 +628,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   startRoomBtn.addEventListener("click", async () => {
-    try {
-      await regatta.requestBoardFullscreenIfAuto?.();
-      await startRoom();
-    } catch (error) {
-      setNotice(error.message, "danger");
-    }
+    await handleRoomStartAction();
   });
 
   copyRoomCodeBtn.addEventListener("click", copyRoomCode);

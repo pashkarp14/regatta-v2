@@ -91,10 +91,11 @@ def normalize_room_start_state(game_state: dict) -> dict:
         settings["playMode"] = "realtime"
         prep_seconds = max(0.0, float(settings.get("realtimePrepSeconds") or 0.0))
         race["phase"] = "countdown"
-        race["realtimeCountdownEndsAt"] = int(time.time() * 1000) + int(prep_seconds * 1000) + 3000
+        race["realtimeCountdownEndsAt"] = int(time.time() * 1000) + int(prep_seconds * 1000)
         race["currentPlayer"] = 0
         race["subMovesLeft"] = 0
         race["raceFinishedCount"] = 0
+        race["prestartRoundsLeft"] = 0
         race.pop("hybridRound", None)
         race.pop("hybridMovesLeft", None)
     else:

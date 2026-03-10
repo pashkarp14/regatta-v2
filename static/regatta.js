@@ -41,6 +41,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const autoGustIntervalInp = document.getElementById("autoGustInterval");
   const autoGustDurationInp = document.getElementById("autoGustDuration");
   const autoFullscreenModeSelect = document.getElementById("autoFullscreenMode");
+  const interactionModeInfoEl = document.getElementById("interactionModeInfo");
   const boatTuningEl = document.getElementById("boatTuning");
   const boardViewportEl = document.getElementById("boardViewport");
 
@@ -56,12 +57,15 @@ document.addEventListener("DOMContentLoaded", () => {
   const btnBestStart = document.getElementById("bestStart");
   const btnLaylines  = document.getElementById("toggleLaylines");
   const btnFullscreen = document.getElementById("toggleFullscreen");
+  const btnBoardStart = document.getElementById("boardStartAction");
 
   // -----------------------------
   // Мир: непрерывные координаты
   // -----------------------------
   const DEFAULT_WORLD_W = 54;
   const DEFAULT_WORLD_H = 72;
+  const DEFAULT_CANVAS_WIDTH = canvas.width;
+  const DEFAULT_CANVAS_HEIGHT = canvas.height;
   const WORLD_MAX = 360;
   const METERS_PER_WORLD_UNIT = 5;
   let worldW = parseFloat(gridColsInput.value);
@@ -157,6 +161,74 @@ document.addEventListener("DOMContentLoaded", () => {
     return { x: wx, y: wy };
   }
 
+  function canvasPixelToWorld(px, py){
+    const tl = fieldTopLeft();
+    return {
+      x: clamp((px - tl.x) / PX, 0, worldW),
+      y: clamp(worldH - ((py - tl.y) / PX), 0, worldH)
+    };
+  }
+
+  function setCameraCenterWorld(centerWorld){
+    if (!centerWorld) return;
+    panX = fieldPixelW() / 2 - centerWorld.x * PX;
+    panY = fieldPixelH() / 2 - (worldH - centerWorld.y) * PX;
+    clampCameraPan();
+  }
+
+  function desiredBoardCanvasCssSize(){
+    if (!boardViewportEl){
+      return { width: DEFAULT_CANVAS_WIDTH, height: DEFAULT_CANVAS_HEIGHT };
+    }
+
+    const styles = window.getComputedStyle(boardViewportEl);
+    const padX = (parseFloat(styles.paddingLeft) || 0) + (parseFloat(styles.paddingRight) || 0);
+    const padY = (parseFloat(styles.paddingTop) || 0) + (parseFloat(styles.paddingBottom) || 0);
+    const availableWidth = Math.max(360, boardViewportEl.clientWidth - padX);
+
+    if (isFullscreenActive()){
+      return {
+        width: availableWidth,
+        height: Math.max(260, boardViewportEl.clientHeight - padY)
+      };
+    }
+
+    const width = Math.min(1080, availableWidth);
+    return {
+      width,
+      height: Math.round(width * (DEFAULT_CANVAS_HEIGHT / DEFAULT_CANVAS_WIDTH))
+    };
+  }
+
+  function resizeBoardCanvas({ preserveView=true, resetView=false } = {}){
+    const prevCenter = preserveView ? canvasPixelToWorld(canvas.width / 2, canvas.height / 2) : null;
+    const cssSize = desiredBoardCanvasCssSize();
+    const dpr = window.devicePixelRatio || 1;
+    const nextWidth = Math.max(1, Math.round(cssSize.width * dpr));
+    const nextHeight = Math.max(1, Math.round(cssSize.height * dpr));
+
+    canvas.style.width = `${Math.round(cssSize.width)}px`;
+    canvas.style.height = `${Math.round(cssSize.height)}px`;
+
+    const changed = canvas.width !== nextWidth || canvas.height !== nextHeight;
+    if (changed){
+      canvas.width = nextWidth;
+      canvas.height = nextHeight;
+    }
+
+    if (resetView){
+      resetCamera();
+    } else if (changed && prevCenter){
+      setCameraCenterWorld(prevCenter);
+    } else {
+      clampCameraPan();
+    }
+
+    if (changed || resetView){
+      render();
+    }
+  }
+
   function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
   function dist(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
   function norm(v){
@@ -230,6 +302,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let realtimePrepSeconds = clamp(parseFloat(realtimePrepInp?.value) || 12, 0, 120);
   let autoFullscreenMode = autoFullscreenModeSelect?.value === "race" ? "race" : "off";
   let showLaylines = false;
+  let boardStartActionOverride = null;
 
   function updateWindInfo(){
     const gustMode = autoGustsEnabled ? "авто" : (gustRect ? "порыв" : "штиль");
@@ -285,6 +358,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let multiplayerSeatIndex = null;
   let realtimeCountdownEndsAt = 0;
   let realtimeCursorTarget = null;
+  let realtimeCursorDirection = null;
   let activeRealtimePointerId = null;
   let localRealtimeLastTickAt = 0;
 
@@ -527,6 +601,87 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function updateResetButtonLabel(){
     btnReset.textContent = isLocalRealtimeMode() ? "Общий старт" : "Новая гонка";
+    updateBoardStartAction();
+  }
+
+  function updateInteractionModeInfo(){
+    if (!interactionModeInfoEl) return;
+
+    const descriptions = {
+      contact: "Контактный режим: лодки упираются друг в друга и в узкие щели не пролезают. Геометрия столкновений учитывается и в ходе, и в подсказках маршрута.",
+      ghost: "Бесконтактный режим: лодки полностью проходят друг сквозь друга и не влияют на движение соперников.",
+      rules: "Бесконтактный + правила: корпуса не блокируют ход, но игра начисляет штрафы за нарушение при встречах. Учитываются левый/правый галс, наветренная/подветренная, чисто впереди/позади, задний ход и упрощенное место у знака."
+    };
+
+    interactionModeInfoEl.textContent = descriptions[interactionMode] || descriptions.contact;
+  }
+
+  function normalizeBoardStartAction(action){
+    if (!action || action.visible === false) return null;
+    const handler = typeof action.onTrigger === "function" ? action.onTrigger : null;
+    return {
+      visible: true,
+      label: typeof action.label === "string" && action.label.trim() ? action.label.trim() : "Старт",
+      title: typeof action.title === "string" && action.title.trim() ? action.title.trim() : "",
+      disabled: !!action.disabled || !handler,
+      onTrigger: handler
+    };
+  }
+
+  function localBoardStartAction(){
+    if (!isLocalRealtimeMode() || phase !== "countdown" || realtimeCountdownEndsAt > 0 || isRaceComplete()){
+      return null;
+    }
+    return normalizeBoardStartAction({
+      label: "Старт гонки",
+      title: "Запустить общий старт",
+      onTrigger: async () => {
+        setMode("play");
+        await handleResetAction();
+      }
+    });
+  }
+
+  function activeBoardStartAction(){
+    return boardStartActionOverride || localBoardStartAction();
+  }
+
+  function updateBoardStartAction(){
+    if (!btnBoardStart) return;
+
+    const action = activeBoardStartAction();
+    if (!action){
+      btnBoardStart.classList.add("hidden");
+      btnBoardStart.disabled = true;
+      btnBoardStart.textContent = "Старт";
+      btnBoardStart.removeAttribute("title");
+      btnBoardStart.setAttribute("aria-hidden", "true");
+      return;
+    }
+
+    btnBoardStart.classList.remove("hidden");
+    btnBoardStart.disabled = !!action.disabled;
+    btnBoardStart.textContent = action.label;
+    btnBoardStart.title = action.title || action.label;
+    btnBoardStart.setAttribute("aria-label", action.title || action.label);
+    btnBoardStart.setAttribute("aria-hidden", "false");
+  }
+
+  async function triggerBoardStartAction(){
+    const action = activeBoardStartAction();
+    if (!action || action.disabled || typeof action.onTrigger !== "function"){
+      updateBoardStartAction();
+      return false;
+    }
+
+    await action.onTrigger();
+    updateBoardStartAction();
+    return true;
+  }
+
+  function setBoardStartActionOverride(action){
+    boardStartActionOverride = normalizeBoardStartAction(action);
+    updateBoardStartAction();
   }
 
   function isFullscreenActive(){
@@ -604,6 +759,16 @@ document.addEventListener("DOMContentLoaded", () => {
   async function requestBoardFullscreenIfAuto(){
     if (!shouldAutoFullscreen()) return false;
     return requestBoardFullscreen();
+  }
+
+  async function handleResetAction(){
+    await requestBoardFullscreenIfAuto();
+    resetBoats({ armRealtime: isLocalRealtimeMode() });
+    invalidateSolutions();
+    updateStatus();
+    updateStats();
+    updateOptInfo();
+    render();
   }
 
   function renderBoatTuningControls(){
@@ -1492,14 +1657,14 @@ document.addEventListener("DOMContentLoaded", () => {
     statusEl.textContent = "СТАРТ! Продолжаем гонку с текущих позиций.";
   }
 
-  function controlTargetForLocalBoat(boatIdx){
+  function controlDirectionForLocalBoat(boatIdx){
     const controlledBoatIndex = realtimeControlledBoatIndex();
-    if (!isLocalRealtimeMode() || controlledBoatIndex !== boatIdx || !realtimeCursorTarget){
+    if (!isLocalRealtimeMode() || controlledBoatIndex !== boatIdx || !realtimeCursorDirection){
       return null;
     }
     return {
-      x: clamp(realtimeCursorTarget.x, 0, worldW),
-      y: clamp(realtimeCursorTarget.y, 0, worldH)
+      x: realtimeCursorDirection.x,
+      y: realtimeCursorDirection.y
     };
   }
 
@@ -1536,33 +1701,26 @@ document.addEventListener("DOMContentLoaded", () => {
         return proposal;
       }
 
-      const target = controlTargetForLocalBoat(index);
-      if (!target){
-        return proposal;
-      }
-
-      const toTarget = { x: target.x - boat.x, y: target.y - boat.y };
-      const normalized = norm(toTarget);
-      if (normalized.L <= REALTIME_TARGET_EPS){
+      const direction = controlDirectionForLocalBoat(index);
+      if (!direction){
         return proposal;
       }
 
       const upwind = upwindVec();
-      const angle = angleBetween({ x: normalized.x, y: normalized.y }, upwind);
+      const angle = angleBetween(direction, upwind);
       const halfDead = (deadZoneDeg * Math.PI / 180) / 2;
+      const reverseThreshold = halfDead * 0.5;
       const softness = Math.max(2, REALTIME_DEADZONE_SOFTNESS_DEG) * Math.PI / 180;
-      const direction = { x: normalized.x, y: normalized.y };
       const heading = Math.atan2(direction.y, direction.x);
       const moveFactor = stepFactorForMove(boat, direction) * realtimePenaltyFactorForBoat(boat, now);
-      const speedFactor = clamp((angle - halfDead) / softness, 0, 1);
+      const speedFactor = (angle <= halfDead)
+        ? 0
+        : clamp((angle - halfDead) / softness, 0, 1);
       const reverseSpeed = REALTIME_SPEED_UNITS_PER_SEC * dtSeconds * moveFactor * 0.10;
-      const reverseMode = speedFactor <= 1e-4;
+      const reverseMode = angle <= reverseThreshold;
       const stepLength = reverseMode
         ? reverseSpeed
-        : Math.min(
-            normalized.L,
-            REALTIME_SPEED_UNITS_PER_SEC * dtSeconds * speedFactor * moveFactor
-          );
+        : (REALTIME_SPEED_UNITS_PER_SEC * dtSeconds * speedFactor * moveFactor);
       if (stepLength <= 1e-5){
         return proposal;
       }
@@ -1572,17 +1730,14 @@ document.addEventListener("DOMContentLoaded", () => {
         : direction;
 
       proposal.accepted = true;
-      proposal.dest = {
-        x: boat.x + motionDirection.x * stepLength,
-        y: boat.y + motionDirection.y * stepLength
-      };
+      proposal.dest = clampAlongRayToField({ x: boat.x, y: boat.y }, motionDirection, stepLength);
       proposal.heading = heading;
       proposal.hasHeading = true;
       proposal.direction = direction;
       proposal.motionDirection = motionDirection;
-      proposal.distance = stepLength;
+      proposal.distance = dist(proposal.prev, proposal.dest);
       proposal.signedSpeedUnitsPerSec = dtSeconds > 1e-6
-        ? (reverseMode ? -1 : 1) * (stepLength / dtSeconds)
+        ? (reverseMode ? -1 : 1) * (proposal.distance / dtSeconds)
         : 0;
       proposal.reverseMode = reverseMode;
       return proposal;
@@ -2324,14 +2479,13 @@ document.addEventListener("DOMContentLoaded", () => {
         ? `Твоя лодка: ${controlledBoatIndex + 1}. Следующий знак: ${Math.min(ownBoat.nextMark + 1, markCount)} из ${markCount}.`
         : "";
       if (phase === "countdown"){
-        if (isRealtimeCountdown()){
-          const msLeft = realtimeCountdownValue();
-          if (msLeft > 3000){
-            const prepLeft = Math.ceil((msLeft - 3000) / 1000);
-            statusEl.textContent = `ПРЕДСТАРТ. На маневры осталось ${prepLeft} с, потом финальный отсчет 3..2..1. ${ownLegInfo}`;
-          } else {
-            const secondsLeft = Math.max(1, Math.ceil(msLeft / 1000));
+        const countdown = realtimeCountdownState();
+        if (countdown.active){
+          if (countdown.inFinal){
+            const secondsLeft = Math.max(1, Math.ceil(countdown.finalMsLeft / 1000));
             statusEl.textContent = `СТАРТ ЧЕРЕЗ ${secondsLeft}. Поймай стартовую линию ровно в сигнал. ${ownLegInfo}`;
+          } else {
+            statusEl.textContent = `ПРЕДСТАРТ. До сигнала ${formatCountdownSeconds(countdown.totalMsLeft)} с, на маневры осталось ${formatCountdownSeconds(countdown.prepMsLeft)} с. ${ownLegInfo}`;
           }
         } else if (isLocalRealtimeMode()) {
           statusEl.textContent = `ЛОКАЛЬНЫЙ REALTIME ГОТОВ. Нажми «Общий старт», чтобы открыть предстарт и затем отсчет 3...2...1. В соло курсором управляешь выбранной лодкой. ${ownLegInfo}`;
@@ -2465,7 +2619,7 @@ document.addEventListener("DOMContentLoaded", () => {
     raceFinishedCount = 0;
 
     prestartRoundsSetting = parseInt(prestartRoundsInp.value,10) || 0;
-    prestartRoundsLeft = prestartRoundsSetting;
+    prestartRoundsLeft = isRealtimePlayMode() ? 0 : prestartRoundsSetting;
     phase = (!isRealtimePlayMode() && prestartRoundsSetting > 0)
       ? "prestart"
       : (isLocalRealtimeMode() ? "countdown" : "race");
@@ -2525,9 +2679,10 @@ document.addEventListener("DOMContentLoaded", () => {
     subMovesLeft = movesPerTurn;
     resetHybridState();
     realtimeCountdownEndsAt = (isLocalRealtimeMode() && armRealtime)
-      ? (Date.now() + (realtimePrepSeconds * 1000) + 3000)
+      ? (Date.now() + (realtimePrepSeconds * 1000))
       : 0;
     realtimeCursorTarget = null;
+    realtimeCursorDirection = null;
     activeRealtimePointerId = null;
     localRealtimeLastTickAt = 0;
     clearGust();
@@ -2575,6 +2730,34 @@ document.addEventListener("DOMContentLoaded", () => {
     return Math.max(0, realtimeCountdownEndsAt - Date.now());
   }
 
+  function realtimeFinalCountdownMs(){
+    return Math.min(3000, Math.max(0, Math.round(realtimePrepSeconds * 1000)));
+  }
+
+  function realtimeCountdownState(nowMs = Date.now()){
+    if (!isRealtimePlayMode() || phase !== "countdown") {
+      return { active:false, totalMsLeft:0, prepMsLeft:0, finalMsLeft:0, inFinal:false };
+    }
+
+    const totalMsLeft = Math.max(0, realtimeCountdownEndsAt - nowMs);
+    const finalWindowMs = realtimeFinalCountdownMs();
+    const prepMsLeft = Math.max(0, totalMsLeft - finalWindowMs);
+    const finalMsLeft = Math.min(totalMsLeft, finalWindowMs);
+    return {
+      active: totalMsLeft > 0,
+      totalMsLeft,
+      prepMsLeft,
+      finalMsLeft,
+      inFinal: totalMsLeft > 0 && prepMsLeft <= 0
+    };
+  }
+
+  function formatCountdownSeconds(ms){
+    if (!Number.isFinite(ms) || ms <= 0) return "0.0";
+    const seconds = ms / 1000;
+    return seconds >= 10 ? String(Math.ceil(seconds)) : seconds.toFixed(1);
+  }
+
   function realtimeControlledBoatIndex(){
     if (multiplayerSeatIndex !== null) return multiplayerSeatIndex;
     if (Number.isInteger(selectedBoatIndex)) return selectedBoatIndex;
@@ -2585,6 +2768,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!isLocalRealtimeMode()) return;
     phase = "countdown";
     realtimeCountdownEndsAt = 0;
+    prestartRoundsLeft = 0;
     localRealtimeLastTickAt = 0;
     for (const boat of boats){
       boat.startDeltaMs = null;
@@ -2604,24 +2788,40 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function clearRealtimeIntent(){
-    if (realtimeCursorTarget === null) return;
+    if (realtimeCursorTarget === null && realtimeCursorDirection === null) return;
     realtimeCursorTarget = null;
+    realtimeCursorDirection = null;
     emitRealtimeIntentChanged();
   }
 
-  function setRealtimeIntentTarget(nextTarget){
-    if (!nextTarget){
+  function setRealtimeIntent(nextTarget, nextDirection){
+    if (!nextTarget || !nextDirection){
       clearRealtimeIntent();
       return;
     }
+
+    const directionLength = Math.hypot(nextDirection.x, nextDirection.y);
+    if (directionLength <= 1e-6){
+      clearRealtimeIntent();
+      return;
+    }
+
     const target = {
       x: clamp(nextTarget.x, 0, worldW),
       y: clamp(nextTarget.y, 0, worldH)
     };
+    const direction = {
+      x: nextDirection.x / directionLength,
+      y: nextDirection.y / directionLength
+    };
     const same = realtimeCursorTarget
       && Math.abs(realtimeCursorTarget.x - target.x) < 1e-4
-      && Math.abs(realtimeCursorTarget.y - target.y) < 1e-4;
+      && Math.abs(realtimeCursorTarget.y - target.y) < 1e-4
+      && realtimeCursorDirection
+      && Math.abs(realtimeCursorDirection.x - direction.x) < 1e-5
+      && Math.abs(realtimeCursorDirection.y - direction.y) < 1e-5;
     realtimeCursorTarget = target;
+    realtimeCursorDirection = direction;
     if (!same) emitRealtimeIntentChanged();
   }
 
@@ -2995,6 +3195,7 @@ document.addEventListener("DOMContentLoaded", () => {
     localRealtimeLastTickAt = 0;
     if (!isRealtimePlayMode()){
       realtimeCursorTarget = null;
+      realtimeCursorDirection = null;
       activeRealtimePointerId = null;
     }
 
@@ -3002,6 +3203,7 @@ document.addEventListener("DOMContentLoaded", () => {
     ensureNextPlayerOptions();
     renderBoatTuningControls();
     updateFinishButtonEnabled();
+    updateInteractionModeInfo();
     updateResetButtonLabel();
     updateViewButtons();
     updateWindInfo();
@@ -3026,7 +3228,7 @@ document.addEventListener("DOMContentLoaded", () => {
     worldH = h;
 
     cellLikeDefaultPlacement();
-    resetCamera();
+    resizeBoardCanvas({ preserveView:false, resetView:true });
 
     resetBoats();
     ensureScenarioLegOptions();
@@ -3638,12 +3840,17 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function drawRealtimeOverlay(){
-    if (isRealtimePlayMode() && mode === "play" && realtimeCursorTarget){
+    if (isRealtimePlayMode() && mode === "play" && (realtimeCursorTarget || realtimeCursorDirection)){
       const boatIdx = realtimeControlledBoatIndex();
       const boat = Number.isInteger(boatIdx) ? boats[boatIdx] : null;
       if (boat){
         const start = worldToScreen({ x: boat.x, y: boat.y });
-        const target = worldToScreen(realtimeCursorTarget);
+        const visualTarget = clampAlongRayToField(
+          { x: boat.x, y: boat.y },
+          realtimeCursorDirection || { x: 1, y: 0 },
+          Math.max(worldW, worldH) * 2
+        );
+        const target = worldToScreen(visualTarget);
         ctx.save();
         ctx.strokeStyle = rgbaHex(boat.color, 0.45);
         ctx.fillStyle = rgbaHex(boat.color, 0.9);
@@ -3657,30 +3864,48 @@ document.addEventListener("DOMContentLoaded", () => {
         ctx.beginPath();
         ctx.arc(target.x, target.y, Math.max(5, PX * 0.12), 0, Math.PI * 2);
         ctx.fill();
+        if (realtimeCursorTarget){
+          const pointerTarget = worldToScreen(realtimeCursorTarget);
+          ctx.beginPath();
+          ctx.arc(pointerTarget.x, pointerTarget.y, Math.max(4, PX * 0.09), 0, Math.PI * 2);
+          ctx.fillStyle = rgbaHex(boat.color, 0.35);
+          ctx.fill();
+        }
         ctx.restore();
       }
     }
 
     drawRealtimeHudPanel();
 
-    if (!isRealtimeCountdown()) return;
+    const countdown = realtimeCountdownState();
+    if (!countdown.active) return;
 
-    const msLeft = realtimeCountdownValue();
-    const secondsLeft = Math.max(1, Math.ceil(msLeft / 1000));
+    const primary = countdown.inFinal
+      ? `Старт через ${Math.max(1, Math.ceil(countdown.finalMsLeft / 1000))}`
+      : `До старта ${formatCountdownSeconds(countdown.totalMsLeft)} с`;
+    const secondary = countdown.inFinal
+      ? "Финальный отсчет 3..2..1"
+      : `Маневры: ${formatCountdownSeconds(countdown.prepMsLeft)} с`;
+    const boxW = 340;
+    const boxH = 68;
+    const boxX = (canvas.width - boxW) / 2;
+    const boxY = 18;
     ctx.save();
-    ctx.fillStyle = "rgba(23, 48, 66, 0.18)";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "rgba(255, 253, 248, 0.94)";
+    ctx.strokeStyle = "rgba(23, 48, 66, 0.12)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.roundRect(boxX, boxY, boxW, boxH, 18);
+    ctx.fill();
+    ctx.stroke();
     ctx.fillStyle = "#173042";
     ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.font = "700 96px Georgia, serif";
-    ctx.fillText(msLeft > 3000 ? "СТАРТ" : String(secondsLeft), canvas.width / 2, canvas.height / 2);
-    ctx.font = "600 22px Georgia, serif";
-    ctx.fillText(
-      msLeft > 3000 ? `Маневры до старта: ${Math.ceil((msLeft - 3000) / 1000)} с` : "Финальный отсчет 3..2..1",
-      canvas.width / 2,
-      canvas.height / 2 + 68
-    );
+    ctx.textBaseline = "top";
+    ctx.font = "700 24px Georgia, serif";
+    ctx.fillText(primary, canvas.width / 2, boxY + 12);
+    ctx.font = "600 14px system-ui";
+    ctx.fillStyle = "rgba(23, 48, 66, 0.78)";
+    ctx.fillText(secondary, canvas.width / 2, boxY + 42);
     ctx.restore();
   }
 
@@ -3733,12 +3958,7 @@ document.addEventListener("DOMContentLoaded", () => {
       clearRealtimeIntent();
       return;
     }
-    const farTarget = clampAlongRayToField(
-      { x: boat.x, y: boat.y },
-      { x: direction.x, y: direction.y },
-      Math.max(worldW, worldH) * 2
-    );
-    setRealtimeIntentTarget(farTarget);
+    setRealtimeIntent(point, { x: direction.x, y: direction.y });
   }
 
   function resetRealtimePointer(pointerId=null){
@@ -4071,6 +4291,7 @@ document.addEventListener("DOMContentLoaded", () => {
   interactionModeSelect?.addEventListener("change", () => {
     interactionMode = normalizeInteractionMode(interactionModeSelect.value);
     invalidateSolutions();
+    updateInteractionModeInfo();
     updateStatus();
     updateStats();
     updateOptInfo();
@@ -4288,9 +4509,17 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
+  btnBoardStart?.addEventListener("click", async () => {
+    await triggerBoardStartAction();
+  });
+
   document.addEventListener("fullscreenchange", () => {
     updateViewButtons();
-    render();
+    resizeBoardCanvas({ preserveView:true });
+  });
+
+  window.addEventListener("resize", () => {
+    resizeBoardCanvas({ preserveView:true });
   });
 
   boatTuningEl?.addEventListener("change", (event) => {
@@ -4309,13 +4538,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Новая гонка: не сбрасывает дистанцию — только лодки
   btnReset.addEventListener("click", async () => {
-    await requestBoardFullscreenIfAuto();
-    resetBoats({ armRealtime: isLocalRealtimeMode() });
-    invalidateSolutions();
-    updateStatus();
-    updateStats();
-    updateOptInfo();
-    render();
+    await handleResetAction();
   });
 
   applyGridBtn.addEventListener("click", () => {
@@ -4336,6 +4559,8 @@ document.addEventListener("DOMContentLoaded", () => {
     requestBoardFullscreen,
     exitBoardFullscreen,
     isBoardFullscreenActive: isFullscreenActive,
+    setBoardStartActionOverride,
+    triggerBoardStartAction,
     setMultiplayerContext: ({ seatIndex=null } = {}) => {
       multiplayerSeatIndex = Number.isInteger(seatIndex) ? seatIndex : null;
       localRealtimeLastTickAt = 0;
@@ -4360,8 +4585,9 @@ document.addEventListener("DOMContentLoaded", () => {
       if (!Number.isInteger(boatIdx) || !boats[boatIdx] || boats[boatIdx].finished) return null;
       return {
         boatIndex: boatIdx,
-        active: realtimeCursorTarget !== null,
+        active: realtimeCursorDirection !== null,
         target: realtimeCursorTarget ? { ...realtimeCursorTarget } : null,
+        direction: realtimeCursorDirection ? { ...realtimeCursorDirection } : null,
         phase,
         countdownEndsAt: realtimeCountdownEndsAt
       };
@@ -4395,7 +4621,7 @@ document.addEventListener("DOMContentLoaded", () => {
   function init(){
     gridColsInput.value = gridColsInput.value || String(DEFAULT_WORLD_W);
     gridRowsInput.value = gridRowsInput.value || String(DEFAULT_WORLD_H);
-    resetCamera();
+    resizeBoardCanvas({ preserveView:false, resetView:true });
 
     markCount = parseInt(markCountSelect.value,10);
     ensureMarkOptions();
@@ -4424,6 +4650,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     updateFinishButtonEnabled();
+    updateInteractionModeInfo();
     updateResetButtonLabel();
     updateViewButtons();
     updateWindInfo();

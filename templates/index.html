@@ -155,6 +155,8 @@
             </label>
           </div>
 
+          <p id="interactionModeInfo" class="panel-note"></p>
+
           <div class="action-row">
             <button type="button" id="applyGrid" class="action-secondary" data-room-lock="setup">Перестроить поле</button>
             <button type="button" id="resetGame" class="action-secondary" data-room-lock="setup">Новая гонка</button>
@@ -324,6 +326,7 @@
 
         <div id="boardViewport" class="board-wrap">
           <button type="button" id="toggleFullscreen" class="board-fullscreen-btn" aria-label="Полный экран">⛶</button>
+          <button type="button" id="boardStartAction" class="board-start-btn hidden" aria-label="Старт гонки">Старт</button>
           <canvas id="board" width="1050" height="680"></canvas>
           <div id="interactionLock" class="interaction-lock hidden"></div>
         </div>
