@@ -244,6 +244,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let realtimeCountdownEndsAt = 0;
   let realtimeCursorTarget = null;
   let activeRealtimePointerId = null;
+  let localRealtimeLastTickAt = 0;
 
   let prestartRoundsSetting = parseInt(prestartRoundsInp.value,10) || 0;
   let prestartRoundsLeft = prestartRoundsSetting;
@@ -265,6 +266,9 @@ document.addEventListener("DOMContentLoaded", () => {
   const ROUND_PASS_RADIUS = BOAT_RULE_LENGTH * 3; // огибание засчитывается в радиусе трех длин корпуса
   const ROUNDING_MIN_SWEEP = Math.PI / 3;
   const ROUNDING_SWEEP_BIN_RAD = Math.PI / 12;
+  const REALTIME_SPEED_UNITS_PER_SEC = 2.4;
+  const REALTIME_DEADZONE_SOFTNESS_DEG = 18;
+  const REALTIME_TARGET_EPS = 0.04;
 
   const START_PICK_TOL = 0.35;
   const PRESTART_DEPTH = 3.0;
@@ -376,6 +380,10 @@ document.addEventListener("DOMContentLoaded", () => {
     const enabled = finishSeparate;
     btnModeFinish.classList.toggle("mode-btn-disabled", !enabled);
     if (!enabled && mode === "finish") setMode("play");
+  }
+
+  function updateResetButtonLabel(){
+    btnReset.textContent = isLocalRealtimeMode() ? "Общий старт" : "Новая гонка";
   }
 
   // -----------------------------
@@ -933,6 +941,216 @@ document.addEventListener("DOMContentLoaded", () => {
     resetHybridState();
 
     statusEl.textContent = "СТАРТ! Продолжаем гонку с текущих позиций.";
+  }
+
+  function controlTargetForLocalBoat(boatIdx){
+    const controlledBoatIndex = realtimeControlledBoatIndex();
+    if (!isLocalRealtimeMode() || controlledBoatIndex !== boatIdx || !realtimeCursorTarget){
+      return null;
+    }
+    return {
+      x: clamp(realtimeCursorTarget.x, 0, worldW),
+      y: clamp(realtimeCursorTarget.y, 0, worldH)
+    };
+  }
+
+  function simulateLocalRealtimeTick(dtSeconds){
+    let changed = false;
+    const now = Date.now();
+
+    if (phase === "countdown" && realtimeCountdownEndsAt > 0 && now >= realtimeCountdownEndsAt){
+      phase = "race";
+      realtimeCountdownEndsAt = 0;
+      changed = true;
+    }
+
+    if (!isLocalRealtimeMode() || phase !== "race"){
+      return changed;
+    }
+
+    const proposals = boats.map((boat, index) => {
+      const proposal = {
+        accepted: false,
+        prev: { x: boat.x, y: boat.y },
+        dest: { x: boat.x, y: boat.y },
+        heading: Number.isFinite(boat.heading) ? boat.heading : 0,
+        hasHeading: !!boat.hasHeading,
+        direction: null,
+        distance: 0
+      };
+
+      if (!boat || boat.finished){
+        return proposal;
+      }
+
+      const target = controlTargetForLocalBoat(index);
+      if (!target){
+        return proposal;
+      }
+
+      const toTarget = { x: target.x - boat.x, y: target.y - boat.y };
+      const normalized = norm(toTarget);
+      if (normalized.L <= REALTIME_TARGET_EPS){
+        return proposal;
+      }
+
+      const upwind = upwindVec();
+      const angle = angleBetween({ x: normalized.x, y: normalized.y }, upwind);
+      const halfDead = (deadZoneDeg * Math.PI / 180) / 2;
+      const softness = Math.max(2, REALTIME_DEADZONE_SOFTNESS_DEG) * Math.PI / 180;
+      const speedFactor = clamp((angle - halfDead) / softness, 0, 1);
+      if (speedFactor <= 1e-4){
+        return proposal;
+      }
+
+      const direction = { x: normalized.x, y: normalized.y };
+      const heading = Math.atan2(direction.y, direction.x);
+      const moveFactor = stepFactorForMove(boat, direction);
+      const stepLength = Math.min(
+        normalized.L,
+        REALTIME_SPEED_UNITS_PER_SEC * dtSeconds * speedFactor * moveFactor
+      );
+      if (stepLength <= 1e-5){
+        return proposal;
+      }
+
+      proposal.accepted = true;
+      proposal.dest = {
+        x: boat.x + direction.x * stepLength,
+        y: boat.y + direction.y * stepLength
+      };
+      proposal.heading = heading;
+      proposal.hasHeading = true;
+      proposal.direction = direction;
+      proposal.distance = stepLength;
+      return proposal;
+    });
+
+    const invalid = new Set();
+
+    for (let i=0;i<proposals.length;i++){
+      const proposal = proposals[i];
+      if (!proposal.accepted) continue;
+
+      const candidateCapsule = boatCapsuleAt(proposal.dest, proposal.heading, proposal.hasHeading);
+      if (!pointInField(proposal.dest)){
+        invalid.add(i);
+        continue;
+      }
+
+      for (let m=0; m<markCount; m++){
+        if (capsuleIntersectsMark(candidateCapsule, marks[m], MARK_CLEARANCE_MARGIN)){
+          invalid.add(i);
+          break;
+        }
+        if (segDistToPoint(proposal.prev, proposal.dest, marks[m]) < (MARK_RADIUS + BOAT_SWEEP_RADIUS + MARK_CLEARANCE_MARGIN - 1e-9)){
+          invalid.add(i);
+          break;
+        }
+      }
+      if (invalid.has(i)) continue;
+
+      for (let j=0; j<boats.length; j++){
+        if (j === i) continue;
+        const otherCapsule = boatCapsuleForIndex(j);
+        if (capsulesOverlap(candidateCapsule, otherCapsule, BOAT_CLEARANCE_MARGIN)){
+          invalid.add(i);
+          break;
+        }
+        if (segmentSegmentDistance(proposal.prev, proposal.dest, otherCapsule.a, otherCapsule.b) < (BOAT_SWEEP_RADIUS + otherCapsule.r + BOAT_CLEARANCE_MARGIN - 1e-9)){
+          invalid.add(i);
+          break;
+        }
+      }
+    }
+
+    for (let left=0; left<proposals.length; left++){
+      const leftProposal = proposals[left];
+      if (!leftProposal.accepted || invalid.has(left)) continue;
+      const leftCapsule = boatCapsuleAt(leftProposal.dest, leftProposal.heading, leftProposal.hasHeading);
+
+      for (let right=left+1; right<proposals.length; right++){
+        const rightProposal = proposals[right];
+        if (!rightProposal.accepted || invalid.has(right)) continue;
+        const rightCapsule = boatCapsuleAt(rightProposal.dest, rightProposal.heading, rightProposal.hasHeading);
+
+        if (capsulesOverlap(leftCapsule, rightCapsule, BOAT_CLEARANCE_MARGIN)){
+          invalid.add(left);
+          invalid.add(right);
+          continue;
+        }
+
+        const minCenterDistance = segmentSegmentDistance(leftProposal.prev, leftProposal.dest, rightProposal.prev, rightProposal.dest);
+        if (minCenterDistance < (BOAT_SWEEP_RADIUS * 2 + BOAT_CLEARANCE_MARGIN - 1e-9)){
+          invalid.add(left);
+          invalid.add(right);
+        }
+      }
+    }
+
+    raceFinishedCount = boats.filter((boat) => boat.finished).length;
+    let anyUnfinished = false;
+
+    for (let i=0; i<boats.length; i++){
+      const boat = boats[i];
+      const proposal = proposals[i];
+
+      if (proposal.accepted && !invalid.has(i)){
+        const dest = proposal.dest;
+        if (Math.abs(dest.x - boat.x) > 1e-9 || Math.abs(dest.y - boat.y) > 1e-9){
+          changed = true;
+          if (boat.hasHeading && Math.abs(angleWrap(proposal.heading - boat.heading)) > (12 * Math.PI / 180)){
+            boat.turns += 1;
+          }
+          boat.x = dest.x;
+          boat.y = dest.y;
+          boat.distance += proposal.distance;
+          boat.heading = proposal.heading;
+          boat.hasHeading = proposal.hasHeading;
+          boat.tack = tackSignFromHeadingVec(proposal.direction);
+          updateBoatMarkAndFinish(boat, proposal.prev, dest, proposal.direction);
+        }
+      }
+
+      if (!boat.finished){
+        anyUnfinished = true;
+      }
+    }
+
+    currentPlayer = Math.max(0, boats.findIndex((boat) => !boat.finished));
+    subMovesLeft = 0;
+
+    if (!anyUnfinished && phase === "race"){
+      phase = "finished";
+      clearRealtimeIntent();
+      changed = true;
+    }
+
+    return changed;
+  }
+
+  function runLocalRealtimeLoop(frameTime){
+    if (isLocalRealtimeMode()){
+      const now = Number.isFinite(frameTime) ? frameTime : performance.now();
+      const dtSeconds = localRealtimeLastTickAt > 0
+        ? clamp((now - localRealtimeLastTickAt) / 1000, 0, 0.08)
+        : 0;
+      localRealtimeLastTickAt = now;
+
+      const changed = simulateLocalRealtimeTick(dtSeconds);
+      if (changed){
+        updateResetButtonLabel();
+        updateStatus();
+        updateStats();
+        updateOptInfo();
+        render();
+        emitStateChanged();
+      }
+    } else {
+      localRealtimeLastTickAt = 0;
+    }
+
+    window.requestAnimationFrame(runLocalRealtimeLoop);
   }
 
   function advanceTurnToNext(){
@@ -1500,12 +1718,21 @@ document.addEventListener("DOMContentLoaded", () => {
         ? `Твоя лодка: ${controlledBoatIndex + 1}. Следующий знак: ${Math.min(ownBoat.nextMark + 1, markCount)} из ${markCount}.`
         : "";
       if (phase === "countdown"){
-        const secondsLeft = Math.max(1, Math.ceil(realtimeCountdownValue() / 1000));
-        statusEl.textContent = `СТАРТ ЧЕРЕЗ ${secondsLeft}. После сигнала обе лодки пойдут одновременно за курсором. ${ownLegInfo}`;
+        if (isRealtimeCountdown()){
+          const secondsLeft = Math.max(1, Math.ceil(realtimeCountdownValue() / 1000));
+          statusEl.textContent = `СТАРТ ЧЕРЕЗ ${secondsLeft}. После сигнала обе лодки пойдут одновременно. ${ownLegInfo}`;
+        } else if (isLocalRealtimeMode()) {
+          statusEl.textContent = `ЛОКАЛЬНЫЙ REALTIME ГОТОВ. Нажми «Общий старт», чтобы запустить отсчет 3...2...1. В соло курсором управляешь выбранной лодкой. ${ownLegInfo}`;
+        } else {
+          statusEl.textContent = `ОЖИДАНИЕ ОБЩЕГО СТАРТА. ${ownLegInfo}`;
+        }
       } else if (phase === "finished"){
         statusEl.textContent = "Гонка завершена: все лодки финишировали.";
       } else {
-        statusEl.textContent = `РЕАЛЬНОЕ ВРЕМЯ. Все лодки идут одновременно. Веди свою лодку курсором мыши или касанием по полю. ${ownLegInfo}`;
+        const controlHint = isLocalRealtimeMode()
+          ? "Веди выбранную лодку курсором мыши или касанием по полю."
+          : "Веди свою лодку курсором мыши или касанием по полю.";
+        statusEl.textContent = `РЕАЛЬНОЕ ВРЕМЯ. Все лодки идут одновременно. ${controlHint} ${ownLegInfo}`;
       }
       return;
     }
@@ -1539,8 +1766,9 @@ document.addEventListener("DOMContentLoaded", () => {
     for (let i=0;i<boats.length;i++){
       const b = boats[i];
       const fin = b.finished ? `✅ финиш: ${b.place}` : (phase==="race" || phase==="finished" ? "⏳ в гонке" : phase==="countdown" ? "⏳ отсчет" : "⏳ предстарт");
+      const controlledBoatIndex = realtimeControlledBoatIndex();
       const stepLine = isRealtimePlayMode()
-        ? `Управление: <b>${(multiplayerSeatIndex === i || (multiplayerSeatIndex === null && i === 0)) ? "курсор" : "сервер"}</b>`
+        ? `Управление: <b>${controlledBoatIndex === i ? "курсор" : (isLocalRealtimeMode() ? "без управления" : "сервер")}</b>`
         : `Шагов: <b>${stepsLeftForBoat(i)}</b>${isHybridRaceMode() ? ` / ${movesPerTurn}` : ""}`;
       lines.push(`
         <div style="border:1px solid #eee;border-radius:10px;padding:8px 10px;min-width:190px;">
@@ -1585,7 +1813,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // -----------------------------
   // Инициализация / сброс
   // -----------------------------
-  function resetBoats(){
+  function resetBoats({ armRealtime=false } = {}){
     const n = parseInt(playerCountSelect.value,10) || 2;
 
     boats = [];
@@ -1593,7 +1821,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
     prestartRoundsSetting = parseInt(prestartRoundsInp.value,10) || 0;
     prestartRoundsLeft = prestartRoundsSetting;
-    phase = (!isRealtimePlayMode() && prestartRoundsSetting > 0) ? "prestart" : "race";
+    phase = (!isRealtimePlayMode() && prestartRoundsSetting > 0)
+      ? "prestart"
+      : (isLocalRealtimeMode() ? "countdown" : "race");
 
     for (let i=0;i<n;i++){
       boats.push({
@@ -1629,17 +1859,19 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     currentPlayer = 0;
-    selectedBoatIndex = null;
+    selectedBoatIndex = isLocalRealtimeMode() && n > 0 ? 0 : null;
     placementSelectedBoat = null;
     subMovesLeft = movesPerTurn;
     resetHybridState();
-    realtimeCountdownEndsAt = 0;
+    realtimeCountdownEndsAt = (isLocalRealtimeMode() && armRealtime) ? (Date.now() + 3000) : 0;
     realtimeCursorTarget = null;
     activeRealtimePointerId = null;
+    localRealtimeLastTickAt = 0;
 
     ensureNextPlayerOptions();
     invalidateSolutions();
     updateFinishButtonEnabled();
+    updateResetButtonLabel();
     updateStatus();
     updateStats();
     updateOptInfo();
@@ -1655,6 +1887,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function isRealtimePlayMode(){
     return playMode === "realtime";
+  }
+
+  function isLocalRealtimeMode(){
+    return isRealtimePlayMode() && multiplayerSeatIndex === null;
   }
 
   function isRealtimeCountdown(){
@@ -1674,6 +1910,19 @@ document.addEventListener("DOMContentLoaded", () => {
     if (multiplayerSeatIndex !== null) return multiplayerSeatIndex;
     if (Number.isInteger(selectedBoatIndex)) return selectedBoatIndex;
     return boats.length ? 0 : null;
+  }
+
+  function setRealtimeReadyState(){
+    if (!isLocalRealtimeMode()) return;
+    phase = "countdown";
+    realtimeCountdownEndsAt = 0;
+    localRealtimeLastTickAt = 0;
+    if (!Number.isInteger(selectedBoatIndex) && boats.length){
+      selectedBoatIndex = 0;
+    } else if (Number.isInteger(selectedBoatIndex)) {
+      selectedBoatIndex = clamp(selectedBoatIndex, 0, Math.max(0, boats.length - 1));
+    }
+    clearRealtimeIntent();
   }
 
   function clearRealtimeIntent(){
@@ -1923,6 +2172,7 @@ document.addEventListener("DOMContentLoaded", () => {
     placementSelectedBoat = null;
     startAwaitSecond = false;
     finishAwaitSecond = false;
+    localRealtimeLastTickAt = 0;
     if (!isRealtimePlayMode()){
       realtimeCursorTarget = null;
       activeRealtimePointerId = null;
@@ -1931,6 +2181,7 @@ document.addEventListener("DOMContentLoaded", () => {
     ensureScenarioLegOptions();
     ensureNextPlayerOptions();
     updateFinishButtonEnabled();
+    updateResetButtonLabel();
     updateWindInfo();
     invalidateSolutions();
     updateStatus();
@@ -2584,6 +2835,19 @@ document.addEventListener("DOMContentLoaded", () => {
 
   canvas.addEventListener("pointerdown", (e) => {
     if (mode !== "play" || !isRealtimePlayMode()) return;
+    const point = screenToWorld(e.clientX, e.clientY);
+    if (isLocalRealtimeMode() && point){
+      const hitBoat = getBoatAtPoint(point);
+      if (hitBoat >= 0 && !boats[hitBoat]?.finished){
+        selectedBoatIndex = hitBoat;
+        clearRealtimeIntent();
+        updateStatus();
+        updateStats();
+        render();
+        e.preventDefault();
+        return;
+      }
+    }
     if (e.pointerType !== "mouse"){
       activeRealtimePointerId = e.pointerId;
       canvas.setPointerCapture?.(e.pointerId);
@@ -2845,7 +3109,12 @@ document.addEventListener("DOMContentLoaded", () => {
     resetHybridState();
     selectedBoatIndex = null;
     realtimeCountdownEndsAt = 0;
+    localRealtimeLastTickAt = 0;
     clearRealtimeIntent();
+    if (isLocalRealtimeMode()){
+      setRealtimeReadyState();
+    }
+    updateResetButtonLabel();
     updateStatus();
     updateStats();
     updateOptInfo();
@@ -2980,7 +3249,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Новая гонка: не сбрасывает дистанцию — только лодки
   btnReset.addEventListener("click", () => {
-    resetBoats();
+    resetBoats({ armRealtime: isLocalRealtimeMode() });
     invalidateSolutions();
     updateStatus();
     updateStats();
@@ -3004,6 +3273,7 @@ document.addEventListener("DOMContentLoaded", () => {
     setMode,
     setMultiplayerContext: ({ seatIndex=null } = {}) => {
       multiplayerSeatIndex = Number.isInteger(seatIndex) ? seatIndex : null;
+      localRealtimeLastTickAt = 0;
       const candidateBoat = Number.isInteger(selectedBoatIndex) ? selectedBoatIndex : multiplayerSeatIndex;
       if (multiplayerSeatIndex !== null && isHybridRaceMode() && !canSelectBoatForPlay(candidateBoat)){
         selectedBoatIndex = null;
@@ -3011,6 +3281,10 @@ document.addEventListener("DOMContentLoaded", () => {
       if (isRealtimePlayMode() && !Number.isInteger(realtimeControlledBoatIndex())){
         clearRealtimeIntent();
       }
+      if (isLocalRealtimeMode() && phase === "race" && boats.every((boat) => !boat.hasHeading && !boat.finished)){
+        setRealtimeReadyState();
+      }
+      updateResetButtonLabel();
       updateStatus();
       updateStats();
       render();
@@ -3047,6 +3321,8 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }, 120);
 
+  window.requestAnimationFrame(runLocalRealtimeLoop);
+
   // -----------------------------
   // Старт приложения
   // -----------------------------
@@ -3074,6 +3350,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     updateFinishButtonEnabled();
+    updateResetButtonLabel();
     updateWindInfo();
     resetBoats();
     setMode("play");
