@@ -435,15 +435,19 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function resetBoatTrails(){
-    boatTrails = boats.map((boat) => boat ? [{ x: boat.x, y: boat.y }] : []);
+    boatTrails = boats.map((boat) => (
+      boat && Number.isFinite(boat.x) && Number.isFinite(boat.y)
+        ? [{ x: boat.x, y: boat.y }]
+        : []
+    ));
   }
 
   function appendBoatTrailPoint(index, point){
-    if (!boats[index] || !point) return;
+    if (!boats[index] || !point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
     if (!boatTrails[index]) boatTrails[index] = [];
     const trail = boatTrails[index];
     const last = trail[trail.length - 1];
-    if (!last || dist(last, point) >= 0.18){
+    if (!last || !Number.isFinite(last.x) || !Number.isFinite(last.y) || dist(last, point) >= 0.18){
       trail.push({ x: point.x, y: point.y });
       if (trail.length > 600){
         trail.splice(0, trail.length - 600);
@@ -3259,12 +3263,16 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     const resetTrails = previousTrails.length !== boats.length || phase === "countdown" || phase === "prestart";
     boatTrails = boats.map((boat, index) => {
-      const trail = resetTrails ? [] : (previousTrails[index] || []);
+      const trail = resetTrails
+        ? []
+        : (previousTrails[index] || [])
+          .filter((point) => point && Number.isFinite(point.x) && Number.isFinite(point.y))
+          .map((point) => ({ x: point.x, y: point.y }));
       if (!trail.length){
         trail.push({ x: boat.x, y: boat.y });
       } else {
         const last = trail[trail.length - 1];
-        if (dist(last, boat) >= 0.18){
+        if (!last || !Number.isFinite(last.x) || !Number.isFinite(last.y) || dist(last, boat) >= 0.18){
           trail.push({ x: boat.x, y: boat.y });
         } else {
           last.x = boat.x;
@@ -3532,16 +3540,18 @@ document.addEventListener("DOMContentLoaded", () => {
     for (let i=0; i<boatTrails.length; i++){
       const trail = boatTrails[i];
       if (!Array.isArray(trail) || trail.length < 2) continue;
+      const points = trail.filter((point) => point && Number.isFinite(point.x) && Number.isFinite(point.y));
+      if (points.length < 2) continue;
       ctx.save();
       ctx.strokeStyle = rgbaHex(boats[i]?.color || BOAT_COLORS[i % BOAT_COLORS.length], 0.34);
       ctx.lineWidth = Math.max(2, PX * 0.08);
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
       ctx.beginPath();
-      const start = worldToScreen(trail[0]);
+      const start = worldToScreen(points[0]);
       ctx.moveTo(start.x, start.y);
-      for (let j=1; j<trail.length; j++){
-        const point = worldToScreen(trail[j]);
+      for (let j=1; j<points.length; j++){
+        const point = worldToScreen(points[j]);
         ctx.lineTo(point.x, point.y);
       }
       ctx.stroke();
