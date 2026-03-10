@@ -20,9 +20,19 @@ document.addEventListener("DOMContentLoaded", () => {
   const playerCountSelect = document.getElementById("playerCount");
   const movesPerTurnInput = document.getElementById("movesPerTurn");
 
-  const setupLockedControls = Array.from(document.querySelectorAll("[data-room-lock='setup']"));
-  const originalDisabledState = new Map(setupLockedControls.map((node) => [node, !!node.disabled]));
+  const originalDisabledState = new WeakMap();
   const originalMovesPerTurnDisabled = !!movesPerTurnInput?.disabled;
+
+  function setupLockedControls() {
+    return Array.from(document.querySelectorAll("[data-room-lock='setup']"));
+  }
+
+  function originalDisabledFor(node) {
+    if (!originalDisabledState.has(node)) {
+      originalDisabledState.set(node, !!node.disabled);
+    }
+    return originalDisabledState.get(node) === true;
+  }
 
   const roomState = {
     room: null,
@@ -177,8 +187,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function applyPermissions() {
     const setupDisabled = !canEditSetup();
-    for (const control of setupLockedControls) {
-      const originalDisabled = originalDisabledState.get(control) === true;
+    for (const control of setupLockedControls()) {
+      const originalDisabled = originalDisabledFor(control);
       control.disabled = originalDisabled || setupDisabled;
     }
     if (movesPerTurnInput) {

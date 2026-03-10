@@ -9,7 +9,7 @@ from flask import current_app, session
 from flask_socketio import emit, join_room
 
 from .extensions import socketio
-from .realtime_engine import simulate_realtime_tick
+from .realtime_engine import simulate_realtime_tick, simulate_weather_tick
 from .room_store import RoomForbidden, RoomStoreError, public_room_view, validate_game_state
 
 
@@ -37,6 +37,20 @@ def state_play_mode(game_state: dict[str, Any] | None) -> str:
     if mode in {"realtime", "hybrid"}:
         return "realtime"
     return "turns"
+
+
+def state_auto_gusts_enabled(game_state: dict[str, Any] | None) -> bool:
+    if not isinstance(game_state, dict):
+        return False
+    settings = game_state.get("settings") or {}
+    return bool(settings.get("autoGustsEnabled"))
+
+
+def room_requires_live_loop(room: dict[str, Any] | None) -> bool:
+    if not isinstance(room, dict) or room.get("status") != "live":
+        return False
+    game_state = room.get("game_state")
+    return state_play_mode(game_state) == "realtime" or state_auto_gusts_enabled(game_state)
 
 
 def normalize_control_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
@@ -108,14 +122,17 @@ def run_realtime_room_loop(app, room_code: str) -> None:
             with app.app_context():
                 store = room_store()
                 room = store.get_room(room_code)
-                if room is None or room.get("status") != "live" or state_play_mode(room.get("game_state")) != "realtime":
+                if room is None or not room_requires_live_loop(room):
                     break
                 if ((room.get("game_state", {}).get("race") or {}).get("phase")) == "finished":
                     break
 
                 now_ms = int(time.time() * 1000)
-                controls = realtime_controls_snapshot(room_code, now_ms)
-                changed = simulate_realtime_tick(room["game_state"], controls, tick_dt, now_ms)
+                if state_play_mode(room.get("game_state")) == "realtime":
+                    controls = realtime_controls_snapshot(room_code, now_ms)
+                    changed = simulate_realtime_tick(room["game_state"], controls, tick_dt, now_ms)
+                else:
+                    changed = simulate_weather_tick(room["game_state"], now_ms)
                 if changed:
                     room["revision"] += 1
                     store.save_room(room)
@@ -147,7 +164,7 @@ def on_room_join_socket(payload):
         {"room": public_room_view(room, None)},
         to=room["code"],
     )
-    if room.get("status") == "live" and state_play_mode(room.get("game_state")) == "realtime":
+    if room_requires_live_loop(room):
         ensure_realtime_room_loop(room["code"])
 
 
@@ -184,6 +201,8 @@ def on_room_push_state(payload):
         emit("room:error", {"error": str(exc)})
         return
 
+    if room_requires_live_loop(room):
+        ensure_realtime_room_loop(room["code"])
     socketio.emit(
         "room:state_updated",
         {"room": public_room_view(room, None)},

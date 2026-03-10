@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import random
 from copy import deepcopy
 from typing import Any
 
@@ -214,6 +215,10 @@ def point_in_gust(point: dict[str, float], gust_rect: dict[str, float] | None) -
     )
 
 
+def boat_speed_coeff(boat: dict[str, Any]) -> float:
+    return clamp(float(boat.get("speedCoeff") or 1.0), 0.5, 1.8)
+
+
 def tack_sign_from_heading_vec(heading_vec: dict[str, float], wind_angle_deg: float) -> int:
     upwind = upwind_vec(wind_angle_deg)
     cross = upwind["x"] * heading_vec["y"] - upwind["y"] * heading_vec["x"]
@@ -232,7 +237,7 @@ def would_change_tack(boat: dict[str, Any], heading_vec: dict[str, float], wind_
 
 
 def move_factor_for_boat(boat: dict[str, Any], heading_vec: dict[str, float], settings: dict[str, Any], gust_rect: dict[str, float] | None) -> float:
-    factor = 1.0
+    factor = boat_speed_coeff(boat)
     if point_in_gust({"x": boat["x"], "y": boat["y"]}, gust_rect):
         factor *= 2.0
     tack_penalty = float(settings.get("tackPenaltyFactor") or 1.0)
@@ -386,9 +391,69 @@ def normalize_boat(boat: dict[str, Any]) -> dict[str, Any]:
     normalized.setdefault("hasHeading", False)
     normalized.setdefault("heading", 0.0)
     normalized.setdefault("tack", 0)
+    normalized.setdefault("speedCoeff", 1.0)
     normalized.setdefault("roundInZone", False)
     normalized.setdefault("roundSweep", 0.0)
     return normalized
+
+
+def random_gust_rect(world_w: float, world_h: float) -> dict[str, float]:
+    width = clamp(world_w * (0.16 + random.random() * 0.12), 2.4, max(2.4, world_w * 0.35))
+    height = clamp(world_h * (0.14 + random.random() * 0.12), 2.2, max(2.2, world_h * 0.32))
+    return {
+        "x": random.random() * max(0.0, world_w - width),
+        "y": random.random() * max(0.0, world_h - height),
+        "w": width,
+        "h": height,
+    }
+
+
+def schedule_next_auto_gust(race: dict[str, Any], settings: dict[str, Any], now_ms: int) -> None:
+    interval_sec = clamp(float(settings.get("autoGustIntervalSec") or 10.0), 3.0, 60.0)
+    factor = 0.6 + random.random() * 0.8
+    race["nextAutoGustAt"] = int(now_ms + interval_sec * 1000.0 * factor)
+
+
+def simulate_weather_tick(game_state: dict[str, Any], now_ms: int) -> bool:
+    settings = game_state.setdefault("settings", {})
+    race = game_state.setdefault("race", {})
+    course = game_state.setdefault("course", {})
+    world = game_state.get("world") or {}
+    world_w = float(world.get("width") or 18.0)
+    world_h = float(world.get("height") or 24.0)
+    auto_enabled = bool(settings.get("autoGustsEnabled"))
+    gust_rect = course.get("gustRect")
+    gust_expires_at = int(race.get("gustExpiresAt") or 0)
+    next_auto_gust_at = int(race.get("nextAutoGustAt") or 0)
+    changed = False
+
+    if gust_rect and gust_expires_at > 0 and now_ms >= gust_expires_at:
+        course["gustRect"] = None
+        race["gustExpiresAt"] = 0
+        gust_rect = None
+        changed = True
+        if auto_enabled:
+            schedule_next_auto_gust(race, settings, now_ms)
+
+    if auto_enabled:
+        if not gust_rect and next_auto_gust_at <= 0:
+            schedule_next_auto_gust(race, settings, now_ms)
+            changed = True
+        elif not gust_rect and now_ms >= next_auto_gust_at:
+            course["gustRect"] = random_gust_rect(world_w, world_h)
+            duration_sec = clamp(float(settings.get("autoGustDurationSec") or 6.0), 2.0, 30.0)
+            race["gustExpiresAt"] = int(now_ms + duration_sec * 1000.0)
+            race["nextAutoGustAt"] = 0
+            changed = True
+    else:
+        if next_auto_gust_at:
+            race["nextAutoGustAt"] = 0
+            changed = True
+        if not gust_rect and gust_expires_at:
+            race["gustExpiresAt"] = 0
+            changed = True
+
+    return changed
 
 
 def control_target_for_boat(control: dict[str, Any] | None, world_w: float, world_h: float) -> dict[str, float] | None:
@@ -418,7 +483,7 @@ def simulate_realtime_tick(game_state: dict[str, Any], controls: dict[int, dict[
     dead_zone_deg = float(settings.get("deadZoneDeg") or 0.0)
     gust_rect = course.get("gustRect")
 
-    changed = False
+    changed = simulate_weather_tick(game_state, now_ms)
     phase = race.get("phase") or "race"
     countdown_ends_at = int(race.get("realtimeCountdownEndsAt") or 0)
     if phase == "countdown" and countdown_ends_at > 0 and now_ms >= countdown_ends_at:

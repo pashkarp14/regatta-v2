@@ -213,6 +213,24 @@
               <span>Штраф смены галса</span>
               <input id="tackPenalty" type="number" min="0.50" max="1.00" step="0.01" value="0.95" data-room-lock="setup" />
             </label>
+
+            <label class="control">
+              <span>Автопорывы</span>
+              <select id="autoGusts" data-room-lock="setup">
+                <option value="off" selected>Выключены</option>
+                <option value="on">Включены</option>
+              </select>
+            </label>
+
+            <label class="control">
+              <span>Пауза порывов, с</span>
+              <input id="autoGustInterval" type="number" min="3" max="60" step="1" value="10" data-room-lock="setup" />
+            </label>
+
+            <label class="control">
+              <span>Длительность, с</span>
+              <input id="autoGustDuration" type="number" min="2" max="30" step="1" value="6" data-room-lock="setup" />
+            </label>
           </div>
 
           <div class="action-row wrap-row">
@@ -233,7 +251,19 @@
           <div class="action-row wrap-row">
             <button type="button" id="toggleOptimal" class="action-secondary">Оптимум для текущей лодки</button>
             <button type="button" id="bestStart" class="action-secondary">Лучший старт</button>
+            <button type="button" id="toggleLaylines" class="action-secondary">Лейлайны</button>
+            <button type="button" id="toggleFullscreen" class="action-secondary">На весь экран</button>
           </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Яхты</h2>
+            </div>
+          </div>
+
+          <div id="boatTuning" class="boat-tuning-grid"></div>
         </section>
 
         <section class="panel">

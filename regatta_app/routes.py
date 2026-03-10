@@ -72,6 +72,7 @@ def normalize_room_start_state(game_state: dict) -> dict:
         boat.setdefault("hasHeading", False)
         boat.setdefault("heading", 0)
         boat.setdefault("tack", 0)
+        boat.setdefault("speedCoeff", 1.0)
         boat["roundInZone"] = False
         boat["roundSweep"] = 0
 
@@ -86,6 +87,9 @@ def normalize_room_start_state(game_state: dict) -> dict:
         race.pop("hybridMovesLeft", None)
     else:
         race.pop("realtimeCountdownEndsAt", None)
+
+    race.setdefault("gustExpiresAt", 0)
+    race.setdefault("nextAutoGustAt", 0)
 
     return game_state
 
@@ -202,7 +206,8 @@ def start_room(room_code: str):
     room["status"] = "live"
     room["revision"] += 1
     room_store().save_room(room)
-    if (room["game_state"].get("settings") or {}).get("playMode") == "realtime":
+    game_settings = room["game_state"].get("settings") or {}
+    if game_settings.get("playMode") == "realtime" or game_settings.get("autoGustsEnabled"):
         from . import sockets as socket_handlers
 
         socket_handlers.ensure_realtime_room_loop(room["code"])
