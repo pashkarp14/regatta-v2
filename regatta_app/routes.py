@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 from flask import Blueprint, current_app, jsonify, render_template, request, session
 
 from .room_store import (
@@ -54,6 +56,38 @@ def json_payload() -> dict:
 
 def error_response(exc: RoomStoreError):
     return jsonify({"error": str(exc)}), exc.status_code
+
+
+def normalize_room_start_state(game_state: dict) -> dict:
+    settings = game_state.setdefault("settings", {})
+    race = game_state.setdefault("race", {})
+    boats = list(game_state.get("boats") or [])
+
+    for boat in boats:
+        boat.setdefault("distance", 0)
+        boat.setdefault("turns", 0)
+        boat.setdefault("nextMark", 0)
+        boat.setdefault("finished", False)
+        boat.setdefault("place", None)
+        boat.setdefault("hasHeading", False)
+        boat.setdefault("heading", 0)
+        boat.setdefault("tack", 0)
+        boat["roundInZone"] = False
+        boat["roundSweep"] = 0
+
+    if settings.get("playMode") in {"realtime", "hybrid"}:
+        settings["playMode"] = "realtime"
+        race["phase"] = "countdown"
+        race["realtimeCountdownEndsAt"] = int(time.time() * 1000) + 3000
+        race["currentPlayer"] = 0
+        race["subMovesLeft"] = 0
+        race["raceFinishedCount"] = 0
+        race.pop("hybridRound", None)
+        race.pop("hybridMovesLeft", None)
+    else:
+        race.pop("realtimeCountdownEndsAt", None)
+
+    return game_state
 
 
 @bp.get("/")
@@ -161,13 +195,17 @@ def start_room(room_code: str):
 
     payload = json_payload()
     try:
-        room["game_state"] = validate_game_state(room, payload.get("game_state"))
+        room["game_state"] = normalize_room_start_state(validate_game_state(room, payload.get("game_state")))
     except RoomStoreError as exc:
         return error_response(exc)
 
     room["status"] = "live"
     room["revision"] += 1
     room_store().save_room(room)
+    if (room["game_state"].get("settings") or {}).get("playMode") == "realtime":
+        from . import sockets as socket_handlers
+
+        socket_handlers.ensure_realtime_room_loop(room["code"])
     current_app.extensions["socketio"].emit(
         "room:snapshot",
         {"room": public_room_view(room, None)},

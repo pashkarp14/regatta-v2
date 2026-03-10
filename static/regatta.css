@@ -472,6 +472,7 @@ canvas{
   border:1px solid rgba(23,48,66,0.14);
   background:#fffdf9;
   user-select:none;
+  touch-action:none;
 }
 
 .interaction-lock{

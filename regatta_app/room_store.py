@@ -84,7 +84,7 @@ def public_room_view(room: dict[str, Any], player_token: str | None) -> dict[str
         "joined_count": len(room["players"]),
         "revision": room["revision"],
         "current_player": current_player,
-        "play_mode": "hybrid" if play_mode == "hybrid" else "turns",
+        "play_mode": "realtime" if play_mode in {"realtime", "hybrid"} else "turns",
         "is_host": room.get("host_token") == player_token,
         "players": [
             {

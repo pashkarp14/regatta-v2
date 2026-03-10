@@ -184,10 +184,14 @@ document.addEventListener("DOMContentLoaded", () => {
   const WIND_STEP = 5;
   let deadZoneDeg = parseFloat(deadZoneInp.value);
 
+  function normalizePlayModeValue(rawMode){
+    return (rawMode === "realtime" || rawMode === "hybrid") ? "realtime" : "turns";
+  }
+
   let snapThreshold = parseFloat(snapThresholdInp.value); // 0..1
   let movesPerTurn  = parseInt(movesPerTurnInp.value,10) || 1;
   let roundingSide  = roundingSideSelect.value; // "port" | "starboard"
-  let playMode = (playModeSelect?.value === "hybrid") ? "hybrid" : "turns"; // "turns" | "hybrid"
+  let playMode = normalizePlayModeValue(playModeSelect?.value);
   let tackPenaltyFactor = parseFloat(tackPenaltyInp.value); // 0.5..1
 
   function updateWindInfo(){ windInfoEl.textContent = `Ветер: ${windAngleDeg.toFixed(0)}°`; }
@@ -237,6 +241,9 @@ document.addEventListener("DOMContentLoaded", () => {
   let hybridRound = 1;
   let hybridMovesLeft = [];
   let multiplayerSeatIndex = null;
+  let realtimeCountdownEndsAt = 0;
+  let realtimeCursorTarget = null;
+  let activeRealtimePointerId = null;
 
   let prestartRoundsSetting = parseInt(prestartRoundsInp.value,10) || 0;
   let prestartRoundsLeft = prestartRoundsSetting;
@@ -1480,9 +1487,26 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    const allDone = boats.length>0 && boats.every(b=>b.finished) && phase==="race";
+    const allDone = boats.length>0 && boats.every(b=>b.finished) && (phase==="race" || phase==="finished");
     if (allDone){
       statusEl.textContent = "Гонка завершена: все лодки финишировали.";
+      return;
+    }
+
+    if (isRealtimePlayMode()){
+      const controlledBoatIndex = realtimeControlledBoatIndex();
+      const ownBoat = Number.isInteger(controlledBoatIndex) ? boats[controlledBoatIndex] : null;
+      const ownLegInfo = ownBoat && !ownBoat.finished
+        ? `Твоя лодка: ${controlledBoatIndex + 1}. Следующий знак: ${Math.min(ownBoat.nextMark + 1, markCount)} из ${markCount}.`
+        : "";
+      if (phase === "countdown"){
+        const secondsLeft = Math.max(1, Math.ceil(realtimeCountdownValue() / 1000));
+        statusEl.textContent = `СТАРТ ЧЕРЕЗ ${secondsLeft}. После сигнала обе лодки пойдут одновременно за курсором. ${ownLegInfo}`;
+      } else if (phase === "finished"){
+        statusEl.textContent = "Гонка завершена: все лодки финишировали.";
+      } else {
+        statusEl.textContent = `РЕАЛЬНОЕ ВРЕМЯ. Все лодки идут одновременно. Веди свою лодку курсором мыши или касанием по полю. ${ownLegInfo}`;
+      }
       return;
     }
 
@@ -1514,13 +1538,16 @@ document.addEventListener("DOMContentLoaded", () => {
 
     for (let i=0;i<boats.length;i++){
       const b = boats[i];
-      const fin = b.finished ? `✅ финиш: ${b.place}` : (phase==="race" ? "⏳ в гонке" : "⏳ предстарт");
+      const fin = b.finished ? `✅ финиш: ${b.place}` : (phase==="race" || phase==="finished" ? "⏳ в гонке" : phase==="countdown" ? "⏳ отсчет" : "⏳ предстарт");
+      const stepLine = isRealtimePlayMode()
+        ? `Управление: <b>${(multiplayerSeatIndex === i || (multiplayerSeatIndex === null && i === 0)) ? "курсор" : "сервер"}</b>`
+        : `Шагов: <b>${stepsLeftForBoat(i)}</b>${isHybridRaceMode() ? ` / ${movesPerTurn}` : ""}`;
       lines.push(`
         <div style="border:1px solid #eee;border-radius:10px;padding:8px 10px;min-width:190px;">
           <div><b style="color:${b.color};">Лодка ${i+1}</b> — ${fin}</div>
           <div>Дистанция: <b>${b.distance.toFixed(2)}</b></div>
           <div>Повороты: <b>${b.turns}</b></div>
-          <div>Шагов: <b>${stepsLeftForBoat(i)}</b>${isHybridRaceMode() ? ` / ${movesPerTurn}` : ""}</div>
+          <div>${stepLine}</div>
           <div>Знаки: <b>${Math.min(b.nextMark, markCount)}</b> / ${markCount}</div>
         </div>
       `);
@@ -1545,7 +1572,14 @@ document.addEventListener("DOMContentLoaded", () => {
       extra += `<div style="margin-top:6px;">⚠️ Не удалось найти маршрут (попробуй уменьшить поле / мёртвую зону / сдвинуть знаки/финиш).</div>`;
     }
 
-    optInfoEl.innerHTML = `<b>Состояние</b>: ${finTxt}. ${roundTxt}. Фаза: <b>${phase === "prestart" ? "предстарт" : "гонка"}</b>.${extra}`;
+    const phaseLabel = phase === "prestart"
+      ? "предстарт"
+      : phase === "countdown"
+        ? "отсчет"
+        : phase === "finished"
+          ? "финиш"
+          : "гонка";
+    optInfoEl.innerHTML = `<b>Состояние</b>: ${finTxt}. ${roundTxt}. Фаза: <b>${phaseLabel}</b>.${extra}`;
   }
 
   // -----------------------------
@@ -1559,7 +1593,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     prestartRoundsSetting = parseInt(prestartRoundsInp.value,10) || 0;
     prestartRoundsLeft = prestartRoundsSetting;
-    phase = (prestartRoundsSetting > 0) ? "prestart" : "race";
+    phase = (!isRealtimePlayMode() && prestartRoundsSetting > 0) ? "prestart" : "race";
 
     for (let i=0;i<n;i++){
       boats.push({
@@ -1599,6 +1633,9 @@ document.addEventListener("DOMContentLoaded", () => {
     placementSelectedBoat = null;
     subMovesLeft = movesPerTurn;
     resetHybridState();
+    realtimeCountdownEndsAt = 0;
+    realtimeCursorTarget = null;
+    activeRealtimePointerId = null;
 
     ensureNextPlayerOptions();
     invalidateSolutions();
@@ -1610,6 +1647,55 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function emitStateChanged(){
     window.dispatchEvent(new CustomEvent("regatta:state-changed"));
+  }
+
+  function emitRealtimeIntentChanged(){
+    window.dispatchEvent(new CustomEvent("regatta:realtime-intent"));
+  }
+
+  function isRealtimePlayMode(){
+    return playMode === "realtime";
+  }
+
+  function isRealtimeCountdown(){
+    return isRealtimePlayMode() && phase === "countdown" && realtimeCountdownEndsAt > Date.now();
+  }
+
+  function isRealtimeRaceMode(){
+    return isRealtimePlayMode() && phase === "race";
+  }
+
+  function realtimeCountdownValue(){
+    if (!isRealtimePlayMode() || phase !== "countdown") return 0;
+    return Math.max(0, realtimeCountdownEndsAt - Date.now());
+  }
+
+  function realtimeControlledBoatIndex(){
+    if (multiplayerSeatIndex !== null) return multiplayerSeatIndex;
+    if (Number.isInteger(selectedBoatIndex)) return selectedBoatIndex;
+    return boats.length ? 0 : null;
+  }
+
+  function clearRealtimeIntent(){
+    if (realtimeCursorTarget === null) return;
+    realtimeCursorTarget = null;
+    emitRealtimeIntentChanged();
+  }
+
+  function setRealtimeIntentTarget(nextTarget){
+    if (!nextTarget){
+      clearRealtimeIntent();
+      return;
+    }
+    const target = {
+      x: clamp(nextTarget.x, 0, worldW),
+      y: clamp(nextTarget.y, 0, worldH)
+    };
+    const same = realtimeCursorTarget
+      && Math.abs(realtimeCursorTarget.x - target.x) < 1e-4
+      && Math.abs(realtimeCursorTarget.y - target.y) < 1e-4;
+    realtimeCursorTarget = target;
+    if (!same) emitRealtimeIntentChanged();
   }
 
   function isHybridPlayMode(){
@@ -1714,6 +1800,7 @@ document.addEventListener("DOMContentLoaded", () => {
         subMovesLeft,
         hybridRound,
         hybridMovesLeft: hybridMovesLeft.slice(),
+        realtimeCountdownEndsAt,
         prestartRoundsLeft,
         phase
       },
@@ -1789,7 +1876,7 @@ document.addEventListener("DOMContentLoaded", () => {
     snapThreshold = clamp(parseFloat(settings.snapThreshold) || snapThreshold, 0, 1);
     movesPerTurn = clamp(parseInt(settings.movesPerTurn,10) || movesPerTurn, 1, 10);
     roundingSide = (settings.roundingSide === "starboard") ? "starboard" : "port";
-    playMode = (settings.playMode === "hybrid") ? "hybrid" : "turns";
+    playMode = normalizePlayModeValue(settings.playMode);
     tackPenaltyFactor = clamp(parseFloat(settings.tackPenaltyFactor) || tackPenaltyFactor, 0.5, 1.0);
     prestartRoundsSetting = Math.max(0, parseInt(settings.prestartRoundsSetting,10) || 0);
 
@@ -1811,7 +1898,9 @@ document.addEventListener("DOMContentLoaded", () => {
       boats.push(normalizeBoatSnapshot(incomingBoats[i], i));
     }
 
-    phase = (race.phase === "prestart") ? "prestart" : "race";
+    phase = (race.phase === "prestart" || race.phase === "countdown" || race.phase === "finished")
+      ? race.phase
+      : "race";
     prestartRoundsLeft = (phase === "prestart")
       ? Math.max(0, parseInt(race.prestartRoundsLeft,10) || prestartRoundsSetting)
       : 0;
@@ -1828,11 +1917,16 @@ document.addEventListener("DOMContentLoaded", () => {
     } else {
       hybridMovesLeft = boats.map((boat) => boat.finished ? 0 : movesPerTurn);
     }
+    realtimeCountdownEndsAt = Math.max(0, parseInt(race.realtimeCountdownEndsAt,10) || 0);
 
     selectedBoatIndex = null;
     placementSelectedBoat = null;
     startAwaitSecond = false;
     finishAwaitSecond = false;
+    if (!isRealtimePlayMode()){
+      realtimeCursorTarget = null;
+      activeRealtimePointerId = null;
+    }
 
     ensureScenarioLegOptions();
     ensureNextPlayerOptions();
@@ -2374,6 +2468,46 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  function drawRealtimeOverlay(){
+    if (isRealtimePlayMode() && mode === "play" && realtimeCursorTarget){
+      const boatIdx = realtimeControlledBoatIndex();
+      const boat = Number.isInteger(boatIdx) ? boats[boatIdx] : null;
+      if (boat){
+        const start = worldToScreen({ x: boat.x, y: boat.y });
+        const target = worldToScreen(realtimeCursorTarget);
+        ctx.save();
+        ctx.strokeStyle = rgbaHex(boat.color, 0.45);
+        ctx.fillStyle = rgbaHex(boat.color, 0.9);
+        ctx.setLineDash([8, 8]);
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(start.x, start.y);
+        ctx.lineTo(target.x, target.y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.arc(target.x, target.y, Math.max(5, PX * 0.12), 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+
+    if (!isRealtimeCountdown()) return;
+
+    const secondsLeft = Math.max(1, Math.ceil(realtimeCountdownValue() / 1000));
+    ctx.save();
+    ctx.fillStyle = "rgba(23, 48, 66, 0.18)";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#173042";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = "700 96px Georgia, serif";
+    ctx.fillText(String(secondsLeft), canvas.width / 2, canvas.height / 2);
+    ctx.font = "600 22px Georgia, serif";
+    ctx.fillText("Старт по общему отсчету", canvas.width / 2, canvas.height / 2 + 68);
+    ctx.restore();
+  }
+
   function render(){
     ctx.setTransform(1,0,0,1,0,0);
     ctx.clearRect(0,0,canvas.width,canvas.height);
@@ -2397,11 +2531,34 @@ document.addEventListener("DOMContentLoaded", () => {
 
     drawOptimalPath();
     drawBoats();
+    drawRealtimeOverlay();
   }
 
   // -----------------------------
   // Клики по canvas
   // -----------------------------
+  function updateRealtimeIntentFromClient(clientX, clientY){
+    if (mode !== "play" || !isRealtimePlayMode()) return;
+    const boatIdx = realtimeControlledBoatIndex();
+    if (!Number.isInteger(boatIdx) || !boats[boatIdx] || boats[boatIdx].finished || phase === "finished"){
+      clearRealtimeIntent();
+      return;
+    }
+    const point = screenToWorld(clientX, clientY);
+    if (!point){
+      clearRealtimeIntent();
+      return;
+    }
+    setRealtimeIntentTarget(point);
+  }
+
+  function resetRealtimePointer(pointerId=null){
+    if (pointerId === null || activeRealtimePointerId === pointerId){
+      activeRealtimePointerId = null;
+      clearRealtimeIntent();
+    }
+  }
+
   canvas.addEventListener("wheel", (e) => {
     if (e.ctrlKey || e.metaKey){
       e.preventDefault();
@@ -2425,7 +2582,47 @@ document.addEventListener("DOMContentLoaded", () => {
     render();
   }, { passive:false });
 
+  canvas.addEventListener("pointerdown", (e) => {
+    if (mode !== "play" || !isRealtimePlayMode()) return;
+    if (e.pointerType !== "mouse"){
+      activeRealtimePointerId = e.pointerId;
+      canvas.setPointerCapture?.(e.pointerId);
+    }
+    updateRealtimeIntentFromClient(e.clientX, e.clientY);
+    render();
+    e.preventDefault();
+  });
+
+  canvas.addEventListener("pointermove", (e) => {
+    if (mode !== "play" || !isRealtimePlayMode()) return;
+    if (e.pointerType === "mouse" || activeRealtimePointerId === e.pointerId){
+      updateRealtimeIntentFromClient(e.clientX, e.clientY);
+      render();
+    }
+  });
+
+  canvas.addEventListener("pointerup", (e) => {
+    if (!isRealtimePlayMode()) return;
+    if (e.pointerType !== "mouse"){
+      resetRealtimePointer(e.pointerId);
+      render();
+    }
+  });
+
+  canvas.addEventListener("pointercancel", (e) => {
+    if (!isRealtimePlayMode()) return;
+    resetRealtimePointer(e.pointerId);
+    render();
+  });
+
+  canvas.addEventListener("mouseleave", () => {
+    if (!isRealtimePlayMode()) return;
+    resetRealtimePointer();
+    render();
+  });
+
   canvas.addEventListener("click", (e) => {
+    if (mode === "play" && isRealtimePlayMode()) return;
     const p = screenToWorld(e.clientX, e.clientY);
     if (!p) return;
 
@@ -2644,9 +2841,11 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   playModeSelect.addEventListener("change", () => {
-    playMode = (playModeSelect.value === "hybrid") ? "hybrid" : "turns";
+    playMode = normalizePlayModeValue(playModeSelect.value);
     resetHybridState();
     selectedBoatIndex = null;
+    realtimeCountdownEndsAt = 0;
+    clearRealtimeIntent();
     updateStatus();
     updateStats();
     updateOptInfo();
@@ -2809,9 +3008,24 @@ document.addEventListener("DOMContentLoaded", () => {
       if (multiplayerSeatIndex !== null && isHybridRaceMode() && !canSelectBoatForPlay(candidateBoat)){
         selectedBoatIndex = null;
       }
+      if (isRealtimePlayMode() && !Number.isInteger(realtimeControlledBoatIndex())){
+        clearRealtimeIntent();
+      }
       updateStatus();
       updateStats();
       render();
+    },
+    getRealtimeIntent: () => {
+      if (!isRealtimePlayMode()) return null;
+      const boatIdx = realtimeControlledBoatIndex();
+      if (!Number.isInteger(boatIdx) || !boats[boatIdx] || boats[boatIdx].finished) return null;
+      return {
+        boatIndex: boatIdx,
+        active: realtimeCursorTarget !== null,
+        target: realtimeCursorTarget ? { ...realtimeCursorTarget } : null,
+        phase,
+        countdownEndsAt: realtimeCountdownEndsAt
+      };
     },
     getMeta: () => ({
       mode,
@@ -2819,11 +3033,19 @@ document.addEventListener("DOMContentLoaded", () => {
       playMode,
       hybridRound,
       hybridMovesLeft: hybridMovesLeft.slice(),
+      realtimeCountdownEndsAt,
       playerCount: boats.length,
       phase,
       markCount
     })
   };
+
+  setInterval(() => {
+    if (isRealtimeCountdown()){
+      updateStatus();
+      render();
+    }
+  }, 120);
 
   // -----------------------------
   // Старт приложения
@@ -2841,7 +3063,7 @@ document.addEventListener("DOMContentLoaded", () => {
     tackPenaltyFactor = clamp(parseFloat(tackPenaltyInp.value)||0.95, 0.5, 1.0);
 
     roundingSide = roundingSideSelect.value;
-    playMode = (playModeSelect.value === "hybrid") ? "hybrid" : "turns";
+    playMode = normalizePlayModeValue(playModeSelect.value);
     finishSeparate = (finishSeparateSelect.value === "yes");
     prestartRoundsSetting = Math.max(0, parseInt(prestartRoundsInp.value,10) || 0);
 

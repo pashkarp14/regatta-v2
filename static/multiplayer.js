@@ -30,6 +30,8 @@ document.addEventListener("DOMContentLoaded", () => {
     applyingRemote: false,
     lastFingerprint: regatta.fingerprintState(),
     selfSeatIndex: null,
+    lastRealtimeIntentKey: "",
+    lastRealtimeIntentSentAt: 0,
   };
 
   function roomPlayer() {
@@ -55,11 +57,12 @@ document.addEventListener("DOMContentLoaded", () => {
     return roomState.room?.game_state?.race?.phase || null;
   }
 
-  function isHybridRoom() {
-    return !!roomState.room
-      && roomState.room.status === "live"
-      && roomPlayMode() === "hybrid"
-      && roomRacePhase() === "race";
+  function isRealtimeRoom() {
+    return !!roomState.room && roomState.room.status === "live" && roomPlayMode() === "realtime";
+  }
+
+  function isRealtimeCountdownRoom() {
+    return isRealtimeRoom() && roomRacePhase() === "countdown";
   }
 
   function canEditSetup() {
@@ -70,21 +73,33 @@ document.addEventListener("DOMContentLoaded", () => {
   function canEditTurnBudget() {
     if (!roomState.room) return true;
     if (roomState.room.status === "lobby") return isRoomHost();
-    if (isHybridRoom()) return isRoomHost();
+    if (isRealtimeRoom()) return isRoomHost();
     return isMyTurn();
   }
 
   function canPushState() {
     if (!roomState.room) return false;
     if (roomState.room.status === "lobby") return isRoomHost();
-    if (isHybridRoom()) return !!roomPlayer();
+    if (isRealtimeRoom()) return false;
     return isMyTurn();
+  }
+
+  function canSendRealtimeControl() {
+    return !!(
+      roomState.room
+      && roomState.socket
+      && roomState.socket.connected
+      && isRealtimeRoom()
+      && roomRacePhase() !== "finished"
+      && roomPlayer()
+      && !roomState.applyingRemote
+    );
   }
 
   function canInteractWithBoard() {
     if (!roomState.room) return true;
     if (roomState.room.status === "lobby") return isRoomHost();
-    if (isHybridRoom()) return !!roomPlayer();
+    if (isRealtimeRoom()) return !!roomPlayer();
     return isMyTurn();
   }
 
@@ -194,9 +209,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
     interactionLockEl.classList.remove("hidden");
     interactionLockEl.textContent = roomState.room.status === "lobby"
-      ? "Хост настраивает дистанцию. Пока можно следить за курсом и готовиться к старту."
-      : isHybridRoom()
-        ? "Идёт гибридный раунд. Этот браузер сейчас не привязан к лодке, поэтому управление заблокировано."
+      ? "Хост настраивает дистанцию. Пока можно следить за полем и готовиться к старту."
+      : isRealtimeRoom()
+        ? "В этой комнате активен realtime-режим, но этот браузер сейчас не привязан к лодке."
         : `Сейчас ход лодки ${roomState.room.current_player + 1}. Твоя лодка активируется, когда очередь дойдёт до тебя.`;
   }
 
@@ -212,6 +227,7 @@ document.addEventListener("DOMContentLoaded", () => {
       setHint("Размер комнаты берётся из настройки «Лодок». Хост настраивает дистанцию, остальные игроки подключаются по коду и ждут старта.");
       setNotice("Сетевой слой не активен, пока ты не создашь комнату.", "neutral");
       setSyncLabel("Локальный режим", false);
+      roomState.lastRealtimeIntentKey = "";
       applyPermissions();
       return;
     }
@@ -230,14 +246,28 @@ document.addEventListener("DOMContentLoaded", () => {
           : "Ты подключился к комнате. Хост готовит дистанцию и запустит матч после сбора экипажа.",
         "success",
       );
-    } else if (isHybridRoom()) {
-      const hybridRound = roomState.room.game_state?.race?.hybridRound || 1;
-      setHint(`Матч запущен. Гибридный раунд ${hybridRound}: экипажи ходят одновременно.`);
-      roomStatusEl.textContent = `Гонка · гибридный раунд ${hybridRound}`;
-      setNotice(
-        "Гибридный режим активен. Каждый экипаж делает свои ходы параллельно, а состояние синхронизируется для всей комнаты.",
-        "neutral",
-      );
+    } else if (isRealtimeRoom()) {
+      const countdownEndsAt = roomState.room.game_state?.race?.realtimeCountdownEndsAt || 0;
+      if (isRealtimeCountdownRoom()) {
+        const secondsLeft = Math.max(1, Math.ceil((countdownEndsAt - Date.now()) / 1000));
+        setHint(`Старт через ${secondsLeft}. После сигнала обе лодки пойдут одновременно.`);
+        roomStatusEl.textContent = `Гонка · общий отсчет`;
+        setNotice(
+          "Realtime-режим активен. Управление идёт курсором мыши или касанием по полю, а сервер двигает обе лодки одновременно.",
+          "neutral",
+        );
+      } else if (roomRacePhase() === "finished") {
+        setHint("Гонка завершена.");
+        roomStatusEl.textContent = "Гонка · финиш";
+        setNotice("Матч завершён. Можно настроить дистанцию заново и запустить новый старт.", "neutral");
+      } else {
+        setHint("Матч запущен. Все лодки движутся одновременно по серверному тику.");
+        roomStatusEl.textContent = "Гонка · realtime";
+        setNotice(
+          "Realtime-режим активен. Веди свою лодку курсором мыши или касанием по полю, сервер считает движение для всех одновременно.",
+          "neutral",
+        );
+      }
     } else {
       setHint(`Матч запущен. Активная лодка: ${roomState.room.current_player + 1}.`);
       roomStatusEl.textContent = `Гонка · ход лодки ${roomState.room.current_player + 1}`;
@@ -263,6 +293,7 @@ document.addEventListener("DOMContentLoaded", () => {
       setSyncLabel("Комната подключена", true);
       roomState.socket.emit("room:join_socket", { room_code: roomState.room.code });
       void tryPushState(true);
+      void trySendRealtimeControl(true);
     });
 
     roomState.socket.on("disconnect", () => {
@@ -361,8 +392,19 @@ document.addEventListener("DOMContentLoaded", () => {
       },
     });
 
-    roomState.lastFingerprint = regatta.fingerprintState();
+    if (payload.room?.game_state) {
+      roomState.applyingRemote = true;
+      try {
+        regatta.importState(payload.room.game_state);
+        roomState.lastFingerprint = regatta.fingerprintState();
+      } finally {
+        roomState.applyingRemote = false;
+      }
+    } else {
+      roomState.lastFingerprint = regatta.fingerprintState();
+    }
     renderRoom(payload.room);
+    void trySendRealtimeControl(true);
   }
 
   async function leaveRoom() {
@@ -371,6 +413,7 @@ document.addEventListener("DOMContentLoaded", () => {
     roomState.room = null;
     roomState.selfSeatIndex = null;
     roomState.lastFingerprint = regatta.fingerprintState();
+    roomState.lastRealtimeIntentKey = "";
     renderRoom(null);
   }
 
@@ -415,6 +458,26 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  async function trySendRealtimeControl(force = false) {
+    if (!canSendRealtimeControl()) return;
+
+    const intent = regatta.getRealtimeIntent?.();
+    const payload = {
+      room_code: roomState.room.code,
+      active: !!intent?.active,
+      target: intent?.target || null,
+    };
+    const key = JSON.stringify(payload);
+    const now = Date.now();
+    if (!force && key === roomState.lastRealtimeIntentKey && now - roomState.lastRealtimeIntentSentAt < 250) {
+      return;
+    }
+
+    roomState.lastRealtimeIntentKey = key;
+    roomState.lastRealtimeIntentSentAt = now;
+    roomState.socket.emit("room:control", payload);
+  }
+
   createRoomBtn.addEventListener("click", async () => {
     try {
       await createRoom();
@@ -457,8 +520,22 @@ document.addEventListener("DOMContentLoaded", () => {
     void tryPushState();
   }, 350);
 
+  setInterval(() => {
+    void trySendRealtimeControl();
+  }, 250);
+
+  setInterval(() => {
+    if (isRealtimeCountdownRoom() && roomState.room) {
+      renderRoom(roomState.room);
+    }
+  }, 200);
+
   window.addEventListener("regatta:state-changed", () => {
     void tryPushState(true);
+  });
+
+  window.addEventListener("regatta:realtime-intent", () => {
+    void trySendRealtimeControl(true);
   });
 
   bootstrapRoom();
