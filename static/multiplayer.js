@@ -79,6 +79,12 @@ document.addEventListener("DOMContentLoaded", () => {
     return isRealtimeRoom() && roomRacePhase() === "countdown";
   }
 
+  function isPendingRealtimeStartRoom() {
+    if (!roomState.room || roomPlayMode() !== "realtime") return false;
+    const countdownEndsAt = Number(roomState.room?.game_state?.race?.realtimeCountdownEndsAt) || 0;
+    return roomRacePhase() === "countdown" && countdownEndsAt <= 0;
+  }
+
   function roomNowMs() {
     return Date.now() + roomState.serverClockOffsetMs;
   }
@@ -157,9 +163,10 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     const roomReady = roomState.room.joined_count === roomState.room.max_players;
+    const waitingStart = roomState.room.status === "lobby" || isPendingRealtimeStartRoom();
     regatta.setBoardStartActionOverride({
-      label: roomState.room.status === "lobby" ? "Старт гонки" : "Новая гонка",
-      title: roomState.room.status === "lobby"
+      label: waitingStart ? "Старт гонки" : "Новая гонка",
+      title: waitingStart
         ? (roomReady ? "Запустить матч" : "Дождись всех участников")
         : "Перезапустить матч с текущей дистанцией",
       disabled: !roomReady,
@@ -299,7 +306,9 @@ document.addEventListener("DOMContentLoaded", () => {
       || !isRoomHost()
       || roomState.room.joined_count !== roomState.room.max_players;
     if (startRoomBtn) {
-      startRoomBtn.textContent = roomState.room?.status === "lobby" ? "Запустить матч" : "Новая гонка";
+      startRoomBtn.textContent = (!roomState.room || roomState.room.status === "lobby" || isPendingRealtimeStartRoom())
+        ? "Запустить матч"
+        : "Новая гонка";
     }
 
     if (!roomState.room) {
@@ -360,7 +369,14 @@ document.addEventListener("DOMContentLoaded", () => {
         "success",
       );
     } else if (isRealtimeRoom()) {
-      if (isRealtimeCountdownRoom()) {
+      if (isPendingRealtimeStartRoom()) {
+        setHint("Новая гонка подготовлена. Лодки возвращены на стартовые позиции, нажми «Старт гонки», когда все готовы.");
+        roomStatusEl.textContent = `Гонка · готова к старту`;
+        setNotice(
+          "Realtime-режим ожидает общего запуска. До нажатия «Старт гонки» отсчёт не идёт и матч ещё не начался.",
+          "neutral",
+        );
+      } else if (isRealtimeCountdownRoom()) {
         const countdown = roomCountdownState();
         setHint(`Предстарт: до сигнала ${formatCountdownSeconds(countdown.totalMsLeft)} с. Фальстарт считается только в последние 3.0 с до старта.`);
         roomStatusEl.textContent = `Гонка · общий отсчет`;
@@ -498,12 +514,13 @@ document.addEventListener("DOMContentLoaded", () => {
     ensureSocket();
   }
 
-  async function startRoom() {
+  async function startRoom({ armRealtime = true } = {}) {
     if (!roomState.room) return;
     const payload = await apiRequest(`/api/rooms/${roomState.room.code}/start`, {
       method: "POST",
       body: {
         game_state: regatta.exportState(),
+        arm_realtime: armRealtime,
       },
     });
 
@@ -531,8 +548,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
     try {
       regatta.setMode?.("play");
-      await regatta.requestBoardFullscreenIfAuto?.();
-      await startRoom();
+      const armRealtime = roomState.room.status === "lobby" || isPendingRealtimeStartRoom();
+      if (armRealtime) {
+        await regatta.requestBoardFullscreenIfAuto?.();
+      } else {
+        await regatta.resetRaceToReadyState?.();
+      }
+      await startRoom({ armRealtime });
     } catch (error) {
       setNotice(error.message, "danger");
     } finally {

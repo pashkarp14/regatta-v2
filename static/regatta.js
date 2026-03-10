@@ -371,6 +371,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let realtimeCountdownEndsAt = 0;
   let realtimeCursorTarget = null;
   let realtimeCursorDirection = null;
+  let realtimeCursorClient = null;
   let activeRealtimePointerId = null;
   let localRealtimeLastTickAt = 0;
 
@@ -676,7 +677,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function updateResetButtonLabel(){
-    btnReset.textContent = isLocalRealtimeMode() ? "Общий старт" : "Новая гонка";
+    btnReset.textContent = "Новая гонка";
     updateBoardStartAction();
   }
 
@@ -712,8 +713,7 @@ document.addEventListener("DOMContentLoaded", () => {
       label: "Старт гонки",
       title: "Запустить общий старт",
       onTrigger: async () => {
-        setMode("play");
-        await handleResetAction();
+        await armLocalRealtimeStart();
       }
     });
   }
@@ -840,14 +840,38 @@ document.addEventListener("DOMContentLoaded", () => {
 
   async function handleResetAction(){
     if (mode !== "play") setMode("play");
-    await requestBoardFullscreenIfAuto();
-    resetBoats({ armRealtime: isLocalRealtimeMode() });
+    resetBoats({ armRealtime: false });
     invalidateSolutions();
     updateStatus();
     updateStats();
     updateOptInfo();
     render();
     emitStateChanged();
+  }
+
+  async function armLocalRealtimeStart(){
+    if (!isLocalRealtimeMode()) return false;
+    if (mode !== "play") setMode("play");
+    if (phase !== "countdown" || realtimeCountdownEndsAt > 0) return false;
+    await requestBoardFullscreenIfAuto();
+    realtimeCountdownEndsAt = currentRaceTimeMs() + Math.max(0, realtimePrepSeconds * 1000);
+    localRealtimeLastTickAt = 0;
+    for (const boat of boats){
+      boat.startDeltaMs = null;
+      boat.falseStartDeltaMs = null;
+      boat.currentSpeedUnitsPerSec = 0;
+      boat.penaltySlowUntil = 0;
+      boat.lastPenaltyAt = 0;
+      boat.lastPenaltyKey = "";
+      boat.lastPenaltyReason = "";
+    }
+    updateResetButtonLabel();
+    updateStatus();
+    updateStats();
+    updateOptInfo();
+    render();
+    emitStateChanged();
+    return true;
   }
 
   function renderBoatTuningControls(){
@@ -1741,6 +1765,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!isLocalRealtimeMode() || controlledBoatIndex !== boatIdx){
       return null;
     }
+    refreshRealtimeIntentFromPointer({ emit:false });
     const boat = boats[boatIdx];
     if (!boat) return null;
 
@@ -2769,6 +2794,7 @@ document.addEventListener("DOMContentLoaded", () => {
       : 0;
     realtimeCursorTarget = null;
     realtimeCursorDirection = null;
+    realtimeCursorClient = null;
     activeRealtimePointerId = null;
     localRealtimeLastTickAt = 0;
     resetBoatTrails();
@@ -2868,13 +2894,14 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function clearRealtimeIntent(){
-    if (realtimeCursorTarget === null && realtimeCursorDirection === null) return;
+    if (realtimeCursorTarget === null && realtimeCursorDirection === null && realtimeCursorClient === null) return;
     realtimeCursorTarget = null;
     realtimeCursorDirection = null;
+    realtimeCursorClient = null;
     emitRealtimeIntentChanged();
   }
 
-  function setRealtimeIntent(nextTarget, nextDirection){
+  function setRealtimeIntent(nextTarget, nextDirection, { emit=true } = {}){
     if (!nextTarget || !nextDirection){
       clearRealtimeIntent();
       return;
@@ -2902,7 +2929,26 @@ document.addEventListener("DOMContentLoaded", () => {
       && Math.abs(realtimeCursorDirection.y - direction.y) < 1e-5;
     realtimeCursorTarget = target;
     realtimeCursorDirection = direction;
-    if (!same) emitRealtimeIntentChanged();
+    if (!same && emit) emitRealtimeIntentChanged();
+  }
+
+  function refreshRealtimeIntentFromPointer({ emit=false } = {}){
+    if (!realtimeCursorClient || mode !== "play" || !isRealtimePlayMode()) return;
+    const boatIdx = realtimeControlledBoatIndex();
+    if (!Number.isInteger(boatIdx) || !boats[boatIdx] || boats[boatIdx].finished || phase === "finished"){
+      return;
+    }
+    const point = screenToWorld(realtimeCursorClient.clientX, realtimeCursorClient.clientY);
+    if (!point){
+      return;
+    }
+    const boat = boats[boatIdx];
+    const aim = { x: point.x - boat.x, y: point.y - boat.y };
+    const direction = norm(aim);
+    if (direction.L <= 1e-6){
+      return;
+    }
+    setRealtimeIntent(point, { x: direction.x, y: direction.y }, { emit });
   }
 
   function isHybridPlayMode(){
@@ -3293,7 +3339,10 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!isRealtimePlayMode()){
       realtimeCursorTarget = null;
       realtimeCursorDirection = null;
+      realtimeCursorClient = null;
       activeRealtimePointerId = null;
+    } else if (realtimeCursorClient){
+      refreshRealtimeIntentFromPointer({ emit:false });
     }
 
     ensureScenarioLegOptions();
@@ -3968,6 +4017,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function drawRealtimeOverlay(){
+    refreshRealtimeIntentFromPointer({ emit:false });
     if (isRealtimePlayMode() && mode === "play" && (realtimeCursorTarget || realtimeCursorDirection)){
       const boatIdx = realtimeControlledBoatIndex();
       const boat = Number.isInteger(boatIdx) ? boats[boatIdx] : null;
@@ -4066,29 +4116,19 @@ document.addEventListener("DOMContentLoaded", () => {
   // -----------------------------
   function updateRealtimeIntentFromClient(clientX, clientY){
     if (mode !== "play" || !isRealtimePlayMode()) return;
+    realtimeCursorClient = { clientX, clientY };
     const boatIdx = realtimeControlledBoatIndex();
     if (!Number.isInteger(boatIdx) || !boats[boatIdx] || boats[boatIdx].finished || phase === "finished"){
       clearRealtimeIntent();
       return;
     }
-    const point = screenToWorld(clientX, clientY);
-    if (!point){
-      clearRealtimeIntent();
-      return;
-    }
-    const boat = boats[boatIdx];
-    const aim = { x: point.x - boat.x, y: point.y - boat.y };
-    const direction = norm(aim);
-    if (direction.L <= 1e-6){
-      clearRealtimeIntent();
-      return;
-    }
-    setRealtimeIntent(point, { x: direction.x, y: direction.y });
+    refreshRealtimeIntentFromPointer({ emit:true });
   }
 
   function resetRealtimePointer(pointerId=null){
     if (pointerId === null || activeRealtimePointerId === pointerId){
       activeRealtimePointerId = null;
+      realtimeCursorClient = null;
       clearRealtimeIntent();
     }
   }
@@ -4693,6 +4733,8 @@ document.addEventListener("DOMContentLoaded", () => {
     requestBoardFullscreen,
     exitBoardFullscreen,
     isBoardFullscreenActive: isFullscreenActive,
+    armLocalRealtimeStart,
+    resetRaceToReadyState: handleResetAction,
     setServerClockOffset,
     setBoardStartActionOverride,
     triggerBoardStartAction,
@@ -4716,6 +4758,7 @@ document.addEventListener("DOMContentLoaded", () => {
     },
     getRealtimeIntent: () => {
       if (!isRealtimePlayMode()) return null;
+      refreshRealtimeIntentFromPointer({ emit:false });
       const boatIdx = realtimeControlledBoatIndex();
       if (!Number.isInteger(boatIdx) || !boats[boatIdx] || boats[boatIdx].finished) return null;
       return {

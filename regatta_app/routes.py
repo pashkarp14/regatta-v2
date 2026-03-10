@@ -58,7 +58,7 @@ def error_response(exc: RoomStoreError):
     return jsonify({"error": str(exc)}), exc.status_code
 
 
-def normalize_room_start_state(game_state: dict) -> dict:
+def normalize_room_start_state(game_state: dict, *, arm_realtime: bool = True) -> dict:
     settings = game_state.setdefault("settings", {})
     race = game_state.setdefault("race", {})
     boats = list(game_state.get("boats") or [])
@@ -91,7 +91,11 @@ def normalize_room_start_state(game_state: dict) -> dict:
         settings["playMode"] = "realtime"
         prep_seconds = max(0.0, float(settings.get("realtimePrepSeconds") or 0.0))
         race["phase"] = "countdown"
-        race["realtimeCountdownEndsAt"] = int(time.time() * 1000) + int(prep_seconds * 1000)
+        race["realtimeCountdownEndsAt"] = (
+            int(time.time() * 1000) + int(prep_seconds * 1000)
+            if arm_realtime
+            else 0
+        )
         race["currentPlayer"] = 0
         race["subMovesLeft"] = 0
         race["raceFinishedCount"] = 0
@@ -211,8 +215,12 @@ def start_room(room_code: str):
         return error_response(RoomValidationError("Wait until every player has joined."))
 
     payload = json_payload()
+    arm_realtime = bool(payload.get("arm_realtime", True))
     try:
-        room["game_state"] = normalize_room_start_state(validate_game_state(room, payload.get("game_state")))
+        room["game_state"] = normalize_room_start_state(
+            validate_game_state(room, payload.get("game_state")),
+            arm_realtime=arm_realtime,
+        )
     except RoomStoreError as exc:
         return error_response(exc)
 
