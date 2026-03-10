@@ -215,6 +215,76 @@ def point_in_gust(point: dict[str, float], gust_rect: dict[str, float] | None) -
     )
 
 
+def midpoint(left: dict[str, float], right: dict[str, float]) -> dict[str, float]:
+    return {"x": (left["x"] + right["x"]) / 2.0, "y": (left["y"] + right["y"]) / 2.0}
+
+
+def start_line_dir_unit(start_a: dict[str, float], start_b: dict[str, float]) -> dict[str, float]:
+    direction = normalize({"x": start_b["x"] - start_a["x"], "y": start_b["y"] - start_a["y"]})
+    return {"x": direction["x"], "y": direction["y"]}
+
+
+def course_side_normal_unit(start_a: dict[str, float], start_b: dict[str, float], marks: list[dict[str, float]]) -> dict[str, float]:
+    direction = start_line_dir_unit(start_a, start_b)
+    normal_a = {"x": -direction["y"], "y": direction["x"]}
+    normal_b = {"x": direction["y"], "y": -direction["x"]}
+    mid = midpoint(start_a, start_b)
+    first_mark = marks[0] if marks else {"x": mid["x"], "y": mid["y"] + 1.0}
+    to_mark = {"x": first_mark["x"] - mid["x"], "y": first_mark["y"] - mid["y"]}
+    dot_a = normal_a["x"] * to_mark["x"] + normal_a["y"] * to_mark["y"]
+    dot_b = normal_b["x"] * to_mark["x"] + normal_b["y"] * to_mark["y"]
+    return normal_a if dot_a >= dot_b else normal_b
+
+
+def start_line_side_value(point: dict[str, float], start_a: dict[str, float], start_b: dict[str, float], marks: list[dict[str, float]]) -> float:
+    mid = midpoint(start_a, start_b)
+    normal = course_side_normal_unit(start_a, start_b, marks)
+    return (point["x"] - mid["x"]) * normal["x"] + (point["y"] - mid["y"]) * normal["y"]
+
+
+def classify_start_line_crossing(
+    prev_pos: dict[str, float],
+    cur_pos: dict[str, float],
+    start_a: dict[str, float],
+    start_b: dict[str, float],
+    marks: list[dict[str, float]],
+) -> str | None:
+    if not segments_intersect(prev_pos, cur_pos, start_a, start_b):
+        return None
+    prev_side = start_line_side_value(prev_pos, start_a, start_b, marks)
+    cur_side = start_line_side_value(cur_pos, start_a, start_b, marks)
+    if prev_side <= 1e-6 and cur_side > 1e-6:
+        return "to_course"
+    if prev_side >= -1e-6 and cur_side < -1e-6:
+        return "to_prestart"
+    return None
+
+
+def record_realtime_start_crossing(
+    boat: dict[str, Any],
+    prev_pos: dict[str, float],
+    cur_pos: dict[str, float],
+    course: dict[str, Any],
+    gun_at_ms: int,
+    now_ms: int,
+) -> None:
+    if gun_at_ms <= 0:
+        return
+    start_a = course.get("startA") or {"x": 0.0, "y": 0.0}
+    start_b = course.get("startB") or {"x": 1.0, "y": 0.0}
+    marks = list(course.get("marks") or [])
+    crossing = classify_start_line_crossing(prev_pos, cur_pos, start_a, start_b, marks)
+    if crossing != "to_course":
+        return
+    delta_ms = int(now_ms - gun_at_ms)
+    if delta_ms < 0:
+        if boat.get("falseStartDeltaMs") is None:
+            boat["falseStartDeltaMs"] = delta_ms
+        return
+    if boat.get("startDeltaMs") is None:
+        boat["startDeltaMs"] = delta_ms
+
+
 def boat_speed_coeff(boat: dict[str, Any]) -> float:
     return clamp(float(boat.get("speedCoeff") or 1.0), 0.5, 1.8)
 
@@ -394,6 +464,8 @@ def normalize_boat(boat: dict[str, Any]) -> dict[str, Any]:
     normalized.setdefault("speedCoeff", 1.0)
     normalized.setdefault("roundInZone", False)
     normalized.setdefault("roundSweep", 0.0)
+    normalized.setdefault("startDeltaMs", None)
+    normalized.setdefault("falseStartDeltaMs", None)
     return normalized
 
 
@@ -486,12 +558,13 @@ def simulate_realtime_tick(game_state: dict[str, Any], controls: dict[int, dict[
     changed = simulate_weather_tick(game_state, now_ms)
     phase = race.get("phase") or "race"
     countdown_ends_at = int(race.get("realtimeCountdownEndsAt") or 0)
+    countdown_active = phase == "countdown" and countdown_ends_at > now_ms
     if phase == "countdown" and countdown_ends_at > 0 and now_ms >= countdown_ends_at:
         race["phase"] = "race"
         phase = "race"
         changed = True
 
-    if phase != "race":
+    if phase != "race" and not countdown_active:
         return changed
 
     proposals: list[dict[str, Any]] = []
@@ -631,6 +704,7 @@ def simulate_realtime_tick(game_state: dict[str, Any], controls: dict[int, dict[
                 boat["heading"] = proposal["heading"]
                 boat["hasHeading"] = proposal["hasHeading"]
                 boat["tack"] = tack_sign_from_heading_vec(proposal["direction"], wind_angle_deg)
+                record_realtime_start_crossing(boat, prev_pos, dest, course, countdown_ends_at, now_ms)
                 update_boat_mark_and_finish(boat, prev_pos, dest, proposal["direction"], game_state)
         if not boat.get("finished"):
             any_unfinished = True

@@ -94,8 +94,8 @@
               <span>Знаков</span>
               <select id="markCount" data-room-lock="setup">
                 <option value="1">1</option>
-                <option value="2" selected>2</option>
-                <option value="3">3</option>
+                <option value="2">2</option>
+                <option value="3" selected>3</option>
                 <option value="4">4</option>
                 <option value="5">5</option>
               </select>
@@ -131,18 +131,23 @@
             </label>
 
             <label class="control">
+              <span>Маневры до старта, с</span>
+              <input id="realtimePrepSeconds" type="number" min="0" max="120" step="1" value="12" data-room-lock="setup" />
+            </label>
+
+            <label class="control">
               <span>Выбранный знак</span>
               <select id="markToEdit" data-room-lock="setup"></select>
             </label>
 
             <label class="control">
               <span>Поле X</span>
-              <input id="gridCols" type="number" min="8" max="120" value="18" data-room-lock="setup" />
+              <input id="gridCols" type="number" min="8" max="360" value="54" data-room-lock="setup" />
             </label>
 
             <label class="control">
               <span>Поле Y</span>
-              <input id="gridRows" type="number" min="8" max="120" value="24" data-room-lock="setup" />
+              <input id="gridRows" type="number" min="8" max="360" value="72" data-room-lock="setup" />
             </label>
           </div>
 

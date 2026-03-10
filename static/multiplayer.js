@@ -125,6 +125,29 @@ document.addEventListener("DOMContentLoaded", () => {
     roomHintEl.classList.toggle("hidden", !text);
   }
 
+  async function copyTextWithFallback(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+
+    const helper = document.createElement("textarea");
+    helper.value = text;
+    helper.setAttribute("readonly", "readonly");
+    helper.style.position = "fixed";
+    helper.style.left = "-9999px";
+    helper.style.top = "0";
+    document.body.appendChild(helper);
+    helper.focus();
+    helper.select();
+    helper.setSelectionRange(0, helper.value.length);
+    const copied = document.execCommand("copy");
+    document.body.removeChild(helper);
+    if (!copied) {
+      throw new Error("copy-failed");
+    }
+  }
+
   function setSyncLabel(text, accent = false) {
     syncIndicatorEl.textContent = text;
     syncIndicatorEl.classList.toggle("hero-badge-muted", !accent);
@@ -259,8 +282,13 @@ document.addEventListener("DOMContentLoaded", () => {
     } else if (isRealtimeRoom()) {
       const countdownEndsAt = roomState.room.game_state?.race?.realtimeCountdownEndsAt || 0;
       if (isRealtimeCountdownRoom()) {
-        const secondsLeft = Math.max(1, Math.ceil((countdownEndsAt - Date.now()) / 1000));
-        setHint(`Старт через ${secondsLeft}. После сигнала обе лодки пойдут одновременно.`);
+        const msLeft = Math.max(0, countdownEndsAt - Date.now());
+        if (msLeft > 3000) {
+          setHint(`Предстарт: ещё ${Math.ceil((msLeft - 3000) / 1000)} с на маневры, затем общий отсчёт 3..2..1.`);
+        } else {
+          const secondsLeft = Math.max(1, Math.ceil(msLeft / 1000));
+          setHint(`Старт через ${secondsLeft}. Поймай стартовую линию ровно в сигнал.`);
+        }
         roomStatusEl.textContent = `Гонка · общий отсчет`;
         setNotice(
           "Realtime-режим активен. Управление идёт курсором мыши или касанием по полю, а сервер двигает обе лодки одновременно.",
@@ -448,7 +476,7 @@ document.addEventListener("DOMContentLoaded", () => {
   async function copyRoomCode() {
     if (!roomState.room) return;
     try {
-      await navigator.clipboard.writeText(roomState.room.code);
+      await copyTextWithFallback(roomState.room.code);
       setNotice(`Код ${roomState.room.code} скопирован.`, "success");
     } catch (error) {
       setNotice("Не удалось скопировать код комнаты.", "warning");
