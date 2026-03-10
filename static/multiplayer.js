@@ -17,6 +17,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const syncIndicatorEl = document.getElementById("syncIndicator");
   const roomPhaseLabelEl = document.getElementById("roomPhaseLabel");
   const interactionLockEl = document.getElementById("interactionLock");
+  const appToastEl = document.getElementById("appToast");
   const playerCountSelect = document.getElementById("playerCount");
   const movesPerTurnInput = document.getElementById("movesPerTurn");
 
@@ -43,6 +44,7 @@ document.addEventListener("DOMContentLoaded", () => {
     lastRealtimeIntentKey: "",
     lastRealtimeIntentSentAt: 0,
   };
+  let toastTimer = 0;
 
   function roomPlayer() {
     if (!roomState.room || roomState.selfSeatIndex === null) return null;
@@ -151,6 +153,18 @@ document.addEventListener("DOMContentLoaded", () => {
   function setSyncLabel(text, accent = false) {
     syncIndicatorEl.textContent = text;
     syncIndicatorEl.classList.toggle("hero-badge-muted", !accent);
+  }
+
+  function showToast(message) {
+    const text = typeof message === "string" ? message.trim() : "";
+    if (!appToastEl || !text) return;
+    window.clearTimeout(toastTimer);
+    appToastEl.textContent = text;
+    appToastEl.classList.remove("hidden");
+    toastTimer = window.setTimeout(() => {
+      appToastEl.classList.add("hidden");
+      appToastEl.textContent = "";
+    }, 1800);
   }
 
   async function apiRequest(url, options = {}) {
@@ -478,8 +492,10 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       await copyTextWithFallback(roomState.room.code);
       setNotice(`Код ${roomState.room.code} скопирован.`, "success");
+      showToast("Скопировано успешно");
     } catch (error) {
       setNotice("Не удалось скопировать код комнаты.", "warning");
+      showToast("Не удалось скопировать");
     }
   }
 

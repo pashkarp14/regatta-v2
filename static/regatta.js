@@ -12,6 +12,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const roundingSideSelect = document.getElementById("roundingSide");
   const playModeSelect = document.getElementById("playMode");
+  const interactionModeSelect = document.getElementById("interactionMode");
   const finishSeparateSelect = document.getElementById("finishSeparate");
   const prestartRoundsInp = document.getElementById("prestartRounds");
   const realtimePrepInp = document.getElementById("realtimePrepSeconds");
@@ -212,10 +213,16 @@ document.addEventListener("DOMContentLoaded", () => {
     return (rawMode === "realtime" || rawMode === "hybrid") ? "realtime" : "turns";
   }
 
+  function normalizeInteractionMode(rawMode){
+    if (rawMode === "ghost" || rawMode === "rules") return rawMode;
+    return "contact";
+  }
+
   let snapThreshold = parseFloat(snapThresholdInp.value); // 0..1
   let movesPerTurn  = parseInt(movesPerTurnInp.value,10) || 1;
   let roundingSide  = roundingSideSelect.value; // "port" | "starboard"
   let playMode = normalizePlayModeValue(playModeSelect?.value);
+  let interactionMode = normalizeInteractionMode(interactionModeSelect?.value);
   let tackPenaltyFactor = parseFloat(tackPenaltyInp.value); // 0.5..1
   let autoGustsEnabled = autoGustsSelect?.value === "on";
   let autoGustIntervalSec = parseFloat(autoGustIntervalInp?.value) || 10;
@@ -305,6 +312,18 @@ document.addEventListener("DOMContentLoaded", () => {
   const REALTIME_SPEED_UNITS_PER_SEC = 2.4;
   const REALTIME_DEADZONE_SOFTNESS_DEG = 18;
   const REALTIME_TARGET_EPS = 0.04;
+  const RULES_PENALTY_COOLDOWN_MS = 2200;
+  const RULES_PENALTY_SLOW_MS = 4000;
+  const RULES_PENALTY_SPEED_FACTOR = 0.72;
+  const RULES_OVERLAP_EPS = 0.05;
+  const RULES_LEEWAY_EPS = 0.05;
+  const RULES_MARK_ROOM_EPS = 0.15;
+  const BOAT_LENGTH_HALF = BOAT_FOOTPRINT_LENGTH / 2;
+  const INTERACTION_MODE_LABEL = {
+    contact: "контактный",
+    ghost: "бесконтактный",
+    rules: "бесконтактный + правила"
+  };
 
   const START_PICK_TOL = 0.35;
   const PRESTART_DEPTH = 3.0;
@@ -997,6 +1016,309 @@ document.addEventListener("DOMContentLoaded", () => {
     return STEP_RADIUS_BASE * stepFactorForMove(boat, headingVecUnit);
   }
 
+  function interactionModeLabel(){
+    return INTERACTION_MODE_LABEL[interactionMode] || INTERACTION_MODE_LABEL.contact;
+  }
+
+  function isContactInteractionMode(){
+    return interactionMode === "contact";
+  }
+
+  function isGhostInteractionMode(){
+    return interactionMode === "ghost";
+  }
+
+  function isRulesInteractionMode(){
+    return interactionMode === "rules";
+  }
+
+  function boatsPhysicalCollisionsEnabled(){
+    return isContactInteractionMode();
+  }
+
+  function realtimePenaltyFactorForBoat(boat, nowMs=Date.now()){
+    if (!boat) return 1;
+    const penaltySlowUntil = Number.isFinite(boat.penaltySlowUntil) ? boat.penaltySlowUntil : 0;
+    return penaltySlowUntil > nowMs ? RULES_PENALTY_SPEED_FACTOR : 1;
+  }
+
+  function headingVectorFromBoatState(state){
+    if (state?.direction && Number.isFinite(state.direction.x) && Number.isFinite(state.direction.y)){
+      const normalized = norm(state.direction);
+      if (normalized.L > 1e-6){
+        return { x: normalized.x, y: normalized.y };
+      }
+    }
+    return boatAxisUnit(state?.heading, !!state?.hasHeading);
+  }
+
+  function boatEncounterState(index, overrides={}){
+    const boat = overrides.boat || boats[index];
+    const pos = overrides.pos || { x: boat?.x || 0, y: boat?.y || 0 };
+    const prev = overrides.prev || { x: pos.x, y: pos.y };
+    const heading = Number.isFinite(overrides.heading) ? overrides.heading : (Number.isFinite(boat?.heading) ? boat.heading : 0);
+    const hasHeading = (typeof overrides.hasHeading === "boolean") ? overrides.hasHeading : !!boat?.hasHeading;
+    const direction = overrides.direction || boatAxisUnit(heading, hasHeading);
+    const signedSpeedUnitsPerSec = Number.isFinite(overrides.signedSpeedUnitsPerSec)
+      ? overrides.signedSpeedUnitsPerSec
+      : (Number.isFinite(boat?.currentSpeedUnitsPerSec) ? boat.currentSpeedUnitsPerSec : 0);
+    const tack = Number.isFinite(overrides.tack)
+      ? overrides.tack
+      : (Number.isFinite(boat?.tack) ? boat.tack : tackSignFromHeadingVec(direction));
+    return {
+      index,
+      boat,
+      pos,
+      prev,
+      heading,
+      hasHeading,
+      direction,
+      tack,
+      nextMark: Number.isFinite(overrides.nextMark) ? overrides.nextMark : (parseInt(boat?.nextMark, 10) || 0),
+      finished: !!(typeof overrides.finished === "boolean" ? overrides.finished : boat?.finished),
+      signedSpeedUnitsPerSec,
+      reverse: signedSpeedUnitsPerSec < -1e-6
+    };
+  }
+
+  function pairReferenceAxis(leftState, rightState){
+    const leftDir = headingVectorFromBoatState(leftState);
+    const rightDir = headingVectorFromBoatState(rightState);
+    let axis = { x: leftDir.x + rightDir.x, y: leftDir.y + rightDir.y };
+    if (Math.hypot(axis.x, axis.y) < 1e-6){
+      axis = { x: leftDir.x, y: leftDir.y };
+    }
+    if (Math.hypot(axis.x, axis.y) < 1e-6){
+      axis = { x: rightDir.x, y: rightDir.y };
+    }
+    if (Math.hypot(axis.x, axis.y) < 1e-6){
+      axis = { x: rightState.pos.x - leftState.pos.x, y: rightState.pos.y - leftState.pos.y };
+    }
+    if (Math.hypot(axis.x, axis.y) < 1e-6){
+      axis = { x: 1, y: 0 };
+    }
+    const normalized = norm(axis);
+    return { x: normalized.x, y: normalized.y };
+  }
+
+  function pairLongitudinalInfo(leftState, rightState){
+    const axis = pairReferenceAxis(leftState, rightState);
+    const leftCenter = dot(leftState.pos, axis);
+    const rightCenter = dot(rightState.pos, axis);
+    const leftRange = { min: leftCenter - BOAT_LENGTH_HALF, max: leftCenter + BOAT_LENGTH_HALF };
+    const rightRange = { min: rightCenter - BOAT_LENGTH_HALF, max: rightCenter + BOAT_LENGTH_HALF };
+    const leftClearAstern = leftRange.max < rightRange.min - RULES_OVERLAP_EPS;
+    const rightClearAstern = rightRange.max < leftRange.min - RULES_OVERLAP_EPS;
+    return {
+      axis,
+      leftRange,
+      rightRange,
+      linked: !leftClearAstern && !rightClearAstern,
+      leftClearAstern,
+      rightClearAstern
+    };
+  }
+
+  function pairLeewardInfo(leftState, rightState){
+    const downwind = downwindVec();
+    const leftProj = dot(leftState.pos, downwind);
+    const rightProj = dot(rightState.pos, downwind);
+    if (Math.abs(leftProj - rightProj) <= RULES_LEEWAY_EPS){
+      return { leewardIndex: null, windwardIndex: null };
+    }
+    if (leftProj > rightProj){
+      return { leewardIndex: leftState.index, windwardIndex: rightState.index };
+    }
+    return { leewardIndex: rightState.index, windwardIndex: leftState.index };
+  }
+
+  function pairMarkRoomInfo(leftState, rightState){
+    if (leftState.finished || rightState.finished) return null;
+    if (leftState.nextMark !== rightState.nextMark) return null;
+    if (!Number.isInteger(leftState.nextMark) || leftState.nextMark < 0 || leftState.nextMark >= markCount) return null;
+
+    const mark = marks[leftState.nextMark];
+    if (!mark) return null;
+
+    const leftDist = dist(leftState.pos, mark);
+    const rightDist = dist(rightState.pos, mark);
+    const inZone = leftDist <= ROUND_PASS_RADIUS + RULES_MARK_ROOM_EPS || rightDist <= ROUND_PASS_RADIUS + RULES_MARK_ROOM_EPS;
+    if (!inZone) return null;
+
+    const longitudinal = pairLongitudinalInfo(leftState, rightState);
+    if (longitudinal.linked && Math.abs(leftDist - rightDist) > RULES_MARK_ROOM_EPS){
+      const inner = leftDist < rightDist ? leftState : rightState;
+      const outer = inner.index === leftState.index ? rightState : leftState;
+      return {
+        giveWayIndex: outer.index,
+        rightOfWayIndex: inner.index,
+        reason: "наружная лодка не дала место у знака"
+      };
+    }
+
+    if (!longitudinal.linked){
+      if (longitudinal.leftClearAstern){
+        return {
+          giveWayIndex: leftState.index,
+          rightOfWayIndex: rightState.index,
+          reason: "чисто позади не уступила у знака"
+        };
+      }
+      if (longitudinal.rightClearAstern){
+        return {
+          giveWayIndex: rightState.index,
+          rightOfWayIndex: leftState.index,
+          reason: "чисто позади не уступила у знака"
+        };
+      }
+    }
+
+    return null;
+  }
+
+  function evaluateRightOfWayForPair(leftState, rightState){
+    if (leftState.reverse !== rightState.reverse){
+      const giveWay = leftState.reverse ? leftState : rightState;
+      const rightOfWay = giveWay.index === leftState.index ? rightState : leftState;
+      return {
+        giveWayIndex: giveWay.index,
+        rightOfWayIndex: rightOfWay.index,
+        reason: "лодка на заднем ходу должна сторониться"
+      };
+    }
+
+    const markRoom = pairMarkRoomInfo(leftState, rightState);
+    if (markRoom) return markRoom;
+
+    if (leftState.tack !== 0 && rightState.tack !== 0 && leftState.tack !== rightState.tack){
+      const portBoat = leftState.tack < 0 ? leftState : rightState;
+      const starboardBoat = portBoat.index === leftState.index ? rightState : leftState;
+      return {
+        giveWayIndex: portBoat.index,
+        rightOfWayIndex: starboardBoat.index,
+        reason: "левый галс уступает правому"
+      };
+    }
+
+    if (leftState.tack !== 0 && leftState.tack === rightState.tack){
+      const longitudinal = pairLongitudinalInfo(leftState, rightState);
+      if (longitudinal.linked){
+        const leeward = pairLeewardInfo(leftState, rightState);
+        if (leeward.windwardIndex !== null){
+          return {
+            giveWayIndex: leeward.windwardIndex,
+            rightOfWayIndex: leeward.leewardIndex,
+            reason: "наветренная лодка не уступила подветренной"
+          };
+        }
+      }
+
+      if (longitudinal.leftClearAstern){
+        return {
+          giveWayIndex: leftState.index,
+          rightOfWayIndex: rightState.index,
+          reason: "чисто позади не уступила чисто впереди"
+        };
+      }
+      if (longitudinal.rightClearAstern){
+        return {
+          giveWayIndex: rightState.index,
+          rightOfWayIndex: leftState.index,
+          reason: "чисто позади не уступила чисто впереди"
+        };
+      }
+    }
+
+    return null;
+  }
+
+  function pairMotionIncident(leftState, rightState){
+    const leftCapsule = boatCapsuleAt(leftState.pos, leftState.heading, leftState.hasHeading);
+    const rightCapsule = boatCapsuleAt(rightState.pos, rightState.heading, rightState.hasHeading);
+    const hullContact = capsulesOverlap(leftCapsule, rightCapsule, BOAT_CLEARANCE_MARGIN);
+    const sweepDistance = segmentSegmentDistance(leftState.prev, leftState.pos, rightState.prev, rightState.pos);
+    const sweepContact = sweepDistance < (BOAT_SWEEP_RADIUS * 2 + BOAT_CLEARANCE_MARGIN - 1e-9);
+    return {
+      incident: hullContact || sweepContact,
+      collision: hullContact || sweepDistance < (BOAT_SWEEP_RADIUS * 2 - 1e-9)
+    };
+  }
+
+  function applyBoatRulePenalty(boatIdx, otherIdx, reason, nowMs, { collision=false, turnPenalty=false } = {}){
+    const boat = boats[boatIdx];
+    if (!boat) return false;
+
+    const penaltyKey = `${otherIdx}:${reason}`;
+    const lastAt = Number.isFinite(boat.lastPenaltyAt) ? boat.lastPenaltyAt : 0;
+    if (boat.lastPenaltyKey === penaltyKey && nowMs - lastAt < RULES_PENALTY_COOLDOWN_MS){
+      return false;
+    }
+
+    boat.penalties = (parseInt(boat.penalties, 10) || 0) + 1;
+    if (collision){
+      boat.collisions = (parseInt(boat.collisions, 10) || 0) + 1;
+    }
+    if (turnPenalty){
+      boat.turns = (parseInt(boat.turns, 10) || 0) + 1;
+    }
+    boat.lastPenaltyAt = nowMs;
+    boat.lastPenaltyKey = penaltyKey;
+    boat.lastPenaltyReason = reason;
+    boat.penaltySlowUntil = Math.max(Number.isFinite(boat.penaltySlowUntil) ? boat.penaltySlowUntil : 0, nowMs + RULES_PENALTY_SLOW_MS);
+    return true;
+  }
+
+  function evaluatePairRulesPenalty(leftState, rightState, nowMs, { turnPenalty=false } = {}){
+    const incident = pairMotionIncident(leftState, rightState);
+    if (!incident.incident) return false;
+
+    const ruling = evaluateRightOfWayForPair(leftState, rightState);
+    if (!ruling){
+      let changed = false;
+      if (incident.collision){
+        changed = applyBoatRulePenalty(leftState.index, rightState.index, "не избежал контакта", nowMs, { collision:true, turnPenalty }) || changed;
+        changed = applyBoatRulePenalty(rightState.index, leftState.index, "не избежал контакта", nowMs, { collision:true, turnPenalty }) || changed;
+      }
+      return changed;
+    }
+
+    return applyBoatRulePenalty(ruling.giveWayIndex, ruling.rightOfWayIndex, ruling.reason, nowMs, {
+      collision: incident.collision,
+      turnPenalty
+    });
+  }
+
+  function applyRealtimeRulesPenalties(proposals, invalidSet, nowMs){
+    if (!isRulesInteractionMode()) return false;
+
+    const encounterStates = proposals.map((proposal, index) => {
+      const boat = boats[index];
+      const proposalAllowed = proposal.accepted && !(invalidSet instanceof Set && invalidSet.has(index));
+      return boatEncounterState(index, {
+        boat,
+        pos: proposalAllowed ? proposal.dest : { x: boat.x, y: boat.y },
+        prev: proposal.prev || { x: boat.x, y: boat.y },
+        heading: proposalAllowed ? proposal.heading : boat.heading,
+        hasHeading: proposalAllowed ? proposal.hasHeading : !!boat.hasHeading,
+        direction: proposalAllowed && proposal.direction ? proposal.direction : boatAxisUnit(boat.heading, boat.hasHeading),
+        signedSpeedUnitsPerSec: proposalAllowed ? proposal.signedSpeedUnitsPerSec : 0
+      });
+    });
+
+    let changed = false;
+    for (let left=0; left<encounterStates.length; left++){
+      if (encounterStates[left].finished) continue;
+      const leftMoved = proposals[left]?.accepted && !(invalidSet instanceof Set && invalidSet.has(left)) && (proposals[left]?.distance || 0) > 1e-5;
+      for (let right=left+1; right<encounterStates.length; right++){
+        if (encounterStates[right].finished) continue;
+        const rightMoved = proposals[right]?.accepted && !(invalidSet instanceof Set && invalidSet.has(right)) && (proposals[right]?.distance || 0) > 1e-5;
+        if (!leftMoved && !rightMoved) continue;
+        changed = evaluatePairRulesPenalty(encounterStates[left], encounterStates[right], nowMs) || changed;
+      }
+    }
+    return changed;
+  }
+
   // -----------------------------
   // "За стартовой линией" — сторона предстарт
   // -----------------------------
@@ -1087,14 +1409,14 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!pointInField(dest)) return null;
     const headingAng = Math.atan2(dir.y, dir.x);
     if (isTooCloseToMarks(dest, boatIdx, headingAng, true)) return null;
-    if (isTooCloseToBoats(dest, boatIdx, headingAng, true)) return null;
+    if (boatsPhysicalCollisionsEnabled() && isTooCloseToBoats(dest, boatIdx, headingAng, true)) return null;
 
     const dd = dist(dest, {x:b.x,y:b.y});
     if (dd > R + 1e-6) return null;
 
     const prevPos = {x:b.x,y:b.y};
     if (pathIntersectsAnyMark(prevPos, dest)) return null;
-    if (pathIntersectsOtherBoat(prevPos, dest, boatIdx)) return null;
+    if (boatsPhysicalCollisionsEnabled() && pathIntersectsOtherBoat(prevPos, dest, boatIdx)) return null;
 
     return dest;
   }
@@ -1149,9 +1471,16 @@ document.addEventListener("DOMContentLoaded", () => {
     for (const b of boats){
       b.distance = 0;
       b.turns = 0;
+      b.penalties = 0;
+      b.collisions = 0;
       b.nextMark = 0;
       b.finished = false;
       b.place = null;
+      b.currentSpeedUnitsPerSec = 0;
+      b.penaltySlowUntil = 0;
+      b.lastPenaltyAt = 0;
+      b.lastPenaltyKey = "";
+      b.lastPenaltyReason = "";
       b.roundInZone = false;
       b.roundSweep = 0;
     }
@@ -1198,7 +1527,9 @@ document.addEventListener("DOMContentLoaded", () => {
         hasHeading: !!boat.hasHeading,
         direction: null,
         motionDirection: null,
-        distance: 0
+        distance: 0,
+        signedSpeedUnitsPerSec: 0,
+        reverseMode: false
       };
 
       if (!boat || boat.finished){
@@ -1222,7 +1553,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const softness = Math.max(2, REALTIME_DEADZONE_SOFTNESS_DEG) * Math.PI / 180;
       const direction = { x: normalized.x, y: normalized.y };
       const heading = Math.atan2(direction.y, direction.x);
-      const moveFactor = stepFactorForMove(boat, direction);
+      const moveFactor = stepFactorForMove(boat, direction) * realtimePenaltyFactorForBoat(boat, now);
       const speedFactor = clamp((angle - halfDead) / softness, 0, 1);
       const reverseSpeed = REALTIME_SPEED_UNITS_PER_SEC * dtSeconds * moveFactor * 0.10;
       const reverseMode = speedFactor <= 1e-4;
@@ -1250,6 +1581,10 @@ document.addEventListener("DOMContentLoaded", () => {
       proposal.direction = direction;
       proposal.motionDirection = motionDirection;
       proposal.distance = stepLength;
+      proposal.signedSpeedUnitsPerSec = dtSeconds > 1e-6
+        ? (reverseMode ? -1 : 1) * (stepLength / dtSeconds)
+        : 0;
+      proposal.reverseMode = reverseMode;
       return proposal;
     });
 
@@ -1277,43 +1612,50 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       if (invalid.has(i)) continue;
 
-      for (let j=0; j<boats.length; j++){
-        if (j === i) continue;
-        const otherCapsule = boatCapsuleForIndex(j);
-        if (capsulesOverlap(candidateCapsule, otherCapsule, BOAT_CLEARANCE_MARGIN)){
-          invalid.add(i);
-          break;
+      if (boatsPhysicalCollisionsEnabled()){
+        for (let j=0; j<boats.length; j++){
+          if (j === i) continue;
+          const otherCapsule = boatCapsuleForIndex(j);
+          if (capsulesOverlap(candidateCapsule, otherCapsule, BOAT_CLEARANCE_MARGIN)){
+            invalid.add(i);
+            break;
+          }
+          if (segmentSegmentDistance(proposal.prev, proposal.dest, otherCapsule.a, otherCapsule.b) < (BOAT_SWEEP_RADIUS + otherCapsule.r + BOAT_CLEARANCE_MARGIN - 1e-9)){
+            invalid.add(i);
+            break;
+          }
         }
-        if (segmentSegmentDistance(proposal.prev, proposal.dest, otherCapsule.a, otherCapsule.b) < (BOAT_SWEEP_RADIUS + otherCapsule.r + BOAT_CLEARANCE_MARGIN - 1e-9)){
-          invalid.add(i);
-          break;
+      }
+    }
+
+    if (boatsPhysicalCollisionsEnabled()){
+      for (let left=0; left<proposals.length; left++){
+        const leftProposal = proposals[left];
+        if (!leftProposal.accepted || invalid.has(left)) continue;
+        const leftCapsule = boatCapsuleAt(leftProposal.dest, leftProposal.heading, leftProposal.hasHeading);
+
+        for (let right=left+1; right<proposals.length; right++){
+          const rightProposal = proposals[right];
+          if (!rightProposal.accepted || invalid.has(right)) continue;
+          const rightCapsule = boatCapsuleAt(rightProposal.dest, rightProposal.heading, rightProposal.hasHeading);
+
+          if (capsulesOverlap(leftCapsule, rightCapsule, BOAT_CLEARANCE_MARGIN)){
+            invalid.add(left);
+            invalid.add(right);
+            continue;
+          }
+
+          const minCenterDistance = segmentSegmentDistance(leftProposal.prev, leftProposal.dest, rightProposal.prev, rightProposal.dest);
+          if (minCenterDistance < (BOAT_SWEEP_RADIUS * 2 + BOAT_CLEARANCE_MARGIN - 1e-9)){
+            invalid.add(left);
+            invalid.add(right);
+          }
         }
       }
     }
 
-    for (let left=0; left<proposals.length; left++){
-      const leftProposal = proposals[left];
-      if (!leftProposal.accepted || invalid.has(left)) continue;
-      const leftCapsule = boatCapsuleAt(leftProposal.dest, leftProposal.heading, leftProposal.hasHeading);
-
-      for (let right=left+1; right<proposals.length; right++){
-        const rightProposal = proposals[right];
-        if (!rightProposal.accepted || invalid.has(right)) continue;
-        const rightCapsule = boatCapsuleAt(rightProposal.dest, rightProposal.heading, rightProposal.hasHeading);
-
-        if (capsulesOverlap(leftCapsule, rightCapsule, BOAT_CLEARANCE_MARGIN)){
-          invalid.add(left);
-          invalid.add(right);
-          continue;
-        }
-
-        const minCenterDistance = segmentSegmentDistance(leftProposal.prev, leftProposal.dest, rightProposal.prev, rightProposal.dest);
-        if (minCenterDistance < (BOAT_SWEEP_RADIUS * 2 + BOAT_CLEARANCE_MARGIN - 1e-9)){
-          invalid.add(left);
-          invalid.add(right);
-        }
-      }
-    }
+    const rulesChanged = applyRealtimeRulesPenalties(proposals, invalid, now);
+    changed = rulesChanged || changed;
 
     raceFinishedCount = boats.filter((boat) => boat.finished).length;
     let anyUnfinished = false;
@@ -1321,6 +1663,7 @@ document.addEventListener("DOMContentLoaded", () => {
     for (let i=0; i<boats.length; i++){
       const boat = boats[i];
       const proposal = proposals[i];
+      boat.currentSpeedUnitsPerSec = 0;
 
       if (proposal.accepted && !invalid.has(i)){
         const dest = proposal.dest;
@@ -1335,6 +1678,7 @@ document.addEventListener("DOMContentLoaded", () => {
           boat.heading = proposal.heading;
           boat.hasHeading = proposal.hasHeading;
           boat.tack = tackSignFromHeadingVec(proposal.direction);
+          boat.currentSpeedUnitsPerSec = proposal.signedSpeedUnitsPerSec;
           recordRealtimeStartCrossing(boat, proposal.prev, dest, tickStartMs, now);
           updateBoatMarkAndFinish(boat, proposal.prev, dest, proposal.direction);
         }
@@ -1469,9 +1813,9 @@ document.addEventListener("DOMContentLoaded", () => {
     const headingAng = Math.atan2(dir.y, dir.x);
 
     if (isTooCloseToMarks(dest, boatIdx, headingAng, true)) return;
-    if (isTooCloseToBoats(dest, boatIdx, headingAng, true)) return;
+    if (boatsPhysicalCollisionsEnabled() && isTooCloseToBoats(dest, boatIdx, headingAng, true)) return;
     if (pathIntersectsAnyMark(prev, dest)) return;
-    if (pathIntersectsOtherBoat(prev, dest, boatIdx)) return;
+    if (boatsPhysicalCollisionsEnabled() && pathIntersectsOtherBoat(prev, dest, boatIdx)) return;
 
     b.distance += L;
 
@@ -1484,11 +1828,27 @@ document.addEventListener("DOMContentLoaded", () => {
     b.heading = headingAng;
     b.tack = newTack;
     b.hasHeading = true;
+    b.currentSpeedUnitsPerSec = 0;
 
     b.x = dest.x; b.y = dest.y;
 
     const curPos = {x:b.x,y:b.y};
     updateBoatMarkAndFinish(b, prev, curPos, dir);
+    if (isRulesInteractionMode()){
+      const movingState = boatEncounterState(boatIdx, {
+        pos: { x: dest.x, y: dest.y },
+        prev,
+        heading: headingAng,
+        hasHeading: true,
+        direction: dir,
+        signedSpeedUnitsPerSec: 1
+      });
+      const nowMs = Date.now();
+      for (let i=0; i<boats.length; i++){
+        if (i === boatIdx) continue;
+        evaluatePairRulesPenalty(movingState, boatEncounterState(i), nowMs, { turnPenalty:true });
+      }
+    }
 
     if (isHybridRaceMode()){
       hybridMovesLeft[boatIdx] = Math.max(0, (hybridMovesLeft[boatIdx] || 0) - 1);
@@ -1665,7 +2025,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const q0 = quantize(sPos, RES);
 
     if (isTooCloseToMarks(sPos, movingBoatIdx ?? -1)) return null;
-    if (movingBoatIdx !== null && isTooCloseToBoats(sPos, movingBoatIdx)) return null;
+    if (movingBoatIdx !== null && boatsPhysicalCollisionsEnabled() && isTooCloseToBoats(sPos, movingBoatIdx)) return null;
 
     const [fa, fb] = finishLine();
     const targetMark = marks[0];
@@ -1754,8 +2114,8 @@ document.addEventListener("DOMContentLoaded", () => {
         if (isTooCloseToMarks(nextPos, movingBoatIdx ?? -1, headingAng, true)) continue;
         if (pathIntersectsAnyMark(curPos, nextPos)) continue;
         if (movingBoatIdx !== null){
-          if (isTooCloseToBoats(nextPos, movingBoatIdx, headingAng, true)) continue;
-          if (pathIntersectsOtherBoat(curPos, nextPos, movingBoatIdx)) continue;
+          if (boatsPhysicalCollisionsEnabled() && isTooCloseToBoats(nextPos, movingBoatIdx, headingAng, true)) continue;
+          if (boatsPhysicalCollisionsEnabled() && pathIntersectsOtherBoat(curPos, nextPos, movingBoatIdx)) continue;
         }
 
         const newTack = tackSignFromHeadingVec({x:moveVec.x/L,y:moveVec.y/L});
@@ -1901,7 +2261,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const sp = { x: startA.x + ux*len*t, y: startA.y + uy*len*t };
 
       if (isTooCloseToMarks(sp)) continue;
-      if (isTooCloseToBoats(sp, -1)) continue;
+      if (boatsPhysicalCollisionsEnabled() && isTooCloseToBoats(sp, -1)) continue;
 
       const res = planOptimalFrom(sp, 0, null, 0, "firstMark", -1, boatSpeedCoeff(baseBoat));
       if (!res) continue;
@@ -2050,8 +2410,10 @@ document.addEventListener("DOMContentLoaded", () => {
           <div>Скорость: <b>×${boatSpeedCoeff(b).toFixed(2)}</b></div>
           <div>Пройдено: <b>${formatMeters(b.distance)}</b></div>
           <div>Повороты: <b>${b.turns}</b></div>
+          <div>Штрафы: <b>${parseInt(b.penalties,10) || 0}</b>${(parseInt(b.collisions,10) || 0) > 0 ? ` · контакты: <b>${parseInt(b.collisions,10) || 0}</b>` : ""}</div>
           <div>${stepLine}</div>
           <div>${boatStartSummary(b)}</div>
+          <div>${b.lastPenaltyReason ? `Последний инцидент: <b>${b.lastPenaltyReason}</b>` : "Инциденты: нет"}</div>
           <div>Знаки: <b>${Math.min(b.nextMark, markCount)}</b> / ${markCount}</div>
         </div>
       `);
@@ -2063,6 +2425,7 @@ document.addEventListener("DOMContentLoaded", () => {
   function updateOptInfo(){
     const finTxt = finishSeparate ? "Финиш: отдельная линия" : "Финиш: по стартовой линии";
     const roundTxt = (roundingSide==="port") ? "Огибание: левая дистанция" : "Огибание: правая дистанция";
+    const contactTxt = `Встречи: ${interactionModeLabel()}`;
     const gustTxt = autoGustsEnabled
       ? `Порывы: авто (${autoGustIntervalSec.toFixed(0)}с / ${autoGustDurationSec.toFixed(0)}с)`
       : (gustRect ? "Порывы: ручной" : "Порывы: выкл");
@@ -2086,7 +2449,7 @@ document.addEventListener("DOMContentLoaded", () => {
         : phase === "finished"
           ? "финиш"
           : "гонка";
-    optInfoEl.innerHTML = `<b>Состояние</b>: ${finTxt}. ${roundTxt}. ${gustTxt}. Фаза: <b>${phaseLabel}</b>.${extra}`;
+    optInfoEl.innerHTML = `<b>Состояние</b>: ${finTxt}. ${roundTxt}. ${contactTxt}. ${gustTxt}. Фаза: <b>${phaseLabel}</b>.${extra}`;
   }
 
   // -----------------------------
@@ -2112,6 +2475,8 @@ document.addEventListener("DOMContentLoaded", () => {
         x:0, y:0,
         distance:0,
         turns:0,
+        penalties:0,
+        collisions:0,
         nextMark:0,
         finished:false,
         place:null,
@@ -2120,6 +2485,11 @@ document.addEventListener("DOMContentLoaded", () => {
         tack:0,
         color: BOAT_COLORS[i % BOAT_COLORS.length],
         speedCoeff: boatSpeedCoeff(previousBoats[i]),
+        currentSpeedUnitsPerSec:0,
+        penaltySlowUntil:0,
+        lastPenaltyAt:0,
+        lastPenaltyKey:"",
+        lastPenaltyReason:"",
 
         // ✅ состояние огибания (важно!)
         roundInZone:false,
@@ -2219,6 +2589,11 @@ document.addEventListener("DOMContentLoaded", () => {
     for (const boat of boats){
       boat.startDeltaMs = null;
       boat.falseStartDeltaMs = null;
+      boat.currentSpeedUnitsPerSec = 0;
+      boat.penaltySlowUntil = 0;
+      boat.lastPenaltyAt = 0;
+      boat.lastPenaltyKey = "";
+      boat.lastPenaltyReason = "";
     }
     if (!Number.isInteger(selectedBoatIndex) && boats.length){
       selectedBoatIndex = 0;
@@ -2387,6 +2762,22 @@ document.addEventListener("DOMContentLoaded", () => {
     return "Старт: ожидание сигнала";
   }
 
+  function boatRealtimeSpeedMps(boat){
+    return Math.abs(Number.isFinite(boat?.currentSpeedUnitsPerSec) ? boat.currentSpeedUnitsPerSec : 0) * METERS_PER_WORLD_UNIT;
+  }
+
+  function boatCourseToWindDeg(boat){
+    if (!boat?.hasHeading) return null;
+    const headingVec = boatAxisUnit(boat.heading, boat.hasHeading);
+    return angleBetween(headingVec, upwindVec()) * 180 / Math.PI;
+  }
+
+  function boatTackLabel(boat){
+    if ((boat?.tack || 0) > 0) return "правый галс";
+    if ((boat?.tack || 0) < 0) return "левый галс";
+    return "левентик";
+  }
+
   function normalizeBoatSnapshot(rawBoat, idx){
     const fallback = boats[idx] || { x:0, y:0 };
     return {
@@ -2394,6 +2785,8 @@ document.addEventListener("DOMContentLoaded", () => {
       y: clamp(Number.isFinite(rawBoat?.y) ? rawBoat.y : fallback.y, 0, worldH),
       distance: Number.isFinite(rawBoat?.distance) ? rawBoat.distance : 0,
       turns: Number.isFinite(rawBoat?.turns) ? rawBoat.turns : 0,
+      penalties: Number.isFinite(rawBoat?.penalties) ? rawBoat.penalties : 0,
+      collisions: Number.isFinite(rawBoat?.collisions) ? rawBoat.collisions : 0,
       nextMark: clamp(parseInt(rawBoat?.nextMark,10) || 0, 0, markCount),
       finished: !!rawBoat?.finished,
       place: Number.isFinite(rawBoat?.place) ? rawBoat.place : null,
@@ -2402,6 +2795,11 @@ document.addEventListener("DOMContentLoaded", () => {
       tack: Number.isFinite(rawBoat?.tack) ? rawBoat.tack : 0,
       color: typeof rawBoat?.color === "string" ? rawBoat.color : BOAT_COLORS[idx % BOAT_COLORS.length],
       speedCoeff: boatSpeedCoeff(rawBoat || fallback),
+      currentSpeedUnitsPerSec: Number.isFinite(rawBoat?.currentSpeedUnitsPerSec) ? rawBoat.currentSpeedUnitsPerSec : 0,
+      penaltySlowUntil: Number.isFinite(rawBoat?.penaltySlowUntil) ? rawBoat.penaltySlowUntil : 0,
+      lastPenaltyAt: Number.isFinite(rawBoat?.lastPenaltyAt) ? rawBoat.lastPenaltyAt : 0,
+      lastPenaltyKey: typeof rawBoat?.lastPenaltyKey === "string" ? rawBoat.lastPenaltyKey : "",
+      lastPenaltyReason: typeof rawBoat?.lastPenaltyReason === "string" ? rawBoat.lastPenaltyReason : "",
       roundInZone: !!rawBoat?.roundInZone,
       roundSweep: Number.isFinite(rawBoat?.roundSweep) ? rawBoat.roundSweep : 0,
       startDeltaMs: Number.isFinite(rawBoat?.startDeltaMs) ? rawBoat.startDeltaMs : null,
@@ -2423,6 +2821,7 @@ document.addEventListener("DOMContentLoaded", () => {
         movesPerTurn,
         roundingSide,
         playMode,
+        interactionMode,
         tackPenaltyFactor,
         autoGustsEnabled,
         autoGustIntervalSec,
@@ -2458,6 +2857,8 @@ document.addEventListener("DOMContentLoaded", () => {
         y: boat.y,
         distance: boat.distance,
         turns: boat.turns,
+        penalties: boat.penalties,
+        collisions: boat.collisions,
         nextMark: boat.nextMark,
         finished: boat.finished,
         place: boat.place,
@@ -2466,6 +2867,11 @@ document.addEventListener("DOMContentLoaded", () => {
         tack: boat.tack,
         color: boat.color,
         speedCoeff: boat.speedCoeff,
+        currentSpeedUnitsPerSec: boat.currentSpeedUnitsPerSec,
+        penaltySlowUntil: boat.penaltySlowUntil,
+        lastPenaltyAt: boat.lastPenaltyAt,
+        lastPenaltyKey: boat.lastPenaltyKey,
+        lastPenaltyReason: boat.lastPenaltyReason,
         roundInZone: boat.roundInZone,
         roundSweep: boat.roundSweep,
         startDeltaMs: boat.startDeltaMs,
@@ -2523,6 +2929,7 @@ document.addEventListener("DOMContentLoaded", () => {
     movesPerTurn = clamp(parseInt(settings.movesPerTurn,10) || movesPerTurn, 1, 10);
     roundingSide = (settings.roundingSide === "starboard") ? "starboard" : "port";
     playMode = normalizePlayModeValue(settings.playMode);
+    interactionMode = normalizeInteractionMode(settings.interactionMode);
     tackPenaltyFactor = clamp(parseFloat(settings.tackPenaltyFactor) || tackPenaltyFactor, 0.5, 1.0);
     autoGustsEnabled = !!settings.autoGustsEnabled;
     autoGustIntervalSec = clamp(parseFloat(settings.autoGustIntervalSec) || autoGustIntervalSec, 3, 60);
@@ -2536,6 +2943,7 @@ document.addEventListener("DOMContentLoaded", () => {
     movesPerTurnInp.value = String(movesPerTurn);
     roundingSideSelect.value = roundingSide;
     playModeSelect.value = playMode;
+    if (interactionModeSelect) interactionModeSelect.value = interactionMode;
     tackPenaltyInp.value = String(tackPenaltyFactor);
     if (autoGustsSelect) autoGustsSelect.value = autoGustsEnabled ? "on" : "off";
     if (autoGustIntervalInp) autoGustIntervalInp.value = String(autoGustIntervalSec);
@@ -3131,7 +3539,7 @@ document.addEventListener("DOMContentLoaded", () => {
     tips.push(`Скорость: ×${boatSpeedCoeff(b).toFixed(2)}`);
     if (tackPenaltyFactor < 1.0) tips.push(`Штраф смены галса: ×${tackPenaltyFactor.toFixed(2)}`);
     tips.push(`Дотягивание: ${snapThreshold.toFixed(2)}R`);
-    tips.push("Столкновения: запрещены");
+    tips.push(`Лодки: ${interactionModeLabel()}`);
     ctx.fillText(tips.join(" | "), center.x, center.y - Rp - 6);
   }
 
@@ -3181,6 +3589,54 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  function drawRealtimeHudPanel(){
+    if (!isRealtimePlayMode() || mode !== "play") return;
+
+    const boatIdx = realtimeControlledBoatIndex();
+    const boat = Number.isInteger(boatIdx) ? boats[boatIdx] : null;
+    if (!boat) return;
+
+    const courseDeg = boatCourseToWindDeg(boat);
+    const speedMps = boatRealtimeSpeedMps(boat);
+    const reverse = (Number.isFinite(boat.currentSpeedUnitsPerSec) ? boat.currentSpeedUnitsPerSec : 0) < -1e-6;
+    const lines = [
+      `Лодка ${boatIdx + 1}`,
+      `Острота к ветру: ${courseDeg === null ? "—" : `${courseDeg.toFixed(0)}°`}`,
+      `Скорость: ${speedMps.toFixed(1)} м/с`,
+      `Галс: ${boatTackLabel(boat)}`
+    ];
+
+    if (reverse){
+      lines.push("Режим: задний ход 10%");
+    } else if ((Number.isFinite(boat.penaltySlowUntil) ? boat.penaltySlowUntil : 0) > Date.now()){
+      lines.push("Штраф: замедление");
+    }
+
+    ctx.save();
+    const boxX = 18;
+    const boxY = 18;
+    const boxW = 248;
+    const boxH = 30 + lines.length * 18;
+    ctx.fillStyle = "rgba(255, 253, 248, 0.90)";
+    ctx.strokeStyle = rgbaHex(boat.color, 0.55);
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(boxX, boxY, boxW, boxH, 14);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = "#173042";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+    ctx.font = "700 15px system-ui";
+    ctx.fillText(lines[0], boxX + 14, boxY + 12);
+    ctx.font = "600 13px system-ui";
+    for (let i=1; i<lines.length; i++){
+      ctx.fillText(lines[i], boxX + 14, boxY + 12 + i * 18);
+    }
+    ctx.restore();
+  }
+
   function drawRealtimeOverlay(){
     if (isRealtimePlayMode() && mode === "play" && realtimeCursorTarget){
       const boatIdx = realtimeControlledBoatIndex();
@@ -3204,6 +3660,8 @@ document.addEventListener("DOMContentLoaded", () => {
         ctx.restore();
       }
     }
+
+    drawRealtimeHudPanel();
 
     if (!isRealtimeCountdown()) return;
 
@@ -3538,11 +3996,18 @@ document.addEventListener("DOMContentLoaded", () => {
       b.nextMark = nm;
       b.distance = 0;
       b.turns = 0;
+      b.penalties = 0;
+      b.collisions = 0;
       b.finished = false;
       b.place = null;
       b.hasHeading = false;
       b.heading = 0;
       b.tack = 0;
+      b.currentSpeedUnitsPerSec = 0;
+      b.penaltySlowUntil = 0;
+      b.lastPenaltyAt = 0;
+      b.lastPenaltyKey = "";
+      b.lastPenaltyReason = "";
 
       b.roundInZone = false;
       b.roundSweep = 0;
@@ -3596,6 +4061,16 @@ document.addEventListener("DOMContentLoaded", () => {
       setRealtimeReadyState();
     }
     updateResetButtonLabel();
+    updateStatus();
+    updateStats();
+    updateOptInfo();
+    render();
+    emitStateChanged();
+  });
+
+  interactionModeSelect?.addEventListener("change", () => {
+    interactionMode = normalizeInteractionMode(interactionModeSelect.value);
+    invalidateSolutions();
     updateStatus();
     updateStats();
     updateOptInfo();
@@ -3895,6 +4370,7 @@ document.addEventListener("DOMContentLoaded", () => {
       mode,
       currentPlayer,
       playMode,
+      interactionMode,
       hybridRound,
       hybridMovesLeft: hybridMovesLeft.slice(),
       realtimeCountdownEndsAt,
@@ -3937,6 +4413,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     roundingSide = roundingSideSelect.value;
     playMode = normalizePlayModeValue(playModeSelect.value);
+    interactionMode = normalizeInteractionMode(interactionModeSelect?.value);
     finishSeparate = (finishSeparateSelect.value === "yes");
     prestartRoundsSetting = Math.max(0, parseInt(prestartRoundsInp.value,10) || 0);
 

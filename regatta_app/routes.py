@@ -63,10 +63,13 @@ def normalize_room_start_state(game_state: dict) -> dict:
     race = game_state.setdefault("race", {})
     boats = list(game_state.get("boats") or [])
     settings.setdefault("realtimePrepSeconds", 12)
+    settings["interactionMode"] = settings.get("interactionMode") if settings.get("interactionMode") in {"ghost", "rules"} else "contact"
 
     for boat in boats:
         boat.setdefault("distance", 0)
         boat.setdefault("turns", 0)
+        boat["penalties"] = 0
+        boat["collisions"] = 0
         boat.setdefault("nextMark", 0)
         boat.setdefault("finished", False)
         boat.setdefault("place", None)
@@ -74,6 +77,11 @@ def normalize_room_start_state(game_state: dict) -> dict:
         boat.setdefault("heading", 0)
         boat.setdefault("tack", 0)
         boat.setdefault("speedCoeff", 1.0)
+        boat["currentSpeedUnitsPerSec"] = 0.0
+        boat["penaltySlowUntil"] = 0
+        boat["lastPenaltyAt"] = 0
+        boat["lastPenaltyKey"] = ""
+        boat["lastPenaltyReason"] = ""
         boat["roundInZone"] = False
         boat["roundSweep"] = 0
         boat["startDeltaMs"] = None

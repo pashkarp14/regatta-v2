@@ -118,6 +118,15 @@
             </label>
 
             <label class="control">
+              <span>Встречи лодок</span>
+              <select id="interactionMode" data-room-lock="setup">
+                <option value="contact" selected>Контактный</option>
+                <option value="ghost">Бесконтактный</option>
+                <option value="rules">Бесконтактный + правила</option>
+              </select>
+            </label>
+
+            <label class="control">
               <span>Финиш</span>
               <select id="finishSeparate" data-room-lock="setup">
                 <option value="no" selected>По стартовой линии</option>
@@ -323,6 +332,7 @@
       </section>
     </main>
   </div>
+  <div id="appToast" class="app-toast hidden" aria-live="polite"></div>
 
   <script src="{{ url_for('static', filename='vendor/socket.io.min.js') }}?v={{ version }}"></script>
   <script src="{{ url_for('static', filename='regatta.js') }}?v={{ version }}"></script>

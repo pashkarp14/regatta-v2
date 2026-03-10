@@ -21,6 +21,13 @@ ROUNDING_MIN_SWEEP = math.pi / 3
 REALTIME_SPEED_UNITS_PER_SEC = 2.4
 REALTIME_DEADZONE_SOFTNESS_DEG = 18.0
 REALTIME_TARGET_EPS = 0.04
+RULES_PENALTY_COOLDOWN_MS = 2200
+RULES_PENALTY_SLOW_MS = 4000
+RULES_PENALTY_SPEED_FACTOR = 0.72
+RULES_OVERLAP_EPS = 0.05
+RULES_LEEWAY_EPS = 0.05
+RULES_MARK_ROOM_EPS = 0.15
+BOAT_LENGTH_HALF = BOAT_FOOTPRINT_LENGTH / 2
 
 
 def clamp(value: float, min_value: float, max_value: float) -> float:
@@ -337,6 +344,306 @@ def move_factor_for_boat(boat: dict[str, Any], heading_vec: dict[str, float], se
     return factor
 
 
+def normalize_interaction_mode(raw_mode: Any) -> str:
+    if raw_mode in {"ghost", "rules"}:
+        return str(raw_mode)
+    return "contact"
+
+
+def boats_physical_collisions_enabled(settings: dict[str, Any]) -> bool:
+    return normalize_interaction_mode(settings.get("interactionMode")) == "contact"
+
+
+def rules_mode_enabled(settings: dict[str, Any]) -> bool:
+    return normalize_interaction_mode(settings.get("interactionMode")) == "rules"
+
+
+def realtime_penalty_factor(boat: dict[str, Any], now_ms: int) -> float:
+    penalty_slow_until = int(boat.get("penaltySlowUntil") or 0)
+    return RULES_PENALTY_SPEED_FACTOR if penalty_slow_until > now_ms else 1.0
+
+
+def heading_vector_from_state(state: dict[str, Any]) -> dict[str, float]:
+    direction = state.get("direction")
+    if isinstance(direction, dict):
+        x = float(direction.get("x") or 0.0)
+        y = float(direction.get("y") or 0.0)
+        if math.hypot(x, y) > 1e-6:
+            normalized = normalize({"x": x, "y": y})
+            return {"x": normalized["x"], "y": normalized["y"]}
+    return boat_axis_unit(float(state.get("heading") or 0.0), bool(state.get("hasHeading")))
+
+
+def boat_encounter_state(index: int, boat: dict[str, Any], **overrides: Any) -> dict[str, Any]:
+    pos = overrides.get("pos") or {"x": float(boat.get("x") or 0.0), "y": float(boat.get("y") or 0.0)}
+    prev = overrides.get("prev") or {"x": pos["x"], "y": pos["y"]}
+    heading = float(overrides.get("heading") if overrides.get("heading") is not None else boat.get("heading") or 0.0)
+    has_heading = bool(overrides.get("hasHeading") if overrides.get("hasHeading") is not None else boat.get("hasHeading"))
+    direction = overrides.get("direction") or boat_axis_unit(heading, has_heading)
+    signed_speed_units_per_sec = float(
+        overrides.get("signedSpeedUnitsPerSec")
+        if overrides.get("signedSpeedUnitsPerSec") is not None
+        else boat.get("currentSpeedUnitsPerSec") or 0.0
+    )
+    tack = int(
+        overrides.get("tack")
+        if overrides.get("tack") is not None
+        else boat.get("tack") if boat.get("tack") is not None else 0
+    )
+    return {
+        "index": index,
+        "boat": boat,
+        "pos": pos,
+        "prev": prev,
+        "heading": heading,
+        "hasHeading": has_heading,
+        "direction": direction,
+        "tack": tack,
+        "nextMark": int(overrides.get("nextMark") if overrides.get("nextMark") is not None else boat.get("nextMark") or 0),
+        "finished": bool(overrides.get("finished") if overrides.get("finished") is not None else boat.get("finished")),
+        "signedSpeedUnitsPerSec": signed_speed_units_per_sec,
+        "reverse": signed_speed_units_per_sec < -1e-6,
+    }
+
+
+def pair_reference_axis(left_state: dict[str, Any], right_state: dict[str, Any]) -> dict[str, float]:
+    left_dir = heading_vector_from_state(left_state)
+    right_dir = heading_vector_from_state(right_state)
+    axis = {"x": left_dir["x"] + right_dir["x"], "y": left_dir["y"] + right_dir["y"]}
+    if math.hypot(axis["x"], axis["y"]) < 1e-6:
+        axis = {"x": left_dir["x"], "y": left_dir["y"]}
+    if math.hypot(axis["x"], axis["y"]) < 1e-6:
+        axis = {"x": right_dir["x"], "y": right_dir["y"]}
+    if math.hypot(axis["x"], axis["y"]) < 1e-6:
+        axis = {
+            "x": float(right_state["pos"]["x"]) - float(left_state["pos"]["x"]),
+            "y": float(right_state["pos"]["y"]) - float(left_state["pos"]["y"]),
+        }
+    if math.hypot(axis["x"], axis["y"]) < 1e-6:
+        axis = {"x": 1.0, "y": 0.0}
+    normalized = normalize(axis)
+    return {"x": normalized["x"], "y": normalized["y"]}
+
+
+def pair_longitudinal_info(left_state: dict[str, Any], right_state: dict[str, Any]) -> dict[str, Any]:
+    axis = pair_reference_axis(left_state, right_state)
+    left_center = dot(left_state["pos"], axis)
+    right_center = dot(right_state["pos"], axis)
+    left_range = {"min": left_center - BOAT_LENGTH_HALF, "max": left_center + BOAT_LENGTH_HALF}
+    right_range = {"min": right_center - BOAT_LENGTH_HALF, "max": right_center + BOAT_LENGTH_HALF}
+    left_clear_astern = left_range["max"] < right_range["min"] - RULES_OVERLAP_EPS
+    right_clear_astern = right_range["max"] < left_range["min"] - RULES_OVERLAP_EPS
+    return {
+        "axis": axis,
+        "leftRange": left_range,
+        "rightRange": right_range,
+        "linked": not left_clear_astern and not right_clear_astern,
+        "leftClearAstern": left_clear_astern,
+        "rightClearAstern": right_clear_astern,
+    }
+
+
+def pair_leeward_info(left_state: dict[str, Any], right_state: dict[str, Any], wind_angle_deg: float) -> dict[str, Any]:
+    downwind = downwind_vec(wind_angle_deg)
+    left_proj = dot(left_state["pos"], downwind)
+    right_proj = dot(right_state["pos"], downwind)
+    if abs(left_proj - right_proj) <= RULES_LEEWAY_EPS:
+        return {"leewardIndex": None, "windwardIndex": None}
+    if left_proj > right_proj:
+        return {"leewardIndex": left_state["index"], "windwardIndex": right_state["index"]}
+    return {"leewardIndex": right_state["index"], "windwardIndex": left_state["index"]}
+
+
+def pair_mark_room_info(left_state: dict[str, Any], right_state: dict[str, Any], marks: list[dict[str, float]], mark_count: int) -> dict[str, Any] | None:
+    if left_state["finished"] or right_state["finished"]:
+        return None
+    if left_state["nextMark"] != right_state["nextMark"]:
+        return None
+    if left_state["nextMark"] < 0 or left_state["nextMark"] >= mark_count:
+        return None
+    if left_state["nextMark"] >= len(marks):
+        return None
+
+    mark = marks[left_state["nextMark"]]
+    left_dist = dist(left_state["pos"], mark)
+    right_dist = dist(right_state["pos"], mark)
+    in_zone = left_dist <= ROUND_PASS_RADIUS + RULES_MARK_ROOM_EPS or right_dist <= ROUND_PASS_RADIUS + RULES_MARK_ROOM_EPS
+    if not in_zone:
+        return None
+
+    longitudinal = pair_longitudinal_info(left_state, right_state)
+    if longitudinal["linked"] and abs(left_dist - right_dist) > RULES_MARK_ROOM_EPS:
+        inner = left_state if left_dist < right_dist else right_state
+        outer = right_state if inner["index"] == left_state["index"] else left_state
+        return {
+            "giveWayIndex": outer["index"],
+            "rightOfWayIndex": inner["index"],
+            "reason": "наружная лодка не дала место у знака",
+        }
+
+    if not longitudinal["linked"]:
+        if longitudinal["leftClearAstern"]:
+            return {
+                "giveWayIndex": left_state["index"],
+                "rightOfWayIndex": right_state["index"],
+                "reason": "чисто позади не уступила у знака",
+            }
+        if longitudinal["rightClearAstern"]:
+            return {
+                "giveWayIndex": right_state["index"],
+                "rightOfWayIndex": left_state["index"],
+                "reason": "чисто позади не уступила у знака",
+            }
+    return None
+
+
+def evaluate_right_of_way_for_pair(
+    left_state: dict[str, Any],
+    right_state: dict[str, Any],
+    wind_angle_deg: float,
+    marks: list[dict[str, float]],
+    mark_count: int,
+) -> dict[str, Any] | None:
+    if left_state["reverse"] != right_state["reverse"]:
+        give_way = left_state if left_state["reverse"] else right_state
+        right_of_way = right_state if give_way["index"] == left_state["index"] else left_state
+        return {
+            "giveWayIndex": give_way["index"],
+            "rightOfWayIndex": right_of_way["index"],
+            "reason": "лодка на заднем ходу должна сторониться",
+        }
+
+    mark_room = pair_mark_room_info(left_state, right_state, marks, mark_count)
+    if mark_room:
+        return mark_room
+
+    if left_state["tack"] != 0 and right_state["tack"] != 0 and left_state["tack"] != right_state["tack"]:
+        port_boat = left_state if left_state["tack"] < 0 else right_state
+        starboard_boat = right_state if port_boat["index"] == left_state["index"] else left_state
+        return {
+            "giveWayIndex": port_boat["index"],
+            "rightOfWayIndex": starboard_boat["index"],
+            "reason": "левый галс уступает правому",
+        }
+
+    if left_state["tack"] != 0 and left_state["tack"] == right_state["tack"]:
+        longitudinal = pair_longitudinal_info(left_state, right_state)
+        if longitudinal["linked"]:
+            leeward = pair_leeward_info(left_state, right_state, wind_angle_deg)
+            if leeward["windwardIndex"] is not None:
+                return {
+                    "giveWayIndex": leeward["windwardIndex"],
+                    "rightOfWayIndex": leeward["leewardIndex"],
+                    "reason": "наветренная лодка не уступила подветренной",
+                }
+        if longitudinal["leftClearAstern"]:
+            return {
+                "giveWayIndex": left_state["index"],
+                "rightOfWayIndex": right_state["index"],
+                "reason": "чисто позади не уступила чисто впереди",
+            }
+        if longitudinal["rightClearAstern"]:
+            return {
+                "giveWayIndex": right_state["index"],
+                "rightOfWayIndex": left_state["index"],
+                "reason": "чисто позади не уступила чисто впереди",
+            }
+
+    return None
+
+
+def pair_motion_incident(left_state: dict[str, Any], right_state: dict[str, Any]) -> dict[str, bool]:
+    left_capsule = boat_capsule_at(left_state["pos"], left_state["heading"], left_state["hasHeading"])
+    right_capsule = boat_capsule_at(right_state["pos"], right_state["heading"], right_state["hasHeading"])
+    hull_contact = capsules_overlap(left_capsule, right_capsule, BOAT_CLEARANCE_MARGIN)
+    sweep_distance = segment_segment_distance(left_state["prev"], left_state["pos"], right_state["prev"], right_state["pos"])
+    sweep_contact = sweep_distance < (BOAT_SWEEP_RADIUS * 2 + BOAT_CLEARANCE_MARGIN - 1e-9)
+    return {
+        "incident": hull_contact or sweep_contact,
+        "collision": hull_contact or sweep_distance < (BOAT_SWEEP_RADIUS * 2 - 1e-9),
+    }
+
+
+def apply_boat_rule_penalty(
+    boat: dict[str, Any],
+    other_index: int,
+    reason: str,
+    now_ms: int,
+    *,
+    collision: bool = False,
+) -> bool:
+    penalty_key = f"{other_index}:{reason}"
+    last_at = int(boat.get("lastPenaltyAt") or 0)
+    if boat.get("lastPenaltyKey") == penalty_key and now_ms - last_at < RULES_PENALTY_COOLDOWN_MS:
+        return False
+
+    boat["penalties"] = int(boat.get("penalties") or 0) + 1
+    if collision:
+        boat["collisions"] = int(boat.get("collisions") or 0) + 1
+    boat["lastPenaltyAt"] = now_ms
+    boat["lastPenaltyKey"] = penalty_key
+    boat["lastPenaltyReason"] = reason
+    boat["penaltySlowUntil"] = max(int(boat.get("penaltySlowUntil") or 0), now_ms + RULES_PENALTY_SLOW_MS)
+    return True
+
+
+def apply_realtime_rules_penalties(
+    boats: list[dict[str, Any]],
+    proposals: list[dict[str, Any]],
+    settings: dict[str, Any],
+    marks: list[dict[str, float]],
+    mark_count: int,
+    invalid: set[int],
+    now_ms: int,
+) -> bool:
+    if not rules_mode_enabled(settings):
+        return False
+
+    encounter_states = [
+        boat_encounter_state(
+            index,
+            boat,
+            pos=proposal["dest"] if proposal.get("accepted") and index not in invalid else {"x": float(boat["x"]), "y": float(boat["y"])},
+            prev=proposal.get("prev") or {"x": float(boat["x"]), "y": float(boat["y"])},
+            heading=proposal["heading"] if proposal.get("accepted") and index not in invalid else float(boat.get("heading") or 0.0),
+            hasHeading=proposal["hasHeading"] if proposal.get("accepted") and index not in invalid else bool(boat.get("hasHeading")),
+            direction=proposal["direction"] if proposal.get("accepted") and index not in invalid and proposal.get("direction") else boat_axis_unit(float(boat.get("heading") or 0.0), bool(boat.get("hasHeading"))),
+            signedSpeedUnitsPerSec=proposal["signedSpeedUnitsPerSec"] if proposal.get("accepted") and index not in invalid else 0.0,
+        )
+        for index, (boat, proposal) in enumerate(zip(boats, proposals))
+    ]
+
+    changed = False
+    wind_angle_deg = float(settings.get("windAngleDeg") or 0.0)
+    for left in range(len(encounter_states)):
+        if encounter_states[left]["finished"]:
+            continue
+        left_moved = bool(proposals[left].get("accepted")) and left not in invalid and float(proposals[left].get("distance") or 0.0) > 1e-5
+        for right in range(left + 1, len(encounter_states)):
+            if encounter_states[right]["finished"]:
+                continue
+            right_moved = bool(proposals[right].get("accepted")) and right not in invalid and float(proposals[right].get("distance") or 0.0) > 1e-5
+            if not left_moved and not right_moved:
+                continue
+
+            incident = pair_motion_incident(encounter_states[left], encounter_states[right])
+            if not incident["incident"]:
+                continue
+
+            ruling = evaluate_right_of_way_for_pair(encounter_states[left], encounter_states[right], wind_angle_deg, marks, mark_count)
+            if ruling is None:
+                if incident["collision"]:
+                    changed = apply_boat_rule_penalty(boats[left], right, "не избежал контакта", now_ms, collision=True) or changed
+                    changed = apply_boat_rule_penalty(boats[right], left, "не избежал контакта", now_ms, collision=True) or changed
+                continue
+
+            violator = int(ruling["giveWayIndex"])
+            other = int(ruling["rightOfWayIndex"])
+            changed = apply_boat_rule_penalty(boats[violator], other, str(ruling["reason"]), now_ms, collision=incident["collision"]) or changed
+
+    return changed
+
+
 def rounding_zone_relation(point: dict[str, float], mark_pos: dict[str, float]) -> int:
     distance = dist(point, mark_pos)
     if distance < ROUND_PASS_RADIUS - 1e-9:
@@ -475,6 +782,8 @@ def normalize_boat(boat: dict[str, Any]) -> dict[str, Any]:
     normalized = deepcopy(boat)
     normalized.setdefault("distance", 0.0)
     normalized.setdefault("turns", 0)
+    normalized.setdefault("penalties", 0)
+    normalized.setdefault("collisions", 0)
     normalized.setdefault("nextMark", 0)
     normalized.setdefault("finished", False)
     normalized.setdefault("place", None)
@@ -482,6 +791,11 @@ def normalize_boat(boat: dict[str, Any]) -> dict[str, Any]:
     normalized.setdefault("heading", 0.0)
     normalized.setdefault("tack", 0)
     normalized.setdefault("speedCoeff", 1.0)
+    normalized.setdefault("currentSpeedUnitsPerSec", 0.0)
+    normalized.setdefault("penaltySlowUntil", 0)
+    normalized.setdefault("lastPenaltyAt", 0)
+    normalized.setdefault("lastPenaltyKey", "")
+    normalized.setdefault("lastPenaltyReason", "")
     normalized.setdefault("roundInZone", False)
     normalized.setdefault("roundSweep", 0.0)
     normalized.setdefault("startDeltaMs", None)
@@ -567,6 +881,7 @@ def simulate_realtime_tick(game_state: dict[str, Any], controls: dict[int, dict[
     course = game_state.setdefault("course", {})
     boats = [normalize_boat(boat) for boat in list(game_state.get("boats") or [])]
     game_state["boats"] = boats
+    settings["interactionMode"] = normalize_interaction_mode(settings.get("interactionMode"))
 
     world = game_state.get("world") or {}
     world_w = float(world.get("width") or 18.0)
@@ -599,6 +914,8 @@ def simulate_realtime_tick(game_state: dict[str, Any], controls: dict[int, dict[
             "direction": None,
             "motionDirection": None,
             "distance": 0.0,
+            "signedSpeedUnitsPerSec": 0.0,
+            "reverseMode": False,
         }
         if boat.get("finished"):
             proposals.append(proposal)
@@ -621,7 +938,7 @@ def simulate_realtime_tick(game_state: dict[str, Any], controls: dict[int, dict[
         softness = math.radians(max(2.0, REALTIME_DEADZONE_SOFTNESS_DEG))
         heading_vec = {"x": normalized["x"], "y": normalized["y"]}
         heading = math.atan2(heading_vec["y"], heading_vec["x"])
-        move_factor = move_factor_for_boat(boat, heading_vec, settings, gust_rect)
+        move_factor = move_factor_for_boat(boat, heading_vec, settings, gust_rect) * realtime_penalty_factor(boat, now_ms)
         speed_factor = clamp((angle - half_dead) / softness, 0.0, 1.0)
         reverse_mode = speed_factor <= 1e-4
         step_length = (
@@ -650,6 +967,8 @@ def simulate_realtime_tick(game_state: dict[str, Any], controls: dict[int, dict[
                 "direction": heading_vec,
                 "motionDirection": motion_vec,
                 "distance": step_length,
+                "signedSpeedUnitsPerSec": ((-1.0 if reverse_mode else 1.0) * (step_length / dt_seconds)) if dt_seconds > 1e-6 else 0.0,
+                "reverseMode": reverse_mode,
             }
         )
         proposals.append(proposal)
@@ -678,45 +997,50 @@ def simulate_realtime_tick(game_state: dict[str, Any], controls: dict[int, dict[
                 break
         if index in invalid:
             continue
-        for other_index, other_boat in enumerate(boats):
-            if other_index == index:
-                continue
-            other_capsule = boat_capsule_at(
-                {"x": float(other_boat["x"]), "y": float(other_boat["y"])},
-                float(other_boat.get("heading") or 0.0),
-                bool(other_boat.get("hasHeading")),
-            )
-            if capsules_overlap(candidate_capsule, other_capsule, BOAT_CLEARANCE_MARGIN):
-                invalid.add(index)
-                break
-            if segment_segment_distance(proposal["prev"], dest, other_capsule["a"], other_capsule["b"]) < (BOAT_SWEEP_RADIUS + other_capsule["r"] + BOAT_CLEARANCE_MARGIN - 1e-9):
-                invalid.add(index)
-                break
+        if boats_physical_collisions_enabled(settings):
+            for other_index, other_boat in enumerate(boats):
+                if other_index == index:
+                    continue
+                other_capsule = boat_capsule_at(
+                    {"x": float(other_boat["x"]), "y": float(other_boat["y"])},
+                    float(other_boat.get("heading") or 0.0),
+                    bool(other_boat.get("hasHeading")),
+                )
+                if capsules_overlap(candidate_capsule, other_capsule, BOAT_CLEARANCE_MARGIN):
+                    invalid.add(index)
+                    break
+                if segment_segment_distance(proposal["prev"], dest, other_capsule["a"], other_capsule["b"]) < (BOAT_SWEEP_RADIUS + other_capsule["r"] + BOAT_CLEARANCE_MARGIN - 1e-9):
+                    invalid.add(index)
+                    break
 
-    for left in range(len(proposals)):
-        left_proposal = proposals[left]
-        if not left_proposal["accepted"] or left in invalid:
-            continue
-        left_capsule = boat_capsule_at(left_proposal["dest"], left_proposal["heading"], left_proposal["hasHeading"])
-        for right in range(left + 1, len(proposals)):
-            right_proposal = proposals[right]
-            if not right_proposal["accepted"] or right in invalid:
+    if boats_physical_collisions_enabled(settings):
+        for left in range(len(proposals)):
+            left_proposal = proposals[left]
+            if not left_proposal["accepted"] or left in invalid:
                 continue
-            right_capsule = boat_capsule_at(right_proposal["dest"], right_proposal["heading"], right_proposal["hasHeading"])
-            if capsules_overlap(left_capsule, right_capsule, BOAT_CLEARANCE_MARGIN):
-                invalid.add(left)
-                invalid.add(right)
-                continue
-            min_center_distance = segment_segment_distance(left_proposal["prev"], left_proposal["dest"], right_proposal["prev"], right_proposal["dest"])
-            if min_center_distance < (BOAT_SWEEP_RADIUS * 2 + BOAT_CLEARANCE_MARGIN - 1e-9):
-                invalid.add(left)
-                invalid.add(right)
+            left_capsule = boat_capsule_at(left_proposal["dest"], left_proposal["heading"], left_proposal["hasHeading"])
+            for right in range(left + 1, len(proposals)):
+                right_proposal = proposals[right]
+                if not right_proposal["accepted"] or right in invalid:
+                    continue
+                right_capsule = boat_capsule_at(right_proposal["dest"], right_proposal["heading"], right_proposal["hasHeading"])
+                if capsules_overlap(left_capsule, right_capsule, BOAT_CLEARANCE_MARGIN):
+                    invalid.add(left)
+                    invalid.add(right)
+                    continue
+                min_center_distance = segment_segment_distance(left_proposal["prev"], left_proposal["dest"], right_proposal["prev"], right_proposal["dest"])
+                if min_center_distance < (BOAT_SWEEP_RADIUS * 2 + BOAT_CLEARANCE_MARGIN - 1e-9):
+                    invalid.add(left)
+                    invalid.add(right)
+
+    changed = apply_realtime_rules_penalties(boats, proposals, settings, marks, mark_count, invalid, now_ms) or changed
 
     race["raceFinishedCount"] = sum(1 for boat in boats if boat.get("finished"))
     any_unfinished = False
     for index, boat in enumerate(boats):
         proposal = proposals[index]
         prev_pos = proposal["prev"]
+        boat["currentSpeedUnitsPerSec"] = 0.0
         if proposal["accepted"] and index not in invalid:
             dest = proposal["dest"]
             if abs(dest["x"] - boat["x"]) > 1e-9 or abs(dest["y"] - boat["y"]) > 1e-9:
@@ -729,6 +1053,7 @@ def simulate_realtime_tick(game_state: dict[str, Any], controls: dict[int, dict[
                 boat["heading"] = proposal["heading"]
                 boat["hasHeading"] = proposal["hasHeading"]
                 boat["tack"] = tack_sign_from_heading_vec(proposal["direction"], wind_angle_deg)
+                boat["currentSpeedUnitsPerSec"] = float(proposal.get("signedSpeedUnitsPerSec") or 0.0)
                 record_realtime_start_crossing(boat, prev_pos, dest, course, countdown_ends_at, tick_start_ms, now_ms)
                 update_boat_mark_and_finish(boat, prev_pos, dest, proposal["direction"], game_state)
         if not boat.get("finished"):
