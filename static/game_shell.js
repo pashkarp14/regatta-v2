@@ -29,13 +29,16 @@ document.addEventListener("DOMContentLoaded", () => {
   const menuScenarioCreateBtn = document.getElementById("menuScenarioCreate");
   const menuScenarioLoadMapBtn = document.getElementById("menuScenarioLoadMap");
   const menuScenarioResumeBtn = document.getElementById("menuScenarioResume");
-  const menuLocalHotseatBtn = document.getElementById("menuLocalHotseat");
-  const menuLocalBotsBtn = document.getElementById("menuLocalBots");
-  const menuLocalRealtimeBtn = document.getElementById("menuLocalRealtime");
+  const menuLocalPartyHotseatBtn = document.getElementById("menuLocalPartyHotseat");
+  const menuLocalPartyBotsBtn = document.getElementById("menuLocalPartyBots");
+  const menuLocalPlayModeTurnsBtn = document.getElementById("menuLocalPlayModeTurns");
+  const menuLocalPlayModeRealtimeBtn = document.getElementById("menuLocalPlayModeRealtime");
+  const menuLaunchLocalGameBtn = document.getElementById("menuLaunchLocalGame");
   const menuCreateRoomBtn = document.getElementById("menuCreateRoom");
   const menuJoinRoomBtn = document.getElementById("menuJoinRoom");
   const menuDeckRoomBtn = document.getElementById("menuDeckRoom");
   const menuDeckCourseBtn = document.getElementById("menuDeckCourse");
+  const menuDeckRulesBtn = document.getElementById("menuDeckRules");
   const menuDeckWeatherBtn = document.getElementById("menuDeckWeather");
   const menuDeckFleetBtn = document.getElementById("menuDeckFleet");
 
@@ -43,6 +46,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const menuHomeSummaryEl = document.getElementById("menuHomeSummary");
   const menuHomeLibraryEl = document.getElementById("menuHomeLibrary");
   const menuSettingsSummaryEl = document.getElementById("menuSettingsSummary");
+  const menuLocalSelectionSummaryEl = document.getElementById("menuLocalSelectionSummary");
   const menuLocalHintEl = document.getElementById("menuLocalHint");
   const menuNetworkHintEl = document.getElementById("menuNetworkHint");
   const mapsScreenHintEl = document.getElementById("mapsScreenHint");
@@ -60,11 +64,23 @@ document.addEventListener("DOMContentLoaded", () => {
   const menuDisplayNameInput = document.getElementById("menuDisplayName");
   const menuJoinCodeInput = document.getElementById("menuJoinCode");
   const playModeSelect = document.getElementById("playMode");
+  const finishSeparateSelect = document.getElementById("finishSeparate");
+  const modeFinishBtn = document.getElementById("modeFinish");
+  const prestartRoundsControlEl = document.getElementById("prestartRoundsControl");
+  const realtimePrepControlEl = document.getElementById("realtimePrepControl");
+  const deckRulesModeHintEl = document.getElementById("deckRulesModeHint");
+  const deckModeHintEl = document.getElementById("deckModeHint");
+  const scenarioLegControlEl = document.getElementById("scenarioLegControl");
+  const nextPlayerControlEl = document.getElementById("nextPlayerControl");
+  const markToEditControlEl = document.getElementById("markToEditControl");
+  const resumeFromModelBtn = document.getElementById("resumeFromModel");
 
   const menuState = {
     screen: "home",
     transport: null,
     scenario: null,
+    localParty: null,
+    localPlayMode: null,
     maps: [],
     races: [],
   };
@@ -103,7 +119,24 @@ document.addEventListener("DOMContentLoaded", () => {
   function currentDisplayName() {
     const menuName = menuDisplayNameInput?.value?.trim();
     const mainName = displayNameInput?.value?.trim();
-    return menuName || mainName || "Skipper";
+    return menuName || mainName || "Шкипер";
+  }
+
+  function formatPlayModeLabel(mode) {
+    return mode === "realtime" ? "В реальном времени" : "Пошаговая";
+  }
+
+  function formatPhaseLabel(phase) {
+    if (phase === "countdown") return "Обратный отсчёт";
+    if (phase === "prestart") return "Предстарт";
+    return "Гонка";
+  }
+
+  function formatFormatLabel(room) {
+    if (room) return "По сети";
+    return regatta.getLocalPilotMode?.() === "bots"
+      ? "Локально против ботов"
+      : "Локально на одном устройстве";
   }
 
   function syncMenuFieldsFromDeck() {
@@ -142,11 +175,16 @@ document.addEventListener("DOMContentLoaded", () => {
       syncMenuFieldsFromDeck();
       renderHomeSummary();
       renderSettingsSummary();
+      renderDeckContext();
       renderHints();
     }
   }
 
   function showScreen(name) {
+    const hasScreen = screens.some((screen) => screen.dataset.menuScreen === name);
+    if (!hasScreen) {
+      name = "home";
+    }
     menuState.screen = name;
     screens.forEach((screen) => {
       screen.classList.toggle("hidden", screen.dataset.menuScreen !== name);
@@ -154,6 +192,9 @@ document.addEventListener("DOMContentLoaded", () => {
     navButtons.forEach((button) => {
       button.classList.toggle("is-active", button.dataset.menuNav === name);
     });
+    if (name === "local") {
+      renderLocalSelection();
+    }
     renderFlowBadge();
     renderHints();
   }
@@ -174,6 +215,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function renderFlowBadge() {
+    if (!menuFlowBadgeEl) return;
     const labels = [];
     if (menuState.transport === "local") labels.push("Локальная");
     if (menuState.transport === "network") labels.push("Сеть");
@@ -208,8 +250,8 @@ document.addEventListener("DOMContentLoaded", () => {
       <div><strong>Поле:</strong> ${snapshot.world?.width || 0} × ${snapshot.world?.height || 0}</div>
       <div><strong>Лодок:</strong> ${meta.playerCount || snapshot.boats?.length || 0}</div>
       <div><strong>Знаков:</strong> ${summary.markCount || 0}</div>
-      <div><strong>Режим:</strong> ${meta.playMode === "realtime" ? "Realtime" : (regatta.getLocalPilotMode?.() === "bots" ? "Локально с ботами" : "По очереди")}</div>
-      <div><strong>Фаза:</strong> ${meta.phase || "race"}</div>
+      <div><strong>Режим:</strong> ${room ? "Сетевая гонка" : `${formatFormatLabel(null)} · ${formatPlayModeLabel(meta.playMode)}`}</div>
+      <div><strong>Фаза:</strong> ${formatPhaseLabel(meta.phase)}</div>
     `;
 
     menuHomeLibraryEl.innerHTML = `
@@ -221,23 +263,142 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function renderSettingsSummary() {
+    if (!menuSettingsSummaryEl) return;
     const meta = regatta.getMeta?.() || {};
     const snapshot = regatta.exportState();
     const room = roomSummary().room;
     menuSettingsSummaryEl.innerHTML = `
-      <div><strong>Формат:</strong> ${regatta.getLocalPilotMode?.() === "bots" ? "Локально с ботами" : "Локально по очереди"}</div>
-      <div><strong>Режим гонки:</strong> ${meta.playMode === "realtime" ? "Realtime" : "Пошаговый"}</div>
+      <div><strong>Формат:</strong> ${formatFormatLabel(room)}</div>
+      <div><strong>Режим игры:</strong> ${formatPlayModeLabel(meta.playMode)}</div>
+      <div><strong>Фаза:</strong> ${formatPhaseLabel(meta.phase)}</div>
       <div><strong>Комната:</strong> ${room ? `${room.code} · ${room.status}` : "не активна"}</div>
-      <div><strong>Ветер:</strong> ${Math.round(snapshot.settings?.windAngleDeg || 0)}°</div>
+      <div><strong>Ветер:</strong> ${Math.round(snapshot.settings?.windAngleDeg || 0)}° откуда дует</div>
       <div><strong>Позывной:</strong> ${currentDisplayName()}</div>
     `;
   }
 
+  function renderDeckContext() {
+    const meta = regatta.getMeta?.() || {};
+    const playMode = meta.playMode === "realtime" ? "realtime" : "turns";
+    const editorMode = meta.mode || "play";
+    const finishSeparate = finishSeparateSelect?.value === "yes";
+
+    prestartRoundsControlEl?.classList.toggle("hidden", playMode === "realtime");
+    realtimePrepControlEl?.classList.toggle("hidden", playMode !== "realtime");
+    modeFinishBtn?.classList.toggle("hidden", !finishSeparate);
+
+    if (deckRulesModeHintEl) {
+      deckRulesModeHintEl.textContent = playMode === "realtime"
+        ? "Сейчас выбрана игра в реальном времени. Перед стартом задаётся время на манёвры."
+        : "Сейчас выбрана пошаговая игра. Перед стартом задаётся число предстартовых кругов.";
+    }
+
+    const isMarksMode = editorMode === "marks";
+    const isModelMode = editorMode === "model";
+    markToEditControlEl?.classList.toggle("hidden", !isMarksMode);
+    scenarioLegControlEl?.classList.toggle("hidden", !isModelMode);
+    nextPlayerControlEl?.classList.toggle("hidden", !isModelMode);
+    resumeFromModelBtn?.classList.toggle("hidden", !isModelMode);
+
+    if (!deckModeHintEl) return;
+
+    if (editorMode === "marks") {
+      deckModeHintEl.textContent = "Выбери знак в списке и кликни по полю, чтобы переставить его.";
+      return;
+    }
+    if (editorMode === "start") {
+      deckModeHintEl.textContent = "Два клика по полю задают стартовую линию.";
+      return;
+    }
+    if (editorMode === "finish") {
+      deckModeHintEl.textContent = "Два клика по полю задают отдельную финишную линию.";
+      return;
+    }
+    if (editorMode === "boats") {
+      deckModeHintEl.textContent = "Выбери лодку на поле и переставь её в стартовую зону.";
+      return;
+    }
+    if (editorMode === "model") {
+      deckModeHintEl.textContent = "Собери нужную ситуацию на поле, затем укажи участок дистанции и следующего игрока.";
+      return;
+    }
+
+    deckModeHintEl.textContent = finishSeparate
+      ? "Редактор выключен. Выбери, что именно нужно настроить на поле."
+      : "Редактор выключен. Финиш сейчас идёт по стартовой линии, поэтому отдельная настройка финиша скрыта.";
+  }
+
+  function ensureLocalSelectionState() {
+    const meta = regatta.getMeta?.() || {};
+    if (!menuState.localParty) {
+      menuState.localParty = regatta.getLocalPilotMode?.() === "bots" ? "bots" : "hotseat";
+    }
+    if (!menuState.localPlayMode) {
+      menuState.localPlayMode = meta.playMode === "realtime" ? "realtime" : "turns";
+    }
+    if (menuState.localParty === "bots" && menuState.localPlayMode === "realtime") {
+      menuState.localPlayMode = "turns";
+    }
+  }
+
+  function localScenarioLabel() {
+    if (menuState.scenario === "create") return "Откроем редактор новой карты и сохраним выбранный режим для старта.";
+    if (menuState.scenario === "map") return "Запустим выбранную карту локально с этим режимом.";
+    if (menuState.scenario === "race") return "Продолжим сохранённую гонку локально с текущим управлением.";
+    return "Подготовим текущую дистанцию и сразу перейдём в игру.";
+  }
+
+  function renderLocalSelection() {
+    ensureLocalSelectionState();
+
+    const isBots = menuState.localParty === "bots";
+    const isRealtime = menuState.localPlayMode === "realtime";
+
+    menuLocalPartyHotseatBtn?.classList.toggle("is-selected", !isBots);
+    menuLocalPartyHotseatBtn?.classList.toggle("menu-action-card--accent", !isBots);
+    menuLocalPartyBotsBtn?.classList.toggle("is-selected", isBots);
+    menuLocalPartyBotsBtn?.classList.toggle("menu-action-card--accent", isBots);
+
+    if (menuLocalPlayModeTurnsBtn) {
+      menuLocalPlayModeTurnsBtn.classList.toggle("is-active", !isRealtime);
+    }
+    if (menuLocalPlayModeRealtimeBtn) {
+      menuLocalPlayModeRealtimeBtn.classList.toggle("is-active", isRealtime);
+      menuLocalPlayModeRealtimeBtn.disabled = isBots;
+      menuLocalPlayModeRealtimeBtn.setAttribute("aria-disabled", String(isBots));
+    }
+
+    if (menuLocalSelectionSummaryEl) {
+      const partyLabel = isBots ? "Против ботов" : "Несколько игроков на одном устройстве";
+      const modeLabel = isRealtime ? "В реальном времени" : "Пошаговая";
+      const controlLabel = isBots
+        ? "Лодка 1 остаётся у человека, остальные ходы делает ИИ."
+        : (isRealtime
+          ? "Все управляют на одном устройстве, гонка идёт без очереди."
+          : "Игроки по очереди передают ход на одном устройстве.");
+      menuLocalSelectionSummaryEl.innerHTML = `
+        <div><strong>Состав:</strong> ${partyLabel}</div>
+        <div><strong>Режим игры:</strong> ${modeLabel}</div>
+        <div><strong>Управление:</strong> ${controlLabel}</div>
+      `;
+    }
+
+    if (menuLocalHintEl) {
+      menuLocalHintEl.textContent = isBots
+        ? `${localScenarioLabel()} Боты доступны только в пошаговом режиме.`
+        : localScenarioLabel();
+    }
+
+    if (menuLaunchLocalGameBtn) {
+      menuLaunchLocalGameBtn.textContent = menuState.scenario === "create"
+        ? "Открыть редактор"
+        : (menuState.scenario === "race" ? "Продолжить локально" : "Начать локальную игру");
+    }
+  }
+
   function renderHints() {
     if (menuLocalHintEl) {
-      menuLocalHintEl.textContent = menuState.scenario === "create"
-        ? "Новая карта откроется сразу в редакторе дистанции. После правок гонку можно стартовать без потери настроек."
-        : "Выбирай локальный формат и запускай текущую конфигурацию поля.";
+      renderLocalSelection();
     }
 
     if (menuNetworkHintEl) {
@@ -248,14 +409,14 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (mapsScreenHintEl) {
       mapsScreenHintEl.textContent = menuState.transport === "network"
-        ? "Для сетевого сценария нажми «Хостить». Для локальной подготовки доступны быстрые кнопки запуска и редактора."
+        ? "Для сетевого сценария нажми «Открыть комнату». Для локальной подготовки доступны быстрые кнопки запуска и редактора."
         : "Стандартные карты идут с релизом, пользовательские лежат в серверной библиотеке.";
     }
 
     if (racesScreenHintEl) {
       racesScreenHintEl.textContent = menuState.transport === "network"
         ? "Сохраненную гонку можно поднять как новый онлайн-матч для удаленных игроков."
-        : "Продолжение локально загрузит полный snapshot гонки и сохранит все текущие настройки.";
+        : "Продолжение локально загрузит полный снимок гонки и сохранит все текущие настройки.";
     }
   }
 
@@ -264,12 +425,12 @@ document.addEventListener("DOMContentLoaded", () => {
     const tags = Array.isArray(record.tags) ? record.tags.map((tag) => `<span class="library-badge">${tag}</span>`).join("") : "";
     return `
       <div class="library-card__meta">
-        <span>${record.author || "Skipper"}</span>
+        <span>${record.author || "Шкипер"}</span>
         <span>${formatDate(record.updated_at)}</span>
         <span>${summary.player_count || 0} лодок</span>
         <span>${summary.mark_count || 0} знака</span>
-        <span>${summary.play_mode === "realtime" ? "Realtime" : "Пошаговая"}</span>
-        ${record.scope === "standard" ? '<span class="library-badge library-badge--standard">Standard</span>' : ""}
+        <span>${formatPlayModeLabel(summary.play_mode)}</span>
+        ${record.scope === "standard" ? '<span class="library-badge library-badge--standard">Стандарт</span>' : ""}
       </div>
       <div class="library-card__meta">${tags}</div>
     `;
@@ -280,7 +441,7 @@ document.addEventListener("DOMContentLoaded", () => {
       <div class="library-card__actions">
         <button type="button" class="action-primary" data-library-kind="maps" data-record-id="${record.id}" data-action="local">Локально</button>
         <button type="button" class="action-secondary" data-library-kind="maps" data-record-id="${record.id}" data-action="bots">С ботами</button>
-        <button type="button" class="action-secondary" data-library-kind="maps" data-record-id="${record.id}" data-action="network">Хостить</button>
+        <button type="button" class="action-secondary" data-library-kind="maps" data-record-id="${record.id}" data-action="network">Открыть комнату</button>
         <button type="button" class="ghost-btn" data-library-kind="maps" data-record-id="${record.id}" data-action="edit">Редактор</button>
         ${record.scope === "custom" ? `<button type="button" class="ghost-btn" data-library-kind="maps" data-record-id="${record.id}" data-action="delete">Удалить</button>` : ""}
       </div>
@@ -291,7 +452,7 @@ document.addEventListener("DOMContentLoaded", () => {
     return `
       <div class="library-card__actions">
         <button type="button" class="action-primary" data-library-kind="races" data-record-id="${record.id}" data-action="local">Продолжить</button>
-        <button type="button" class="action-secondary" data-library-kind="races" data-record-id="${record.id}" data-action="network">Хостить</button>
+        <button type="button" class="action-secondary" data-library-kind="races" data-record-id="${record.id}" data-action="network">Открыть комнату</button>
         ${record.scope === "custom" ? `<button type="button" class="ghost-btn" data-library-kind="races" data-record-id="${record.id}" data-action="delete">Удалить</button>` : ""}
       </div>
     `;
@@ -326,7 +487,7 @@ document.addEventListener("DOMContentLoaded", () => {
             ${raceCardActions(record)}
           </article>
         `).join("")
-      : '<div class="library-card"><strong>Сохраненных гонок пока нет</strong><span>Сделай checkpoint текущего матча из меню или с быстрого дока.</span></div>';
+      : '<div class="library-card"><strong>Сохраненных гонок пока нет</strong><span>Сделай сохранение текущего матча из меню или с быстрого дока.</span></div>';
   }
 
   async function refreshLibrary() {
@@ -465,6 +626,19 @@ document.addEventListener("DOMContentLoaded", () => {
     showToast(openEditor ? "Открыт редактор новой карты." : "Новая локальная гонка готова.");
   }
 
+  async function launchLocalSelection() {
+    ensureLocalSelectionState();
+    const localMode = menuState.localParty === "bots" ? "bots" : "hotseat";
+    const playMode = (localMode === "bots")
+      ? "turns"
+      : (menuState.localPlayMode === "realtime" ? "realtime" : "turns");
+    await startFreshLocal({
+      playMode,
+      localMode,
+      openEditor: menuState.scenario === "create",
+    });
+  }
+
   async function createFreshRoom() {
     await ensureSoloContext();
     syncDeckFieldsFromMenu();
@@ -591,27 +765,33 @@ document.addEventListener("DOMContentLoaded", () => {
     showScreen("races");
   });
 
-  menuLocalHotseatBtn?.addEventListener("click", async () => {
+  menuLocalPartyHotseatBtn?.addEventListener("click", () => {
+    menuState.localParty = "hotseat";
+    renderLocalSelection();
+  });
+
+  menuLocalPartyBotsBtn?.addEventListener("click", () => {
+    menuState.localParty = "bots";
+    menuState.localPlayMode = "turns";
+    renderLocalSelection();
+  });
+
+  menuLocalPlayModeTurnsBtn?.addEventListener("click", () => {
+    menuState.localPlayMode = "turns";
+    renderLocalSelection();
+  });
+
+  menuLocalPlayModeRealtimeBtn?.addEventListener("click", () => {
+    if (menuState.localParty === "bots") return;
+    menuState.localPlayMode = "realtime";
+    renderLocalSelection();
+  });
+
+  menuLaunchLocalGameBtn?.addEventListener("click", async () => {
     try {
-      await startFreshLocal({ playMode: "turns", localMode: "hotseat", openEditor: menuState.scenario === "create" });
+      await launchLocalSelection();
     } catch (error) {
       showToast(error.message || "Не удалось подготовить локальную игру.");
-    }
-  });
-
-  menuLocalBotsBtn?.addEventListener("click", async () => {
-    try {
-      await startFreshLocal({ playMode: "turns", localMode: "bots", openEditor: menuState.scenario === "create" });
-    } catch (error) {
-      showToast(error.message || "Не удалось подготовить игру с ботами.");
-    }
-  });
-
-  menuLocalRealtimeBtn?.addEventListener("click", async () => {
-    try {
-      await startFreshLocal({ playMode: "realtime", localMode: "hotseat", openEditor: false });
-    } catch (error) {
-      showToast(error.message || "Не удалось подготовить локальный realtime.");
     }
   });
 
@@ -637,6 +817,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   menuDeckRoomBtn?.addEventListener("click", () => focusDeckSection("deckRoomSection"));
   menuDeckCourseBtn?.addEventListener("click", () => focusDeckSection("deckCourseSection"));
+  menuDeckRulesBtn?.addEventListener("click", () => focusDeckSection("deckRulesSection"));
   menuDeckWeatherBtn?.addEventListener("click", () => focusDeckSection("deckWeatherSection"));
   menuDeckFleetBtn?.addEventListener("click", () => focusDeckSection("deckFleetSection"));
 
@@ -704,6 +885,7 @@ document.addEventListener("DOMContentLoaded", () => {
   window.addEventListener("regatta:state-changed", () => {
     renderHomeSummary();
     renderSettingsSummary();
+    renderDeckContext();
   });
 
   window.addEventListener("regatta:room-state", () => {
@@ -725,7 +907,9 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   syncMenuFieldsFromDeck();
+  renderLocalSelection();
   renderHints();
+  renderDeckContext();
   refreshLibrary().catch((error) => {
     showToast(error.message || "Не удалось загрузить библиотеку.");
   });

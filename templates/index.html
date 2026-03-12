@@ -48,7 +48,7 @@
       <aside class="control-rail is-collapsed" id="commandDeck" aria-hidden="true">
         <div class="control-rail-head">
           <div>
-            <span class="meta-label">Race Setup</span>
+            <span class="meta-label">Настройки</span>
             <h2>Настройки гонки</h2>
           </div>
           <button type="button" id="collapseCommandDeck" class="ghost-btn">Закрыть</button>
@@ -113,7 +113,7 @@
         <section class="panel" id="deckCourseSection">
           <div class="panel-head">
             <div>
-              <span class="meta-label">Course Forge</span>
+              <span class="meta-label">Геометрия</span>
               <h2>Дистанция</h2>
             </div>
           </div>
@@ -152,38 +152,11 @@
             </label>
 
             <label class="control">
-              <span>Режим гонки</span>
-              <select id="playMode" data-room-lock="setup">
-                <option value="turns" selected>По очереди</option>
-                <option value="realtime">В реальном времени</option>
-              </select>
-            </label>
-
-            <label class="control">
-              <span>Встречи лодок</span>
-              <select id="interactionMode" data-room-lock="setup">
-                <option value="contact" selected>Контактный</option>
-                <option value="ghost">Бесконтактный</option>
-                <option value="rules">Бесконтактный + правила</option>
-              </select>
-            </label>
-
-            <label class="control">
               <span>Финиш</span>
               <select id="finishSeparate" data-room-lock="setup">
                 <option value="no" selected>По стартовой линии</option>
                 <option value="yes">Отдельная линия</option>
               </select>
-            </label>
-
-            <label class="control">
-              <span>Кругов до старта</span>
-              <input id="prestartRounds" type="number" min="0" max="20" step="1" value="0" data-room-lock="setup" />
-            </label>
-
-            <label class="control">
-              <span>Маневры до старта, с</span>
-              <input id="realtimePrepSeconds" type="number" min="0" max="120" step="1" value="12" data-room-lock="setup" />
             </label>
 
             <label class="control">
@@ -197,7 +170,15 @@
             </label>
           </div>
 
-          <p id="interactionModeInfo" class="panel-note"></p>
+          <div class="hidden" aria-hidden="true">
+            <label class="control">
+              <span>Режим игры</span>
+              <select id="playMode" data-room-lock="setup">
+                <option value="turns" selected>По очереди</option>
+                <option value="realtime">В реальном времени</option>
+              </select>
+            </label>
+          </div>
 
           <div class="action-row">
             <button type="button" id="applyGrid" class="action-secondary" data-room-lock="setup">Перестроить поле</button>
@@ -205,50 +186,88 @@
           </div>
         </section>
 
-        <section class="panel" id="deckModesSection">
+        <section class="panel" id="deckRulesSection">
           <div class="panel-head">
             <div>
-              <span class="meta-label">Modes</span>
-              <h2>Режимы</h2>
+              <span class="meta-label">Правила</span>
+              <h2>Старт и правила</h2>
             </div>
           </div>
 
+          <div class="field-grid">
+            <label class="control">
+              <span>Столкновения лодок</span>
+              <select id="interactionMode" data-room-lock="setup">
+                <option value="contact" selected>С столкновениями</option>
+                <option value="ghost">Без столкновений</option>
+                <option value="rules">Без столкновений, но с правилами</option>
+              </select>
+            </label>
+
+            <label class="control" id="prestartRoundsControl">
+              <span>Кругов до старта</span>
+              <input id="prestartRounds" type="number" min="0" max="20" step="1" value="0" data-room-lock="setup" />
+            </label>
+
+            <label class="control wide-control" id="realtimePrepControl">
+              <span>Маневры до старта, с</span>
+              <input id="realtimePrepSeconds" type="number" min="0" max="120" step="1" value="12" data-room-lock="setup" />
+            </label>
+          </div>
+
+          <p class="panel-note">Режим игры выбирается в меню запуска. Здесь остаются только относящиеся к нему стартовые настройки.</p>
+          <p id="deckRulesModeHint" class="panel-note"></p>
+          <p id="interactionModeInfo" class="panel-note"></p>
+        </section>
+
+        <section class="panel" id="deckModesSection">
+          <div class="panel-head">
+            <div>
+              <span class="meta-label">Редактор</span>
+              <h2>Редактор поля</h2>
+            </div>
+          </div>
+
+          <p id="deckModeHint" class="panel-note">
+            Выбери, что именно меняем на поле: знаки, стартовую линию, лодки или моделируемую ситуацию.
+          </p>
+
           <div class="chip-group">
-            <button type="button" id="modePlay">Гонка</button>
-            <button type="button" id="modeMarks" data-room-lock="setup">Знаки</button>
-            <button type="button" id="modeStart" data-room-lock="setup">Старт</button>
-            <button type="button" id="modeFinish" data-room-lock="setup">Финиш</button>
-            <button type="button" id="modeBoats" data-room-lock="setup">Лодки</button>
-            <button type="button" id="modeModel" data-room-lock="setup">Моделирование</button>
+            <button type="button" id="modePlay">В игру</button>
+            <button type="button" id="modeMarks" data-room-lock="setup">Поставить знаки</button>
+            <button type="button" id="modeStart" data-room-lock="setup">Настроить старт</button>
+            <button type="button" id="modeFinish" data-room-lock="setup">Настроить финиш</button>
+            <button type="button" id="modeBoats" data-room-lock="setup">Расставить лодки</button>
+            <button type="button" id="modeModel" data-room-lock="setup">Смоделировать ситуацию</button>
           </div>
 
           <div class="field-grid compact-grid">
-            <label class="control">
-              <span>Лег</span>
+            <label class="control hidden" id="scenarioLegControl">
+              <span>Участок дистанции</span>
               <select id="scenarioLeg" data-room-lock="setup"></select>
             </label>
 
-            <label class="control">
-              <span>Следующий ход</span>
+            <label class="control hidden" id="nextPlayerControl">
+              <span>Следующий игрок</span>
               <select id="nextPlayer" data-room-lock="setup"></select>
             </label>
 
-            <label class="control">
-              <span>Выбранный знак</span>
+            <label class="control hidden" id="markToEditControl">
+              <span>Редактируемый знак</span>
               <select id="markToEdit" data-room-lock="setup"></select>
             </label>
           </div>
 
-          <button type="button" id="resumeFromModel" class="action-secondary" data-room-lock="setup">
-            Продолжить из ситуации
+          <button type="button" id="resumeFromModel" class="action-secondary hidden" data-room-lock="setup">
+            Применить ситуацию
           </button>
         </section>
 
         <section class="panel" id="deckWeatherSection">
           <div class="panel-head">
             <div>
-              <span class="meta-label">Weather</span>
-              <h2>Погодный блок</h2>
+              <span class="meta-label">Погода</span>
+              <h2>Ветер и условия</h2>
             </div>
             <span class="pill" id="windInfo">Ветер: 0°</span>
           </div>
@@ -304,16 +323,16 @@
         <section class="panel" id="deckTacticsSection">
           <div class="panel-head">
             <div>
-              <span class="meta-label">Tactics</span>
+              <span class="meta-label">Подсказки</span>
               <h2>Подсказки</h2>
             </div>
           </div>
 
           <div class="action-row wrap-row">
-            <button type="button" id="toggleOptimal" class="action-secondary">Оптимум для текущей лодки</button>
-            <button type="button" id="bestStart" class="action-secondary">Лучший старт</button>
-            <button type="button" id="toggleLaylines" class="action-secondary">Лейлайны</button>
-            <button type="button" id="toggleTrails" class="action-secondary">След траектории</button>
+            <button type="button" id="toggleOptimal" class="action-secondary">Показать лучший маршрут</button>
+            <button type="button" id="bestStart" class="action-secondary">Показать лучший старт</button>
+            <button type="button" id="toggleLaylines" class="action-secondary">Показать лейлайны</button>
+            <button type="button" id="toggleTrails" class="action-secondary">Показать траекторию</button>
           </div>
 
           <div class="field-grid compact-grid">
@@ -330,8 +349,8 @@
         <section class="panel" id="deckFleetSection">
           <div class="panel-head">
             <div>
-              <span class="meta-label">Fleet</span>
-              <h2>Яхты</h2>
+              <span class="meta-label">Лодки</span>
+              <h2>Лодки</h2>
             </div>
           </div>
 
@@ -392,12 +411,11 @@
     <div class="menu-shell">
       <div class="menu-topbar">
         <div>
-          <span class="meta-label">Main Menu</span>
-          <h2>Штормовой мостик</h2>
+          <span class="meta-label">Главное меню</span>
+          <h2>Меню регаты</h2>
         </div>
         <div class="menu-topbar-actions">
-          <span id="menuFlowBadge" class="menu-flow-badge">Меню</span>
-          <button type="button" id="closeMainMenu" class="ghost-btn">В игру</button>
+          <button type="button" id="closeMainMenu" class="ghost-btn menu-close-btn" aria-label="Вернуться в игру" title="Вернуться в игру">X</button>
         </div>
       </div>
 
@@ -407,15 +425,14 @@
           <button type="button" class="menu-rail-btn" data-menu-nav="mode">Новая игра</button>
           <button type="button" class="menu-rail-btn" data-menu-nav="maps">Карты</button>
           <button type="button" class="menu-rail-btn" data-menu-nav="races">Сохранения</button>
-          <button type="button" class="menu-rail-btn" data-menu-nav="settings">Пульт</button>
         </nav>
 
         <section class="menu-main">
           <div class="menu-screen" data-menu-screen="home">
             <div class="menu-screen-head">
               <div>
-                <span class="meta-label">Regatta Launch</span>
-                <h3>Стартовая каюта</h3>
+                <span class="meta-label">Старт</span>
+                <h3>Начало</h3>
               </div>
               <p>
                 При запуске открывается игровое меню. Отсюда можно начать новую регату,
@@ -437,13 +454,13 @@
               </button>
 
               <button type="button" id="menuOpenMaps" class="menu-action-card">
-                <span class="menu-action-card__eyebrow">Course Library</span>
+                <span class="menu-action-card__eyebrow">Библиотека</span>
                 <strong>Карты</strong>
                 <span>Стандартные трассы и карты, созданные пользователями на сервере.</span>
               </button>
 
               <button type="button" id="menuOpenRaces" class="menu-action-card">
-                <span class="menu-action-card__eyebrow">Race Archive</span>
+                <span class="menu-action-card__eyebrow">Сохранения</span>
                 <strong>Сохраненные гонки</strong>
                 <span>Поднять гонку из любого сохраненного момента.</span>
               </button>
@@ -465,7 +482,7 @@
           <div class="menu-screen hidden" data-menu-screen="mode">
             <div class="menu-screen-head">
               <div>
-                <span class="meta-label">Step 1</span>
+                <span class="meta-label">Шаг 1</span>
                 <h3>Выбери режим запуска</h3>
               </div>
               <p>Сначала определяем, играешь ли ты локально на одном устройстве или поднимаешь сетевую комнату.</p>
@@ -473,13 +490,13 @@
 
             <div class="menu-card-grid">
               <button type="button" id="menuChooseLocal" class="menu-action-card menu-action-card--accent">
-                <span class="menu-action-card__eyebrow">Local Command</span>
+                <span class="menu-action-card__eyebrow">Локально</span>
                 <strong>Локальная игра</strong>
-                <span>Один экран, горячая посадка по очереди, боты или локальный realtime.</span>
+                <span>Один экран, передача хода по очереди, боты или локальная игра в реальном времени.</span>
               </button>
 
               <button type="button" id="menuChooseNetwork" class="menu-action-card">
-                <span class="menu-action-card__eyebrow">Online Room</span>
+                <span class="menu-action-card__eyebrow">Сеть</span>
                 <strong>По сети</strong>
                 <span>Создать комнату, поделиться кодом и запускать гонку с любого интернета, а не только в локалке.</span>
               </button>
@@ -489,7 +506,7 @@
           <div class="menu-screen hidden" data-menu-screen="scenario">
             <div class="menu-screen-head">
               <div>
-                <span class="meta-label">Step 2</span>
+                <span class="meta-label">Шаг 2</span>
                 <h3>Выбери сценарий старта</h3>
               </div>
               <p>Дальше решаем, строим ли мы новую карту, поднимаем готовую трассу или возвращаемся к сохраненной гонке.</p>
@@ -497,19 +514,19 @@
 
             <div class="menu-card-grid">
               <button type="button" id="menuScenarioCreate" class="menu-action-card menu-action-card--accent">
-                <span class="menu-action-card__eyebrow">Course Forge</span>
+                <span class="menu-action-card__eyebrow">Редактор</span>
                 <strong>Создать новую карту</strong>
                 <span>Открыть редактор дистанции, расставить знаки и подготовить стартовый коридор.</span>
               </button>
 
               <button type="button" id="menuScenarioLoadMap" class="menu-action-card">
-                <span class="menu-action-card__eyebrow">Library</span>
+                <span class="menu-action-card__eyebrow">Библиотека</span>
                 <strong>Загрузить существующую карту</strong>
                 <span>Выбрать стандартную или пользовательскую карту из серверной библиотеки.</span>
               </button>
 
               <button type="button" id="menuScenarioResume" class="menu-action-card">
-                <span class="menu-action-card__eyebrow">Archive</span>
+                <span class="menu-action-card__eyebrow">Сохранение</span>
                 <strong>Запустить сохраненную гонку</strong>
                 <span>Продолжить матч из сохраненного момента без потери позиции, ветра и штрафов.</span>
               </button>
@@ -519,39 +536,67 @@
           <div class="menu-screen hidden" data-menu-screen="local">
             <div class="menu-screen-head">
               <div>
-                <span class="meta-label">Step 3</span>
-                <h3>Локальный формат</h3>
+                <span class="meta-label">Шаг 3</span>
+                <h3>Локальная игра</h3>
               </div>
-              <p>Для локального режима выбираем тип партии. Все текущие настройки дистанции и лодок сохраняются.</p>
+              <p>Сначала выбираем, с кем играешь, затем — режим игры. Все текущие настройки дистанции и лодок сохраняются.</p>
             </div>
 
-            <div class="menu-card-grid">
-              <button type="button" id="menuLocalHotseat" class="menu-action-card menu-action-card--accent">
-                <span class="menu-action-card__eyebrow">Hot Seat</span>
-                <strong>Ходить по очереди</strong>
-                <span>Классический локальный матч: игроки передают ход на одном устройстве.</span>
-              </button>
+            <div class="menu-choice-stack">
+              <section class="menu-choice-block">
+                <div class="menu-choice-head">
+                  <span class="meta-label">Состав гонки</span>
+                  <h4>С кем играешь?</h4>
+                </div>
 
-              <button type="button" id="menuLocalBots" class="menu-action-card">
-                <span class="menu-action-card__eyebrow">Solo Skirmish</span>
-                <strong>Играть с ботами</strong>
-                <span>Лодка 1 остается под человеком, остальные экипажи ведет автопилот.</span>
-              </button>
+                <div class="menu-card-grid menu-card-grid--two">
+                  <button type="button" id="menuLocalPartyHotseat" class="menu-action-card">
+                    <span class="menu-action-card__eyebrow">Локально</span>
+                    <strong>На одном устройстве</strong>
+                    <span>Несколько игроков по очереди на одном экране.</span>
+                  </button>
 
-              <button type="button" id="menuLocalRealtime" class="menu-action-card">
-                <span class="menu-action-card__eyebrow">Bonus Mode</span>
-                <strong>Локальный realtime</strong>
-                <span>Существующий realtime-режим без сети: общий старт и управление курсором.</span>
-              </button>
+                  <button type="button" id="menuLocalPartyBots" class="menu-action-card">
+                    <span class="menu-action-card__eyebrow">Соло</span>
+                    <strong>Против ботов</strong>
+                    <span>Лодка 1 остаётся у человека, остальные экипажи ведёт автопилот.</span>
+                  </button>
+                </div>
+              </section>
+
+              <section class="menu-choice-block">
+                <div class="menu-choice-head">
+                  <span class="meta-label">Режим игры</span>
+                  <h4>Пошаговая или в реальном времени</h4>
+                </div>
+
+                <div class="menu-mode-switch" role="group" aria-label="Режим локальной игры">
+                  <button type="button" id="menuLocalPlayModeTurns" class="menu-mode-btn">Пошаговая</button>
+                  <button type="button" id="menuLocalPlayModeRealtime" class="menu-mode-btn">В реальном времени</button>
+                </div>
+              </section>
             </div>
 
-            <p id="menuLocalHint" class="menu-inline-note"></p>
+            <div class="menu-summary-grid menu-summary-grid--local">
+              <div class="menu-summary-card">
+                <span class="meta-label">Текущий выбор</span>
+                <div id="menuLocalSelectionSummary" class="menu-summary-card__body"></div>
+              </div>
+
+              <div class="menu-summary-card">
+                <span class="meta-label">Следующий шаг</span>
+                <div class="menu-summary-card__body">
+                  <p id="menuLocalHint" class="menu-inline-note menu-inline-note-strong"></p>
+                  <button type="button" id="menuLaunchLocalGame" class="action-primary">Начать локальную игру</button>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div class="menu-screen hidden" data-menu-screen="network">
             <div class="menu-screen-head">
               <div>
-                <span class="meta-label">Step 3</span>
+                <span class="meta-label">Шаг 3</span>
                 <h3>Сетевая комната</h3>
               </div>
               <p>
@@ -563,7 +608,7 @@
             <div class="menu-form-grid">
               <label class="control wide-control">
                 <span>Позывной</span>
-                <input id="menuDisplayName" type="text" maxlength="24" placeholder="Skipper" />
+                <input id="menuDisplayName" type="text" maxlength="24" placeholder="Шкипер" />
               </label>
 
               <label class="control">
@@ -574,13 +619,13 @@
 
             <div class="menu-card-grid">
               <button type="button" id="menuCreateRoom" class="menu-action-card menu-action-card--accent">
-                <span class="menu-action-card__eyebrow">Host</span>
+                <span class="menu-action-card__eyebrow">Создать</span>
                 <strong>Создать комнату</strong>
                 <span>Поднять сетевое лобби и раздать код остальным экипажам.</span>
               </button>
 
               <button type="button" id="menuJoinRoom" class="menu-action-card">
-                <span class="menu-action-card__eyebrow">Join</span>
+                <span class="menu-action-card__eyebrow">Вход</span>
                 <strong>Войти по коду</strong>
                 <span>Подключиться к существующей комнате. Сценарий и карта придут от хоста.</span>
               </button>
@@ -592,7 +637,7 @@
           <div class="menu-screen hidden" data-menu-screen="maps">
             <div class="menu-screen-head">
               <div>
-                <span class="meta-label">Course Library</span>
+                <span class="meta-label">Библиотека</span>
                 <h3>Карты и стандартный набор</h3>
               </div>
               <p>
@@ -616,11 +661,11 @@
           <div class="menu-screen hidden" data-menu-screen="races">
             <div class="menu-screen-head">
               <div>
-                <span class="meta-label">Race Archive</span>
+                <span class="meta-label">Сохранения</span>
                 <h3>Сохраненные гонки</h3>
               </div>
               <p>
-                Каждое сохранение гонки содержит полный snapshot матча. Можно вернуться к нему локально
+                Каждое сохранение гонки содержит полный снимок матча. Можно вернуться к нему локально
                 или поднять из него новую сетевую комнату.
               </p>
             </div>
@@ -635,61 +680,6 @@
 
             <p id="racesScreenHint" class="menu-inline-note"></p>
             <div id="savedRacesList" class="library-list"></div>
-          </div>
-
-          <div class="menu-screen hidden" data-menu-screen="settings">
-            <div class="menu-screen-head">
-              <div>
-                <span class="meta-label">Bridge Deck</span>
-                <h3>Штурманский пульт</h3>
-              </div>
-              <p>
-                Детальные настройки живут только на пульте и не дублируются в меню. Здесь — быстрые входы в нужные секции,
-                чтобы можно было сразу открыть правильный блок без поиска по длинной колонке.
-              </p>
-            </div>
-
-            <div class="menu-card-grid">
-              <button type="button" id="menuDeckRoom" class="menu-action-card menu-action-card--accent">
-                <span class="menu-action-card__eyebrow">Room</span>
-                <strong>Комната и старт</strong>
-                <span>Код комнаты, состав экипажей, выход из лобби и запуск общего старта.</span>
-              </button>
-
-              <button type="button" id="menuDeckCourse" class="menu-action-card">
-                <span class="menu-action-card__eyebrow">Course Forge</span>
-                <strong>Дистанция и сценарий</strong>
-                <span>Размер поля, знаки, старт/финиш, режим гонки и сценарное моделирование.</span>
-              </button>
-
-              <button type="button" id="menuDeckWeather" class="menu-action-card">
-                <span class="menu-action-card__eyebrow">Weather</span>
-                <strong>Ветер и погода</strong>
-                <span>Направление ветра, мёртвая зона, порывы и бюджет ходов.</span>
-              </button>
-
-              <button type="button" id="menuDeckFleet" class="menu-action-card">
-                <span class="menu-action-card__eyebrow">Fleet</span>
-                <strong>Лодки и подсказки</strong>
-                <span>Параметры яхт, тактические подсказки, лейлайны и следы траектории.</span>
-              </button>
-            </div>
-
-            <div class="menu-summary-grid">
-              <div class="menu-summary-card">
-                <span class="meta-label">Текущая конфигурация</span>
-                <div id="menuSettingsSummary" class="menu-summary-card__body"></div>
-              </div>
-
-              <div class="menu-summary-card">
-                <span class="meta-label">Логика интерфейса</span>
-                <div class="menu-summary-card__body">
-                  <div><strong>Главное меню:</strong> запуск игры, карты, сохранения и вход в сеть.</div>
-                  <div><strong>Штурманский пульт:</strong> все детальные игровые настройки.</div>
-                  <div><strong>Быстрый док:</strong> только короткие действия без дублей настроек.</div>
-                </div>
-              </div>
-            </div>
           </div>
         </section>
       </div>

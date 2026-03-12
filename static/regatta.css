@@ -243,6 +243,7 @@ body.menu-open .app-shell{
 .action-secondary,
 .ghost-btn,
 .chip-group button,
+.menu-mode-btn,
 .menu-rail-btn,
 .menu-action-card{
   border:none;
@@ -396,6 +397,7 @@ body.menu-open .app-shell{
 .action-secondary:focus,
 .ghost-btn:focus,
 .chip-group button:focus,
+.menu-mode-btn:focus,
 .dock-btn:focus,
 .menu-rail-btn:focus,
 .menu-action-card:focus{
@@ -713,6 +715,7 @@ body.menu-open .app-shell{
 .ghost-btn:disabled,
 .dock-btn:disabled,
 .chip-group button:disabled,
+.menu-mode-btn:disabled,
 .control input:disabled,
 .control select:disabled,
 .menu-action-card:disabled{
@@ -816,9 +819,23 @@ canvas{
 
 .menu-topbar-actions{
   display:flex;
-  flex-wrap:wrap;
-  gap:10px;
+  justify-content:flex-end;
+  gap:8px;
   align-items:center;
+}
+
+.menu-close-btn{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:42px;
+  min-width:42px;
+  min-height:42px;
+  padding:0;
+  border-radius:999px;
+  font-size:18px;
+  font-weight:800;
+  line-height:1;
 }
 
 .menu-layout{
@@ -880,6 +897,10 @@ canvas{
   gap:14px;
 }
 
+.menu-card-grid--two{
+  grid-template-columns:repeat(2, minmax(0, 1fr));
+}
+
 .menu-action-card{
   display:grid;
   gap:12px;
@@ -893,6 +914,11 @@ canvas{
   color:var(--ink);
   text-align:left;
   box-shadow:var(--shadow-soft);
+}
+
+.menu-action-card.is-selected{
+  border-color:rgba(46, 196, 182, 0.42);
+  box-shadow:0 16px 36px rgba(2, 9, 14, 0.34), inset 0 0 0 1px rgba(46, 196, 182, 0.14);
 }
 
 .menu-action-card--accent{
@@ -919,6 +945,10 @@ canvas{
   gap:16px;
 }
 
+.menu-summary-grid--local{
+  align-items:start;
+}
+
 .menu-summary-card{
   padding:18px;
   border-radius:22px;
@@ -926,11 +956,62 @@ canvas{
   background:rgba(8, 19, 29, 0.76);
 }
 
+.menu-choice-stack{
+  display:grid;
+  gap:18px;
+}
+
+.menu-choice-block{
+  display:grid;
+  gap:14px;
+}
+
+.menu-choice-head{
+  display:grid;
+  gap:8px;
+}
+
+.menu-choice-head h4{
+  margin:0;
+  font-family:"Palatino Linotype","Book Antiqua","Georgia",serif;
+  font-size:1.35rem;
+  letter-spacing:0.02em;
+}
+
 .menu-summary-card__body{
   display:grid;
   gap:8px;
   margin-top:12px;
   color:#dff6f9;
+}
+
+.menu-mode-switch{
+  display:grid;
+  grid-template-columns:repeat(2, minmax(0, 1fr));
+  gap:12px;
+}
+
+.menu-mode-btn{
+  min-height:62px;
+  padding:16px 18px;
+  border-radius:18px;
+  border:1px solid rgba(255,255,255,0.08);
+  background:rgba(10, 24, 36, 0.82);
+  color:var(--ink);
+  font-weight:800;
+  letter-spacing:0.01em;
+}
+
+.menu-mode-btn.is-active{
+  border-color:rgba(46, 196, 182, 0.42);
+  background:linear-gradient(135deg, rgba(46, 196, 182, 0.22), rgba(244, 184, 96, 0.18));
+  box-shadow:0 16px 36px rgba(2, 9, 14, 0.34), inset 0 0 0 1px rgba(46, 196, 182, 0.12);
+}
+
+.menu-mode-btn:disabled{
+  opacity:0.45;
+  cursor:not-allowed;
+  box-shadow:none;
 }
 
 .menu-toolbar{
@@ -1015,6 +1096,11 @@ canvas{
   margin:0;
 }
 
+.menu-inline-note-strong{
+  min-height:44px;
+  color:#dff6f9;
+}
+
 .app-toast{
   position:fixed;
   right:20px;
@@ -1041,6 +1127,7 @@ canvas{
 .action-secondary:hover,
 .ghost-btn:hover,
 .chip-group button:hover,
+.menu-mode-btn:hover,
 .menu-rail-btn:hover,
 .menu-action-card:hover,
 .board-fullscreen-btn:hover,
@@ -1088,7 +1175,9 @@ canvas{
   .chip-group,
   .boat-tuning-grid,
   .menu-summary-grid,
-  .menu-form-grid{
+  .menu-form-grid,
+  .menu-card-grid--two,
+  .menu-mode-switch{
     grid-template-columns:1fr;
   }
 
