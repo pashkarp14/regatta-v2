@@ -309,7 +309,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function updateWindInfo(){
     const gustMode = autoGustsEnabled ? "авто" : (gustRect ? "порыв" : "штиль");
-    windInfoEl.textContent = `Ветер: ${windAngleDeg.toFixed(0)}° · ${gustMode}`;
+    windInfoEl.textContent = `Ветер: ${windAngleDeg.toFixed(0)}° откуда дует · ${gustMode}`;
   }
 
   function currentRaceTimeMs(){
@@ -3761,7 +3761,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     ctx.save();
     ctx.translate(base.x, base.y);
-    ctx.rotate(windAngleDeg * Math.PI/180);
+    ctx.rotate((windAngleDeg + 180) * Math.PI/180);
 
     ctx.strokeStyle = "#d32f2f";
     ctx.fillStyle = "#d32f2f";

@@ -27,7 +27,7 @@
 
         <div class="hero-actions">
           <button type="button" id="openMainMenu" class="action-primary">Меню регаты</button>
-          <button type="button" id="toggleCommandDeck" class="action-secondary">Штурманский пульт</button>
+          <button type="button" id="toggleCommandDeck" class="action-secondary">Настройки гонки</button>
         </div>
       </div>
 
@@ -41,20 +41,20 @@
       <button type="button" id="dockMenu" class="dock-btn">Меню</button>
       <button type="button" id="dockSaveMap" class="dock-btn">Сохранить карту</button>
       <button type="button" id="dockSaveRace" class="dock-btn">Сохранить гонку</button>
-      <button type="button" id="dockToggleDeck" class="dock-btn dock-btn-accent">Пульт</button>
+      <button type="button" id="dockToggleDeck" class="dock-btn dock-btn-accent">Настройки</button>
     </div>
 
     <main class="workspace">
-      <aside class="control-rail" id="commandDeck">
+      <aside class="control-rail is-collapsed" id="commandDeck" aria-hidden="true">
         <div class="control-rail-head">
           <div>
-            <span class="meta-label">Bridge Deck</span>
-            <h2>Штурманский пульт</h2>
+            <span class="meta-label">Race Setup</span>
+            <h2>Настройки гонки</h2>
           </div>
-          <button type="button" id="collapseCommandDeck" class="ghost-btn">Свернуть</button>
+          <button type="button" id="collapseCommandDeck" class="ghost-btn">Закрыть</button>
         </div>
 
-        <section class="panel panel-room">
+        <section class="panel panel-room" id="deckRoomSection">
           <div class="panel-head">
             <div>
               <span class="meta-label">Сеть</span>
@@ -63,23 +63,28 @@
           </div>
 
           <div class="stack">
-            <label class="control">
-              <span>Позывной</span>
-              <input id="displayName" type="text" maxlength="24" placeholder="Например, Pavel" />
-            </label>
-
-            <div class="action-row">
-              <button type="button" id="createRoom" class="action-primary">Создать комнату</button>
-              <button type="button" id="leaveRoom" class="action-secondary">Выйти</button>
-            </div>
-
-            <div class="join-row">
-              <label class="control grow">
-                <span>Код комнаты</span>
-                <input id="joinRoomCode" type="text" maxlength="6" placeholder="ABC123" />
+            <div class="hidden" aria-hidden="true">
+              <label class="control">
+                <span>Позывной</span>
+                <input id="displayName" type="text" maxlength="24" placeholder="Например, Pavel" />
               </label>
-              <button type="button" id="joinRoom" class="action-secondary">Войти</button>
+
+              <div class="action-row">
+                <button type="button" id="createRoom" class="action-primary">Создать комнату</button>
+              </div>
+
+              <div class="join-row">
+                <label class="control grow">
+                  <span>Код комнаты</span>
+                  <input id="joinRoomCode" type="text" maxlength="6" placeholder="ABC123" />
+                </label>
+                <button type="button" id="joinRoom" class="action-secondary">Войти</button>
+              </div>
             </div>
+
+            <p class="room-panel-note">
+              Создание и вход в комнату находятся в главном меню. Здесь остаются только статус лобби, запуск гонки и состав экипажей.
+            </p>
 
             <div class="room-summary">
               <div>
@@ -95,14 +100,17 @@
               </div>
             </div>
 
-            <button type="button" id="startRoom" class="action-primary">Запустить матч</button>
+            <div class="action-row">
+              <button type="button" id="startRoom" class="action-primary">Запустить матч</button>
+              <button type="button" id="leaveRoom" class="action-secondary">Выйти</button>
+            </div>
             <p class="panel-note hidden" id="roomHint"></p>
             <div id="roomNotice" class="room-notice room-notice-neutral hidden"></div>
             <ul id="roomPlayers" class="room-roster"></ul>
           </div>
         </section>
 
-        <section class="panel">
+        <section class="panel" id="deckCourseSection">
           <div class="panel-head">
             <div>
               <span class="meta-label">Course Forge</span>
@@ -197,7 +205,7 @@
           </div>
         </section>
 
-        <section class="panel">
+        <section class="panel" id="deckModesSection">
           <div class="panel-head">
             <div>
               <span class="meta-label">Modes</span>
@@ -236,7 +244,7 @@
           </button>
         </section>
 
-        <section class="panel">
+        <section class="panel" id="deckWeatherSection">
           <div class="panel-head">
             <div>
               <span class="meta-label">Weather</span>
@@ -293,7 +301,7 @@
           </div>
         </section>
 
-        <section class="panel">
+        <section class="panel" id="deckTacticsSection">
           <div class="panel-head">
             <div>
               <span class="meta-label">Tactics</span>
@@ -319,7 +327,7 @@
           </div>
         </section>
 
-        <section class="panel">
+        <section class="panel" id="deckFleetSection">
           <div class="panel-head">
             <div>
               <span class="meta-label">Fleet</span>
@@ -378,6 +386,8 @@
     </main>
   </div>
 
+  <div id="deckOverlay" class="deck-overlay hidden" aria-hidden="true"></div>
+
   <div id="mainMenuOverlay" class="menu-overlay" aria-hidden="false">
     <div class="menu-shell">
       <div class="menu-topbar">
@@ -396,8 +406,8 @@
           <button type="button" class="menu-rail-btn is-active" data-menu-nav="home">Главная</button>
           <button type="button" class="menu-rail-btn" data-menu-nav="mode">Новая игра</button>
           <button type="button" class="menu-rail-btn" data-menu-nav="maps">Карты</button>
-          <button type="button" class="menu-rail-btn" data-menu-nav="races">Гонки</button>
-          <button type="button" class="menu-rail-btn" data-menu-nav="settings">Настройки</button>
+          <button type="button" class="menu-rail-btn" data-menu-nav="races">Сохранения</button>
+          <button type="button" class="menu-rail-btn" data-menu-nav="settings">Пульт</button>
         </nav>
 
         <section class="menu-main">
@@ -630,36 +640,56 @@
           <div class="menu-screen hidden" data-menu-screen="settings">
             <div class="menu-screen-head">
               <div>
-                <span class="meta-label">Command Overrides</span>
-                <h3>Настройки и быстрые действия</h3>
+                <span class="meta-label">Bridge Deck</span>
+                <h3>Штурманский пульт</h3>
               </div>
               <p>
-                Все детальные настройки остались на штурманском пульте. Здесь — быстрые переходы,
-                чтобы игровой режим не превращался обратно в сухую админку.
+                Детальные настройки живут только на пульте и не дублируются в меню. Здесь — быстрые входы в нужные секции,
+                чтобы можно было сразу открыть правильный блок без поиска по длинной колонке.
               </p>
             </div>
 
             <div class="menu-card-grid">
-              <button type="button" id="menuOpenDeckSettings" class="menu-action-card menu-action-card--accent">
-                <span class="menu-action-card__eyebrow">Deck</span>
-                <strong>Открыть штурманский пульт</strong>
-                <span>Погода, дистанция, лодки, режимы моделирования и все текущие формы проекта.</span>
+              <button type="button" id="menuDeckRoom" class="menu-action-card menu-action-card--accent">
+                <span class="menu-action-card__eyebrow">Room</span>
+                <strong>Комната и старт</strong>
+                <span>Код комнаты, состав экипажей, выход из лобби и запуск общего старта.</span>
               </button>
 
-              <button type="button" id="menuQuickSaveMap" class="menu-action-card">
-                <span class="menu-action-card__eyebrow">Snapshot</span>
-                <strong>Быстро сохранить карту</strong>
-                <span>Записать текущую конфигурацию дистанции в библиотеку сервера.</span>
+              <button type="button" id="menuDeckCourse" class="menu-action-card">
+                <span class="menu-action-card__eyebrow">Course Forge</span>
+                <strong>Дистанция и сценарий</strong>
+                <span>Размер поля, знаки, старт/финиш, режим гонки и сценарное моделирование.</span>
               </button>
 
-              <button type="button" id="menuQuickSaveRace" class="menu-action-card">
-                <span class="menu-action-card__eyebrow">Snapshot</span>
-                <strong>Быстро сохранить гонку</strong>
-                <span>Сделать checkpoint матча и вернуться к нему позже.</span>
+              <button type="button" id="menuDeckWeather" class="menu-action-card">
+                <span class="menu-action-card__eyebrow">Weather</span>
+                <strong>Ветер и погода</strong>
+                <span>Направление ветра, мёртвая зона, порывы и бюджет ходов.</span>
+              </button>
+
+              <button type="button" id="menuDeckFleet" class="menu-action-card">
+                <span class="menu-action-card__eyebrow">Fleet</span>
+                <strong>Лодки и подсказки</strong>
+                <span>Параметры яхт, тактические подсказки, лейлайны и следы траектории.</span>
               </button>
             </div>
 
-            <div id="menuSettingsSummary" class="menu-summary-card__body"></div>
+            <div class="menu-summary-grid">
+              <div class="menu-summary-card">
+                <span class="meta-label">Текущая конфигурация</span>
+                <div id="menuSettingsSummary" class="menu-summary-card__body"></div>
+              </div>
+
+              <div class="menu-summary-card">
+                <span class="meta-label">Логика интерфейса</span>
+                <div class="menu-summary-card__body">
+                  <div><strong>Главное меню:</strong> запуск игры, карты, сохранения и вход в сеть.</div>
+                  <div><strong>Штурманский пульт:</strong> все детальные игровые настройки.</div>
+                  <div><strong>Быстрый док:</strong> только короткие действия без дублей настроек.</div>
+                </div>
+              </div>
+            </div>
           </div>
         </section>
       </div>

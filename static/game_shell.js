@@ -13,6 +13,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const toggleCommandDeckBtn = document.getElementById("toggleCommandDeck");
   const collapseCommandDeckBtn = document.getElementById("collapseCommandDeck");
   const commandDeckEl = document.getElementById("commandDeck");
+  const deckOverlayEl = document.getElementById("deckOverlay");
 
   const dockMenuBtn = document.getElementById("dockMenu");
   const dockSaveMapBtn = document.getElementById("dockSaveMap");
@@ -33,9 +34,10 @@ document.addEventListener("DOMContentLoaded", () => {
   const menuLocalRealtimeBtn = document.getElementById("menuLocalRealtime");
   const menuCreateRoomBtn = document.getElementById("menuCreateRoom");
   const menuJoinRoomBtn = document.getElementById("menuJoinRoom");
-  const menuOpenDeckSettingsBtn = document.getElementById("menuOpenDeckSettings");
-  const menuQuickSaveMapBtn = document.getElementById("menuQuickSaveMap");
-  const menuQuickSaveRaceBtn = document.getElementById("menuQuickSaveRace");
+  const menuDeckRoomBtn = document.getElementById("menuDeckRoom");
+  const menuDeckCourseBtn = document.getElementById("menuDeckCourse");
+  const menuDeckWeatherBtn = document.getElementById("menuDeckWeather");
+  const menuDeckFleetBtn = document.getElementById("menuDeckFleet");
 
   const menuFlowBadgeEl = document.getElementById("menuFlowBadge");
   const menuHomeSummaryEl = document.getElementById("menuHomeSummary");
@@ -130,6 +132,9 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function setMenuOpen(nextOpen) {
+    if (nextOpen) {
+      setCommandDeckOpen(false);
+    }
     overlay.classList.toggle("hidden", !nextOpen);
     overlay.setAttribute("aria-hidden", String(!nextOpen));
     body.classList.toggle("menu-open", nextOpen);
@@ -218,11 +223,12 @@ document.addEventListener("DOMContentLoaded", () => {
   function renderSettingsSummary() {
     const meta = regatta.getMeta?.() || {};
     const snapshot = regatta.exportState();
+    const room = roomSummary().room;
     menuSettingsSummaryEl.innerHTML = `
-      <div><strong>Локальный профиль:</strong> ${regatta.getLocalPilotMode?.() === "bots" ? "С ботами" : "По очереди"}</div>
-      <div><strong>Play mode:</strong> ${meta.playMode === "realtime" ? "Realtime" : "Пошаговый"}</div>
-      <div><strong>Interaction:</strong> ${snapshot.settings?.interactionMode || "contact"}</div>
-      <div><strong>Автопорывы:</strong> ${snapshot.settings?.autoGustsEnabled ? "включены" : "выключены"}</div>
+      <div><strong>Формат:</strong> ${regatta.getLocalPilotMode?.() === "bots" ? "Локально с ботами" : "Локально по очереди"}</div>
+      <div><strong>Режим гонки:</strong> ${meta.playMode === "realtime" ? "Realtime" : "Пошаговый"}</div>
+      <div><strong>Комната:</strong> ${room ? `${room.code} · ${room.status}` : "не активна"}</div>
+      <div><strong>Ветер:</strong> ${Math.round(snapshot.settings?.windAngleDeg || 0)}°</div>
       <div><strong>Позывной:</strong> ${currentDisplayName()}</div>
     `;
   }
@@ -346,15 +352,37 @@ document.addEventListener("DOMContentLoaded", () => {
     await multiplayer.leaveRoom();
   }
 
+  function prepareMapSnapshotForLocalMode(snapshot, localMode = "hotseat") {
+    const source = snapshot && typeof snapshot === "object"
+      ? JSON.parse(JSON.stringify(snapshot))
+      : null;
+    if (!source) return snapshot;
+
+    if (localMode === "bots") {
+      source.settings = {
+        ...(source.settings || {}),
+        playMode: "turns",
+        autoFullscreenMode: "off",
+      };
+    }
+
+    return regatta.normalizeMapState?.(source) || source;
+  }
+
   async function loadMapRecord(record, { localMode = "hotseat", openEditor = false } = {}) {
     await ensureSoloContext();
-    regatta.importState(regatta.normalizeMapState?.(record.snapshot) || record.snapshot);
+    const preparedState = prepareMapSnapshotForLocalMode(record.snapshot, localMode);
+    regatta.importState(preparedState);
     regatta.setLocalPilotMode?.(localMode);
     regatta.setMode(openEditor ? "marks" : "play");
     if (openEditor) {
       commandDeckEl.classList.remove("is-collapsed");
     }
     closeMenu();
+    if (localMode === "bots" && record.snapshot?.settings?.playMode === "realtime") {
+      showToast(`Карта «${record.name}» переведена в пошаговый режим для игры с ботами.`);
+      return;
+    }
     showToast(`Карта «${record.name}» загружена.`);
   }
 
@@ -448,11 +476,34 @@ document.addEventListener("DOMContentLoaded", () => {
     showToast("Сетевая комната создана.");
   }
 
+  function setCommandDeckOpen(nextOpen) {
+    const shouldOpen = !!nextOpen;
+    body.classList.toggle("deck-open", shouldOpen);
+    commandDeckEl.classList.toggle("is-collapsed", !shouldOpen);
+    commandDeckEl.setAttribute("aria-hidden", String(!shouldOpen));
+    deckOverlayEl?.classList.toggle("hidden", !shouldOpen);
+    deckOverlayEl?.setAttribute("aria-hidden", String(!shouldOpen));
+  }
+
   function toggleCommandDeck(force) {
-    const shouldCollapse = typeof force === "boolean"
-      ? !force
-      : !commandDeckEl.classList.contains("is-collapsed");
-    commandDeckEl.classList.toggle("is-collapsed", shouldCollapse);
+    const shouldOpen = typeof force === "boolean"
+      ? force
+      : commandDeckEl.classList.contains("is-collapsed");
+    if (shouldOpen) {
+      closeMenu();
+    }
+    setCommandDeckOpen(shouldOpen);
+  }
+
+  function focusDeckSection(sectionId) {
+    setMenuOpen(false);
+    setCommandDeckOpen(true);
+    const section = document.getElementById(sectionId);
+    if (section) {
+      window.setTimeout(() => {
+        section.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 20);
+    }
   }
 
   async function handleLibraryClick(event) {
@@ -506,6 +557,7 @@ document.addEventListener("DOMContentLoaded", () => {
   toggleCommandDeckBtn?.addEventListener("click", () => toggleCommandDeck());
   collapseCommandDeckBtn?.addEventListener("click", () => toggleCommandDeck(false));
   dockToggleDeckBtn?.addEventListener("click", () => toggleCommandDeck());
+  deckOverlayEl?.addEventListener("click", () => toggleCommandDeck(false));
 
   menuContinueBtn?.addEventListener("click", closeMenu);
   menuNewGameBtn?.addEventListener("click", () => showScreen("mode"));
@@ -583,26 +635,10 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  menuOpenDeckSettingsBtn?.addEventListener("click", () => {
-    commandDeckEl.classList.remove("is-collapsed");
-    closeMenu();
-  });
-
-  menuQuickSaveMapBtn?.addEventListener("click", async () => {
-    try {
-      await saveCurrentMap(mapRecordNameInput?.value);
-    } catch (error) {
-      showToast(error.message || "Не удалось сохранить карту.");
-    }
-  });
-
-  menuQuickSaveRaceBtn?.addEventListener("click", async () => {
-    try {
-      await saveCurrentRace(raceRecordNameInput?.value);
-    } catch (error) {
-      showToast(error.message || "Не удалось сохранить гонку.");
-    }
-  });
+  menuDeckRoomBtn?.addEventListener("click", () => focusDeckSection("deckRoomSection"));
+  menuDeckCourseBtn?.addEventListener("click", () => focusDeckSection("deckCourseSection"));
+  menuDeckWeatherBtn?.addEventListener("click", () => focusDeckSection("deckWeatherSection"));
+  menuDeckFleetBtn?.addEventListener("click", () => focusDeckSection("deckFleetSection"));
 
   saveCurrentMapBtn?.addEventListener("click", async () => {
     try {
@@ -675,6 +711,10 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && body.classList.contains("deck-open")) {
+      toggleCommandDeck(false);
+      return;
+    }
     if (event.key.toLowerCase() !== "m") return;
     if (event.target && /input|textarea|select/i.test(event.target.tagName)) return;
     if (overlay.classList.contains("hidden")) {
