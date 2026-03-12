@@ -48,6 +48,15 @@ document.addEventListener("DOMContentLoaded", () => {
   let toastTimer = 0;
   let roomStartPending = false;
 
+  function emitRoomStateChanged() {
+    window.dispatchEvent(new CustomEvent("regatta:room-state", {
+      detail: {
+        room: roomState.room,
+        selfSeatIndex: roomState.selfSeatIndex,
+      },
+    }));
+  }
+
   function roomPlayer() {
     if (!roomState.room || roomState.selfSeatIndex === null) return null;
     return roomState.room.players?.find((player) => player.seat_index === roomState.selfSeatIndex) || null;
@@ -348,6 +357,7 @@ document.addEventListener("DOMContentLoaded", () => {
       roomState.lastRealtimeIntentKey = "";
       syncBoardStartAction();
       applyPermissions();
+      emitRoomStateChanged();
       return;
     }
 
@@ -409,6 +419,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     syncBoardStartAction();
     applyPermissions();
+    emitRoomStateChanged();
   }
 
   function ensureSocket() {
@@ -694,6 +705,18 @@ document.addEventListener("DOMContentLoaded", () => {
   window.addEventListener("regatta:realtime-intent", () => {
     void trySendRealtimeControl(true);
   });
+
+  window.RegattaMultiplayer = {
+    createRoom,
+    joinRoom,
+    leaveRoom,
+    startRoom,
+    getRoomState: () => ({
+      room: roomState.room,
+      selfSeatIndex: roomState.selfSeatIndex,
+      serverClockOffsetMs: roomState.serverClockOffsetMs,
+    }),
+  };
 
   bootstrapRoom();
 });

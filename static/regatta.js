@@ -368,6 +368,10 @@ document.addEventListener("DOMContentLoaded", () => {
   let hybridRound = 1;
   let hybridMovesLeft = [];
   let multiplayerSeatIndex = null;
+  let localPilotMode = "hotseat";
+  const LOCAL_HUMAN_SEAT = 0;
+  let botTurnTimer = 0;
+  let botTurnInProgress = false;
   let realtimeCountdownEndsAt = 0;
   let realtimeCursorTarget = null;
   let realtimeCursorDirection = null;
@@ -679,6 +683,40 @@ document.addEventListener("DOMContentLoaded", () => {
   function updateResetButtonLabel(){
     btnReset.textContent = "Новая гонка";
     updateBoardStartAction();
+  }
+
+  function clearBotTurnTimer(){
+    if (botTurnTimer){
+      window.clearTimeout(botTurnTimer);
+      botTurnTimer = 0;
+    }
+  }
+
+  function isLocalBotsMode(){
+    return multiplayerSeatIndex === null && localPilotMode === "bots" && !isRealtimePlayMode();
+  }
+
+  function isHumanControlledBoat(boatIdx){
+    return !isLocalBotsMode() || boatIdx === LOCAL_HUMAN_SEAT;
+  }
+
+  function isBotControlledBoat(boatIdx){
+    return isLocalBotsMode() && !isHumanControlledBoat(boatIdx);
+  }
+
+  function setLocalPilotMode(nextMode="hotseat"){
+    localPilotMode = nextMode === "bots" ? "bots" : "hotseat";
+    clearBotTurnTimer();
+    if (isLocalBotsMode() && boats[LOCAL_HUMAN_SEAT]){
+      selectedBoatIndex = LOCAL_HUMAN_SEAT;
+    }
+    updateStatus();
+    updateStats();
+    updateOptInfo();
+    render();
+    if (isLocalBotsMode()){
+      scheduleLocalBotTurn();
+    }
   }
 
   function updateInteractionModeInfo(){
@@ -1692,6 +1730,146 @@ document.addEventListener("DOMContentLoaded", () => {
   // -----------------------------
   // Прогресс/финиш/смена игрока
   // -----------------------------
+  function botGoalPointForBoat(boat){
+    if (!boat) return null;
+    if (boat.nextMark < markCount){
+      return marks[boat.nextMark] || null;
+    }
+    const [finishLeft, finishRight] = finishLine();
+    return midpoint(finishLeft, finishRight);
+  }
+
+  function chooseBotDestination(boatIdx){
+    const boat = boats[boatIdx];
+    if (!boat || boat.finished) return null;
+
+    const planned = planOptimalFrom(
+      { x: boat.x, y: boat.y },
+      clamp(boat.nextMark, 0, markCount),
+      boat.hasHeading ? boat.heading : null,
+      boat.tack,
+      "course",
+      boatIdx,
+      boatSpeedCoeff(boat),
+    );
+    if (planned?.path?.length >= 2){
+      const plannedDest = proposeDestination(boatIdx, planned.path[1]);
+      if (plannedDest){
+        return plannedDest;
+      }
+    }
+
+    const goal = botGoalPointForBoat(boat);
+    if (!goal) return null;
+
+    const toGoal = norm({ x: goal.x - boat.x, y: goal.y - boat.y });
+    const baseDirection = toGoal.L > 1e-6 ? { x: toGoal.x, y: toGoal.y } : boatAxisUnit(boat.heading, boat.hasHeading);
+    const searchAngles = [
+      0,
+      Math.PI / 18,
+      -Math.PI / 18,
+      Math.PI / 9,
+      -Math.PI / 9,
+      Math.PI / 6,
+      -Math.PI / 6,
+      Math.PI / 4,
+      -Math.PI / 4,
+      Math.PI / 3,
+      -Math.PI / 3,
+      Math.PI / 2,
+      -Math.PI / 2,
+      Math.PI,
+    ];
+
+    let bestDest = null;
+    let bestScore = Infinity;
+    for (const angle of searchAngles){
+      const dir = rotateVec(baseDirection, angle);
+      const testPoint = {
+        x: boat.x + dir.x * STEP_RADIUS_BASE * 2,
+        y: boat.y + dir.y * STEP_RADIUS_BASE * 2,
+      };
+      const dest = proposeDestination(boatIdx, testPoint);
+      if (!dest){
+        continue;
+      }
+
+      const remaining = dist(dest, goal);
+      const heading = Math.atan2(dest.y - boat.y, dest.x - boat.x);
+      const route = planOptimalFrom(
+        { x: dest.x, y: dest.y },
+        clamp(boat.nextMark, 0, markCount),
+        heading,
+        tackSignFromHeadingVec({ x: dest.x - boat.x, y: dest.y - boat.y }),
+        "course",
+        boatIdx,
+        boatSpeedCoeff(boat),
+      );
+      const routePenalty = route?.distance ?? remaining;
+      const score = remaining + routePenalty * 0.45 + Math.abs(angle) * 0.12;
+      if (score < bestScore){
+        bestScore = score;
+        bestDest = dest;
+      }
+    }
+
+    return bestDest;
+  }
+
+  function scheduleLocalBotTurn({ delayMs=420 } = {}){
+    clearBotTurnTimer();
+    if (!isLocalBotsMode() || phase === "finished" || isRealtimePlayMode() || botTurnInProgress){
+      return;
+    }
+    if (!boats.length || boats.every((boat) => boat.finished)){
+      return;
+    }
+    if (!isBotControlledBoat(currentPlayer) || subMovesLeft <= 0){
+      return;
+    }
+    botTurnTimer = window.setTimeout(runLocalBotTurn, delayMs);
+  }
+
+  function finalizeBotTurnNoMove(){
+    subMovesLeft = 0;
+    advanceTurnToNext();
+    selectedBoatIndex = null;
+    updateStatus();
+    updateStats();
+    updateOptInfo();
+    render();
+    emitStateChanged();
+  }
+
+  async function runLocalBotTurn(){
+    botTurnTimer = 0;
+    if (!isLocalBotsMode() || !isBotControlledBoat(currentPlayer) || subMovesLeft <= 0 || phase === "finished"){
+      return;
+    }
+
+    botTurnInProgress = true;
+    try {
+      let guard = 0;
+      while (isLocalBotsMode() && isBotControlledBoat(currentPlayer) && subMovesLeft > 0 && phase !== "finished" && guard < 32){
+        const boatIdx = currentPlayer;
+        const dest = chooseBotDestination(boatIdx);
+        if (!dest){
+          finalizeBotTurnNoMove();
+          guard += 1;
+          continue;
+        }
+
+        performMove(boatIdx, dest);
+        invalidateSolutions();
+        updateOptInfo();
+        guard += 1;
+      }
+    } finally {
+      botTurnInProgress = false;
+      scheduleLocalBotTurn({ delayMs: 560 });
+    }
+  }
+
   function updateBoatMarkAndFinish(boat, prevPos, curPos, dirUnit){
     if (phase !== "race") return;
 
@@ -2027,6 +2205,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     ensureNextPlayerOptions();
+    scheduleLocalBotTurn();
   }
 
   function applyMovesPerTurnSetting(nextValue){
@@ -2135,6 +2314,7 @@ document.addEventListener("DOMContentLoaded", () => {
       updateStats();
       render();
       emitStateChanged();
+      clearBotTurnTimer();
       return;
     }
 
@@ -2154,6 +2334,7 @@ document.addEventListener("DOMContentLoaded", () => {
         updateStats();
         render();
         emitStateChanged();
+        scheduleLocalBotTurn();
         return;
       }
 
@@ -2165,6 +2346,7 @@ document.addEventListener("DOMContentLoaded", () => {
     updateStats();
     render();
     emitStateChanged();
+    scheduleLocalBotTurn();
   }
 
   // -----------------------------
@@ -2635,6 +2817,103 @@ document.addEventListener("DOMContentLoaded", () => {
     statusEl.textContent = `${phaseText}. Ход лодки ${who}. ${stepsInfo}. ${legInfo}. Клик по своей лодке → клик в разрешённую область.`;
   }
 
+  updateStatus = function(){
+    syncFullscreenPhaseWatch();
+
+    if (mode === "marks"){
+      const idx = parseInt(markToEditSelect.value,10) + 1;
+      statusEl.textContent = `\u0420\u0435\u0436\u0438\u043c: \u0437\u043d\u0430\u043a\u0438. \u041a\u043b\u0438\u043a \u043f\u043e \u043f\u043e\u043b\u044e \u2014 \u043f\u043e\u0441\u0442\u0430\u0432\u0438\u0442\u044c \u0437\u043d\u0430\u043a ${idx}.`;
+      return;
+    }
+    if (mode === "start"){
+      statusEl.textContent = startAwaitSecond
+        ? "\u0420\u0435\u0436\u0438\u043c: \u0441\u0442\u0430\u0440\u0442. \u0412\u044b\u0431\u0435\u0440\u0438 \u0432\u0442\u043e\u0440\u043e\u0439 \u043a\u043e\u043d\u0435\u0446 \u0441\u0442\u0430\u0440\u0442\u043e\u0432\u043e\u0439 \u043b\u0438\u043d\u0438\u0438."
+        : "\u0420\u0435\u0436\u0438\u043c: \u0441\u0442\u0430\u0440\u0442. \u041f\u0435\u0440\u0432\u044b\u0439 \u043a\u043b\u0438\u043a \u2014 \u043f\u0435\u0440\u0432\u044b\u0439 \u043a\u043e\u043d\u0435\u0446, \u0432\u0442\u043e\u0440\u043e\u0439 \u043a\u043b\u0438\u043a \u2014 \u0432\u0442\u043e\u0440\u043e\u0439 \u043a\u043e\u043d\u0435\u0446.";
+      return;
+    }
+    if (mode === "finish"){
+      statusEl.textContent = finishAwaitSecond
+        ? "\u0420\u0435\u0436\u0438\u043c: \u0444\u0438\u043d\u0438\u0448. \u0412\u044b\u0431\u0435\u0440\u0438 \u0432\u0442\u043e\u0440\u043e\u0439 \u043a\u043e\u043d\u0435\u0446 \u0444\u0438\u043d\u0438\u0448\u043d\u043e\u0439 \u043b\u0438\u043d\u0438\u0438."
+        : "\u0420\u0435\u0436\u0438\u043c: \u0444\u0438\u043d\u0438\u0448. \u041f\u0435\u0440\u0432\u044b\u0439 \u043a\u043b\u0438\u043a \u2014 \u043f\u0435\u0440\u0432\u044b\u0439 \u043a\u043e\u043d\u0435\u0446, \u0432\u0442\u043e\u0440\u043e\u0439 \u043a\u043b\u0438\u043a \u2014 \u0432\u0442\u043e\u0440\u043e\u0439 \u043a\u043e\u043d\u0435\u0446.";
+      return;
+    }
+    if (mode === "boats"){
+      const zone = (prestartRoundsSetting > 0 && phase === "prestart")
+        ? "\u0437\u0435\u043b\u0435\u043d\u0430\u044f \u0437\u043e\u043d\u0430 \u0437\u0430 \u0441\u0442\u0430\u0440\u0442\u043e\u0432\u043e\u0439 \u043b\u0438\u043d\u0438\u0435\u0439"
+        : "\u0437\u0435\u043b\u0435\u043d\u0430\u044f \u0437\u043e\u043d\u0430 \u043d\u0430 \u0441\u0442\u0430\u0440\u0442\u043e\u0432\u043e\u0439 \u043b\u0438\u043d\u0438\u0438";
+      statusEl.textContent = `\u0420\u0435\u0436\u0438\u043c: \u043b\u043e\u0434\u043a\u0438. \u041a\u043b\u0438\u043a \u043f\u043e \u043b\u043e\u0434\u043a\u0435 \u2014 \u0432\u044b\u0431\u0440\u0430\u0442\u044c. \u041a\u043b\u0438\u043a \u0432 ${zone} \u2014 \u043f\u043e\u0441\u0442\u0430\u0432\u0438\u0442\u044c (\u043d\u0435\u043b\u044c\u0437\u044f \u0441\u0442\u0430\u0432\u0438\u0442\u044c \u043d\u0430 \u0434\u0440\u0443\u0433\u0438\u0435 \u043b\u043e\u0434\u043a\u0438/\u0437\u043d\u0430\u043a\u0438).`;
+      return;
+    }
+    if (mode === "model"){
+      statusEl.textContent =
+        "\u0420\u0435\u0436\u0438\u043c: \u043c\u043e\u0434\u0435\u043b\u0438\u0440\u043e\u0432\u0430\u043d\u0438\u0435. \u041a\u043b\u0438\u043a \u043f\u043e \u043b\u043e\u0434\u043a\u0435 \u2014 \u0432\u044b\u0431\u0440\u0430\u0442\u044c. \u041a\u043b\u0438\u043a \u043f\u043e \u043f\u043e\u043b\u044e \u2014 \u043f\u043e\u0441\u0442\u0430\u0432\u0438\u0442\u044c \u043b\u043e\u0434\u043a\u0443 (\u043d\u0435\u043b\u044c\u0437\u044f \u0441\u0442\u0430\u0432\u0438\u0442\u044c \u043d\u0430 \u043b\u043e\u0434\u043a\u0438/\u0437\u043d\u0430\u043a\u0438). " +
+        "\u0412\u044b\u0431\u0435\u0440\u0438 \u043b\u0435\u0433 \u0438 \u0441\u043b\u0435\u0434\u0443\u044e\u0449\u0435\u0433\u043e \u0438\u0433\u0440\u043e\u043a\u0430, \u0437\u0430\u0442\u0435\u043c \u043d\u0430\u0436\u043c\u0438 \u00ab\u041f\u0440\u043e\u0434\u043e\u043b\u0436\u0438\u0442\u044c \u0438\u0437 \u0441\u0438\u0442\u0443\u0430\u0446\u0438\u0438\u00bb.";
+      return;
+    }
+
+    if (isRaceComplete()){
+      statusEl.textContent = "\u0413\u043e\u043d\u043a\u0430 \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043d\u0430: \u0432\u0441\u0435 \u043b\u043e\u0434\u043a\u0438 \u0444\u0438\u043d\u0438\u0448\u0438\u0440\u043e\u0432\u0430\u043b\u0438.";
+      return;
+    }
+
+    if (isRealtimePlayMode()){
+      const controlledBoatIndex = realtimeControlledBoatIndex();
+      const ownBoat = Number.isInteger(controlledBoatIndex) ? boats[controlledBoatIndex] : null;
+      const ownLegInfo = ownBoat && !ownBoat.finished
+        ? ` \u0422\u0432\u043e\u044f \u043b\u043e\u0434\u043a\u0430: ${controlledBoatIndex + 1}. \u0421\u043b\u0435\u0434\u0443\u044e\u0449\u0438\u0439 \u0437\u043d\u0430\u043a: ${Math.min(ownBoat.nextMark + 1, markCount)} \u0438\u0437 ${markCount}.`
+        : "";
+      if (phase === "countdown"){
+        const countdown = realtimeCountdownState();
+        if (countdown.active){
+          statusEl.textContent = `\u041f\u0440\u0435\u0434\u0441\u0442\u0430\u0440\u0442. \u0414\u043e \u0441\u0438\u0433\u043d\u0430\u043b\u0430 ${formatCountdownSeconds(countdown.totalMsLeft)} \u0441. \u0424\u0430\u043b\u044c\u0441\u0441\u0442\u0430\u0440\u0442 \u0441\u0447\u0438\u0442\u0430\u0435\u0442\u0441\u044f \u0442\u043e\u043b\u044c\u043a\u043e \u0432 \u043f\u043e\u0441\u043b\u0435\u0434\u043d\u0438\u0435 3.0 \u0441 \u0434\u043e \u0441\u0442\u0430\u0440\u0442\u0430.${ownLegInfo}`;
+        } else if (isLocalRealtimeMode()) {
+          statusEl.textContent = `\u041b\u043e\u043a\u0430\u043b\u044c\u043d\u044b\u0439 realtime \u0433\u043e\u0442\u043e\u0432. \u041d\u0430\u0436\u043c\u0438 \u00ab\u041e\u0431\u0449\u0438\u0439 \u0441\u0442\u0430\u0440\u0442\u00bb, \u0447\u0442\u043e\u0431\u044b \u043e\u0442\u043a\u0440\u044b\u0442\u044c \u043f\u0440\u0435\u0434\u0441\u0442\u0430\u0440\u0442. \u0412 \u0441\u043e\u043b\u043e \u0432\u0435\u0434\u0438 \u0432\u044b\u0431\u0440\u0430\u043d\u043d\u0443\u044e \u043b\u043e\u0434\u043a\u0443 \u043a\u0443\u0440\u0441\u043e\u0440\u043e\u043c.${ownLegInfo}`;
+        } else {
+          statusEl.textContent = `\u041e\u0436\u0438\u0434\u0430\u043d\u0438\u0435 \u043e\u0431\u0449\u0435\u0433\u043e \u0441\u0442\u0430\u0440\u0442\u0430.${ownLegInfo}`;
+        }
+      } else if (phase === "finished"){
+        statusEl.textContent = "\u0413\u043e\u043d\u043a\u0430 \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043d\u0430: \u0432\u0441\u0435 \u043b\u043e\u0434\u043a\u0438 \u0444\u0438\u043d\u0438\u0448\u0438\u0440\u043e\u0432\u0430\u043b\u0438.";
+      } else {
+        const controlHint = isLocalRealtimeMode()
+          ? "\u0412\u0435\u0434\u0438 \u0432\u044b\u0431\u0440\u0430\u043d\u043d\u0443\u044e \u043b\u043e\u0434\u043a\u0443 \u043a\u0443\u0440\u0441\u043e\u0440\u043e\u043c \u043c\u044b\u0448\u0438 \u0438\u043b\u0438 \u043a\u0430\u0441\u0430\u043d\u0438\u0435\u043c \u043f\u043e \u043f\u043e\u043b\u044e."
+          : "\u0412\u0435\u0434\u0438 \u0441\u0432\u043e\u044e \u043b\u043e\u0434\u043a\u0443 \u043a\u0443\u0440\u0441\u043e\u0440\u043e\u043c \u043c\u044b\u0448\u0438 \u0438\u043b\u0438 \u043a\u0430\u0441\u0430\u043d\u0438\u0435\u043c \u043f\u043e \u043f\u043e\u043b\u044e.";
+        statusEl.textContent = `\u0420\u0435\u0430\u043b\u044c\u043d\u043e\u0435 \u0432\u0440\u0435\u043c\u044f. \u0412\u0441\u0435 \u043b\u043e\u0434\u043a\u0438 \u0438\u0434\u0443\u0442 \u043e\u0434\u043d\u043e\u0432\u0440\u0435\u043c\u0435\u043d\u043d\u043e. ${controlHint}${ownLegInfo}`;
+      }
+      return;
+    }
+
+    if (isHybridRaceMode()){
+      const seat = (multiplayerSeatIndex !== null && boats[multiplayerSeatIndex]) ? multiplayerSeatIndex : selectedBoatIndex;
+      const ownBoat = Number.isInteger(seat) ? boats[seat] : null;
+      const ownInfo = ownBoat
+        ? ` \u0422\u0432\u043e\u044f \u043b\u043e\u0434\u043a\u0430: ${seat + 1}. \u0428\u0430\u0433\u043e\u0432 \u0432 \u0440\u0430\u0443\u043d\u0434\u0435: ${stepsLeftForBoat(seat)} / ${movesPerTurn}.`
+        : "";
+      statusEl.textContent = `\u0413\u043e\u043d\u043a\u0430. \u0413\u0438\u0431\u0440\u0438\u0434\u043d\u044b\u0439 \u0440\u0430\u0443\u043d\u0434 ${hybridRound}. \u0412\u0441\u0435 \u044d\u043a\u0438\u043f\u0430\u0436\u0438 \u0445\u043e\u0434\u044f\u0442 \u043e\u0434\u043d\u043e\u0432\u0440\u0435\u043c\u0435\u043d\u043d\u043e.${ownInfo} \u041a\u043b\u0438\u043a \u043f\u043e \u0441\u0432\u043e\u0435\u0439 \u043b\u043e\u0434\u043a\u0435 \u2192 \u043a\u043b\u0438\u043a \u0432 \u0440\u0430\u0437\u0440\u0435\u0448\u0435\u043d\u043d\u0443\u044e \u043e\u0431\u043b\u0430\u0441\u0442\u044c.`;
+      return;
+    }
+
+    const boat = boats[currentPlayer];
+    const who = currentPlayer + 1;
+    const phaseText = (phase === "prestart")
+      ? `\u041f\u0440\u0435\u0434\u0441\u0442\u0430\u0440\u0442: \u043a\u0440\u0443\u0433\u043e\u0432 \u0434\u043e \u0441\u0442\u0430\u0440\u0442\u0430 ${prestartRoundsLeft}`
+      : "\u0413\u043e\u043d\u043a\u0430";
+    const stepsInfo = `\u0428\u0430\u0433\u043e\u0432 \u043e\u0441\u0442\u0430\u043b\u043e\u0441\u044c: ${subMovesLeft} / ${movesPerTurn}`;
+    const legInfo = (phase === "race" && boat && !boat.finished)
+      ? ` \u0421\u043b\u0435\u0434\u0443\u044e\u0449\u0438\u0439 \u0437\u043d\u0430\u043a: ${Math.min(boat.nextMark + 1, markCount)} \u0438\u0437 ${markCount}.`
+      : "";
+
+    if (isLocalBotsMode()){
+      if (isBotControlledBoat(currentPlayer)){
+        statusEl.textContent = `${phaseText}. \u0425\u043e\u0434 \u0431\u043e\u0442\u0430 ${who}. ${stepsInfo}.${legInfo} \u0410\u0432\u0442\u043e\u043f\u0438\u043b\u043e\u0442 \u043f\u0440\u043e\u0441\u0447\u0438\u0442\u044b\u0432\u0430\u0435\u0442 \u043c\u0430\u043d\u0435\u0432\u0440.`;
+      } else {
+        statusEl.textContent = `${phaseText}. \u0422\u0432\u043e\u0439 \u0445\u043e\u0434: \u043b\u043e\u0434\u043a\u0430 ${who}. ${stepsInfo}.${legInfo} \u041a\u043b\u0438\u043a \u043f\u043e \u0441\u0432\u043e\u0435\u0439 \u043b\u043e\u0434\u043a\u0435 \u2192 \u043a\u043b\u0438\u043a \u0432 \u0440\u0430\u0437\u0440\u0435\u0448\u0435\u043d\u043d\u0443\u044e \u043e\u0431\u043b\u0430\u0441\u0442\u044c.`;
+      }
+      return;
+    }
+
+    statusEl.textContent = `${phaseText}. \u0425\u043e\u0434 \u043b\u043e\u0434\u043a\u0438 ${who}. ${stepsInfo}.${legInfo} \u041a\u043b\u0438\u043a \u043f\u043e \u0441\u0432\u043e\u0435\u0439 \u043b\u043e\u0434\u043a\u0435 \u2192 \u043a\u043b\u0438\u043a \u0432 \u0440\u0430\u0437\u0440\u0435\u0448\u0435\u043d\u043d\u0443\u044e \u043e\u0431\u043b\u0430\u0441\u0442\u044c.`;
+  };
+
   function updateStats(){
     const lines = [];
     const finishLinePoints = finishLine();
@@ -2797,6 +3076,8 @@ document.addEventListener("DOMContentLoaded", () => {
     realtimeCursorClient = null;
     activeRealtimePointerId = null;
     localRealtimeLastTickAt = 0;
+    clearBotTurnTimer();
+    botTurnInProgress = false;
     resetBoatTrails();
     clearGust();
     if (autoGustsEnabled){
@@ -2989,6 +3270,7 @@ document.addEventListener("DOMContentLoaded", () => {
   function canSelectBoatForPlay(boatIdx){
     if (!Number.isInteger(boatIdx)) return false;
     if (!canBoatMoveNow(boatIdx)) return false;
+    if (isLocalBotsMode()) return boatIdx === LOCAL_HUMAN_SEAT && boatIdx === currentPlayer;
     if (!isHybridRaceMode()) return boatIdx === currentPlayer;
     if (multiplayerSeatIndex !== null) return boatIdx === multiplayerSeatIndex;
     return true;
@@ -3331,11 +3613,13 @@ document.addEventListener("DOMContentLoaded", () => {
       return trail;
     });
 
-    selectedBoatIndex = null;
+    selectedBoatIndex = (isLocalBotsMode() && boats[LOCAL_HUMAN_SEAT]) ? LOCAL_HUMAN_SEAT : null;
     placementSelectedBoat = null;
     startAwaitSecond = false;
     finishAwaitSecond = false;
     localRealtimeLastTickAt = 0;
+    clearBotTurnTimer();
+    botTurnInProgress = false;
     if (!isRealtimePlayMode()){
       realtimeCursorTarget = null;
       realtimeCursorDirection = null;
@@ -3358,6 +3642,7 @@ document.addEventListener("DOMContentLoaded", () => {
     updateStats();
     updateOptInfo();
     render();
+    scheduleLocalBotTurn();
   }
 
   function fingerprintGameState(){
@@ -4723,12 +5008,105 @@ document.addEventListener("DOMContentLoaded", () => {
     updateOptInfo();
   });
 
+  function renderGameToText(){
+    const payload = {
+      mode,
+      phase,
+      playMode,
+      localPilotMode,
+      world: { width: worldW, height: worldH, origin: "bottom-left" },
+      race: {
+        currentPlayer,
+        subMovesLeft,
+        raceFinishedCount,
+        prestartRoundsLeft,
+        realtimeCountdownEndsAt,
+      },
+      boats: boats.map((boat, index) => ({
+        index,
+        x: Number(boat.x.toFixed(3)),
+        y: Number(boat.y.toFixed(3)),
+        nextMark: boat.nextMark,
+        finished: boat.finished,
+        place: boat.place,
+        selected: index === selectedBoatIndex,
+        controller: isBotControlledBoat(index) ? "bot" : "human",
+      })),
+      course: {
+        marks: marks.slice(0, markCount).map((mark, index) => ({
+          index,
+          x: Number(mark.x.toFixed(3)),
+          y: Number(mark.y.toFixed(3)),
+        })),
+        startA: { x: Number(startA.x.toFixed(3)), y: Number(startA.y.toFixed(3)) },
+        startB: { x: Number(startB.x.toFixed(3)), y: Number(startB.y.toFixed(3)) },
+      },
+    };
+    return JSON.stringify(payload);
+  }
+
+  function advanceTime(ms){
+    const totalMs = Math.max(0, Number(ms) || 0);
+    const stepMs = 1000 / 60;
+    const steps = Math.max(1, Math.round(totalMs / stepMs));
+    for (let i=0; i<steps; i++){
+      simulateLocalRealtimeTick(stepMs / 1000);
+    }
+    updateStatus();
+    updateStats();
+    updateOptInfo();
+    render();
+  }
+
+  function debugWorldToClient(point){
+    if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return null;
+    const screenPoint = worldToScreen(point);
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: rect.left + screenPoint.x * (rect.width / canvas.width),
+      y: rect.top + screenPoint.y * (rect.height / canvas.height)
+    };
+  }
+
+  function debugMoveTargets(boatIdx=currentPlayer){
+    const boat = boats[boatIdx];
+    if (!boat || boat.finished) return [];
+
+    const unique = new Map();
+    for (const dir of DIRS){
+      const probe = {
+        x: boat.x + dir.ux * STEP_RADIUS_BASE * 2,
+        y: boat.y + dir.uy * STEP_RADIUS_BASE * 2
+      };
+      const dest = proposeDestination(boatIdx, probe);
+      if (!dest) continue;
+      const key = `${dest.x.toFixed(3)},${dest.y.toFixed(3)}`;
+      if (unique.has(key)) continue;
+      unique.set(key, {
+        x: Number(dest.x.toFixed(3)),
+        y: Number(dest.y.toFixed(3)),
+        client: debugWorldToClient(dest)
+      });
+    }
+
+    return Array.from(unique.values());
+  }
+
+  window.render_game_to_text = renderGameToText;
+  window.advanceTime = advanceTime;
+
   window.RegattaApp = {
     exportState: exportGameState,
     importState: importGameState,
     fingerprintState: fingerprintGameState,
+    renderGameToText,
+    advanceTime,
+    debugWorldToClient,
+    debugMoveTargets,
     render,
     setMode,
+    setLocalPilotMode,
+    getLocalPilotMode: () => localPilotMode,
     requestBoardFullscreenIfAuto,
     requestBoardFullscreen,
     exitBoardFullscreen,
@@ -4741,9 +5119,13 @@ document.addEventListener("DOMContentLoaded", () => {
     setMultiplayerContext: ({ seatIndex=null } = {}) => {
       multiplayerSeatIndex = Number.isInteger(seatIndex) ? seatIndex : null;
       localRealtimeLastTickAt = 0;
+      clearBotTurnTimer();
       const candidateBoat = Number.isInteger(selectedBoatIndex) ? selectedBoatIndex : multiplayerSeatIndex;
       if (multiplayerSeatIndex !== null && isHybridRaceMode() && !canSelectBoatForPlay(candidateBoat)){
         selectedBoatIndex = null;
+      }
+      if (multiplayerSeatIndex === null && isLocalBotsMode()){
+        selectedBoatIndex = LOCAL_HUMAN_SEAT;
       }
       if (isRealtimePlayMode() && !Number.isInteger(realtimeControlledBoatIndex())){
         clearRealtimeIntent();
@@ -4755,6 +5137,7 @@ document.addEventListener("DOMContentLoaded", () => {
       updateStatus();
       updateStats();
       render();
+      scheduleLocalBotTurn();
     },
     getRealtimeIntent: () => {
       if (!isRealtimePlayMode()) return null;
@@ -4780,7 +5163,8 @@ document.addEventListener("DOMContentLoaded", () => {
       realtimeCountdownEndsAt,
       playerCount: boats.length,
       phase,
-      markCount
+      markCount,
+      localPilotMode
     })
   };
 
@@ -4799,7 +5183,6 @@ document.addEventListener("DOMContentLoaded", () => {
   function init(){
     gridColsInput.value = gridColsInput.value || String(DEFAULT_WORLD_W);
     gridRowsInput.value = gridRowsInput.value || String(DEFAULT_WORLD_H);
-    resizeBoardCanvas({ preserveView:false, resetView:true });
 
     markCount = parseInt(markCountSelect.value,10);
     ensureMarkOptions();
@@ -4826,6 +5209,8 @@ document.addEventListener("DOMContentLoaded", () => {
       finishA = { ...startA };
       finishB = { ...startB };
     }
+
+    resizeBoardCanvas({ preserveView:false, resetView:true });
 
     updateFinishButtonEnabled();
     updateInteractionModeInfo();

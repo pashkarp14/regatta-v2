@@ -7,11 +7,28 @@
   <link rel="icon" href="data:," />
   <link rel="stylesheet" href="{{ url_for('static', filename='regatta.css') }}?v={{ version }}" />
 </head>
-<body>
-  <div class="app-shell">
+<body class="menu-open">
+  <div class="game-atmosphere" aria-hidden="true">
+    <div class="game-atmosphere__aurora"></div>
+    <div class="game-atmosphere__chart"></div>
+    <div class="game-atmosphere__foam game-atmosphere__foam--left"></div>
+    <div class="game-atmosphere__foam game-atmosphere__foam--right"></div>
+  </div>
+
+  <div class="app-shell" id="appShell">
     <header class="hero">
       <div class="hero-copy">
+        <span class="meta-label">Regatta V3</span>
         <h1>{{ app_name }}</h1>
+        <p>
+          Тактическая парусная гонка с игровым меню, библиотекой карт, сохраненными заездами
+          и сетевыми комнатами для удаленного старта.
+        </p>
+
+        <div class="hero-actions">
+          <button type="button" id="openMainMenu" class="action-primary">Меню регаты</button>
+          <button type="button" id="toggleCommandDeck" class="action-secondary">Штурманский пульт</button>
+        </div>
       </div>
 
       <div class="hero-status">
@@ -20,11 +37,27 @@
       </div>
     </header>
 
+    <div class="command-dock" aria-label="Быстрые действия">
+      <button type="button" id="dockMenu" class="dock-btn">Меню</button>
+      <button type="button" id="dockSaveMap" class="dock-btn">Сохранить карту</button>
+      <button type="button" id="dockSaveRace" class="dock-btn">Сохранить гонку</button>
+      <button type="button" id="dockToggleDeck" class="dock-btn dock-btn-accent">Пульт</button>
+    </div>
+
     <main class="workspace">
-      <aside class="control-rail">
-        <section class="panel">
+      <aside class="control-rail" id="commandDeck">
+        <div class="control-rail-head">
+          <div>
+            <span class="meta-label">Bridge Deck</span>
+            <h2>Штурманский пульт</h2>
+          </div>
+          <button type="button" id="collapseCommandDeck" class="ghost-btn">Свернуть</button>
+        </div>
+
+        <section class="panel panel-room">
           <div class="panel-head">
             <div>
+              <span class="meta-label">Сеть</span>
               <h2>Комната</h2>
             </div>
           </div>
@@ -72,6 +105,7 @@
         <section class="panel">
           <div class="panel-head">
             <div>
+              <span class="meta-label">Course Forge</span>
               <h2>Дистанция</h2>
             </div>
           </div>
@@ -166,6 +200,7 @@
         <section class="panel">
           <div class="panel-head">
             <div>
+              <span class="meta-label">Modes</span>
               <h2>Режимы</h2>
             </div>
           </div>
@@ -204,6 +239,7 @@
         <section class="panel">
           <div class="panel-head">
             <div>
+              <span class="meta-label">Weather</span>
               <h2>Погодный блок</h2>
             </div>
             <span class="pill" id="windInfo">Ветер: 0°</span>
@@ -260,6 +296,7 @@
         <section class="panel">
           <div class="panel-head">
             <div>
+              <span class="meta-label">Tactics</span>
               <h2>Подсказки</h2>
             </div>
           </div>
@@ -285,6 +322,7 @@
         <section class="panel">
           <div class="panel-head">
             <div>
+              <span class="meta-label">Fleet</span>
               <h2>Яхты</h2>
             </div>
           </div>
@@ -292,7 +330,7 @@
           <div id="boatTuning" class="boat-tuning-grid"></div>
         </section>
 
-        <section class="panel">
+        <section class="panel hidden">
           <div class="panel-head">
             <div>
               <h2>Камера</h2>
@@ -322,24 +360,317 @@
       </aside>
 
       <section class="board-stage">
-        <div id="status" class="status-card"></div>
-        <div id="optinfo" class="info-card"></div>
+        <div class="stage-hud">
+          <div id="status" class="status-card status-card-primary"></div>
+          <div id="optinfo" class="info-card"></div>
+        </div>
 
         <div id="boardViewport" class="board-wrap">
+          <div class="board-chrome" aria-hidden="true"></div>
           <button type="button" id="toggleFullscreen" class="board-fullscreen-btn" aria-label="Полный экран">⛶</button>
           <button type="button" id="boardStartAction" class="board-start-btn hidden" aria-label="Старт гонки">Старт</button>
           <canvas id="board" width="1050" height="680"></canvas>
           <div id="interactionLock" class="interaction-lock hidden"></div>
         </div>
 
-        <div id="stats" class="info-card"></div>
+        <div id="stats" class="info-card info-card-wide"></div>
       </section>
     </main>
   </div>
+
+  <div id="mainMenuOverlay" class="menu-overlay" aria-hidden="false">
+    <div class="menu-shell">
+      <div class="menu-topbar">
+        <div>
+          <span class="meta-label">Main Menu</span>
+          <h2>Штормовой мостик</h2>
+        </div>
+        <div class="menu-topbar-actions">
+          <span id="menuFlowBadge" class="menu-flow-badge">Меню</span>
+          <button type="button" id="closeMainMenu" class="ghost-btn">В игру</button>
+        </div>
+      </div>
+
+      <div class="menu-layout">
+        <nav class="menu-rail" aria-label="Навигация меню">
+          <button type="button" class="menu-rail-btn is-active" data-menu-nav="home">Главная</button>
+          <button type="button" class="menu-rail-btn" data-menu-nav="mode">Новая игра</button>
+          <button type="button" class="menu-rail-btn" data-menu-nav="maps">Карты</button>
+          <button type="button" class="menu-rail-btn" data-menu-nav="races">Гонки</button>
+          <button type="button" class="menu-rail-btn" data-menu-nav="settings">Настройки</button>
+        </nav>
+
+        <section class="menu-main">
+          <div class="menu-screen" data-menu-screen="home">
+            <div class="menu-screen-head">
+              <div>
+                <span class="meta-label">Regatta Launch</span>
+                <h3>Стартовая каюта</h3>
+              </div>
+              <p>
+                При запуске открывается игровое меню. Отсюда можно начать новую регату,
+                продолжить текущую партию, выбрать стандартную карту или открыть серверную библиотеку сохранений.
+              </p>
+            </div>
+
+            <div class="menu-card-grid">
+              <button type="button" id="menuContinue" class="menu-action-card">
+                <span class="menu-action-card__eyebrow">Быстрый вход</span>
+                <strong>Продолжить</strong>
+                <span>Вернуться на поле и продолжить текущую гонку.</span>
+              </button>
+
+              <button type="button" id="menuNewGame" class="menu-action-card menu-action-card--accent">
+                <span class="menu-action-card__eyebrow">Новая сессия</span>
+                <strong>Новая игра</strong>
+                <span>Выбрать локальный или сетевой запуск и собрать новый сценарий регаты.</span>
+              </button>
+
+              <button type="button" id="menuOpenMaps" class="menu-action-card">
+                <span class="menu-action-card__eyebrow">Course Library</span>
+                <strong>Карты</strong>
+                <span>Стандартные трассы и карты, созданные пользователями на сервере.</span>
+              </button>
+
+              <button type="button" id="menuOpenRaces" class="menu-action-card">
+                <span class="menu-action-card__eyebrow">Race Archive</span>
+                <strong>Сохраненные гонки</strong>
+                <span>Поднять гонку из любого сохраненного момента.</span>
+              </button>
+            </div>
+
+            <div class="menu-summary-grid">
+              <div class="menu-summary-card">
+                <span class="meta-label">Состояние поля</span>
+                <div id="menuHomeSummary" class="menu-summary-card__body"></div>
+              </div>
+
+              <div class="menu-summary-card">
+                <span class="meta-label">Сеть и библиотека</span>
+                <div id="menuHomeLibrary" class="menu-summary-card__body"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="menu-screen hidden" data-menu-screen="mode">
+            <div class="menu-screen-head">
+              <div>
+                <span class="meta-label">Step 1</span>
+                <h3>Выбери режим запуска</h3>
+              </div>
+              <p>Сначала определяем, играешь ли ты локально на одном устройстве или поднимаешь сетевую комнату.</p>
+            </div>
+
+            <div class="menu-card-grid">
+              <button type="button" id="menuChooseLocal" class="menu-action-card menu-action-card--accent">
+                <span class="menu-action-card__eyebrow">Local Command</span>
+                <strong>Локальная игра</strong>
+                <span>Один экран, горячая посадка по очереди, боты или локальный realtime.</span>
+              </button>
+
+              <button type="button" id="menuChooseNetwork" class="menu-action-card">
+                <span class="menu-action-card__eyebrow">Online Room</span>
+                <strong>По сети</strong>
+                <span>Создать комнату, поделиться кодом и запускать гонку с любого интернета, а не только в локалке.</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="menu-screen hidden" data-menu-screen="scenario">
+            <div class="menu-screen-head">
+              <div>
+                <span class="meta-label">Step 2</span>
+                <h3>Выбери сценарий старта</h3>
+              </div>
+              <p>Дальше решаем, строим ли мы новую карту, поднимаем готовую трассу или возвращаемся к сохраненной гонке.</p>
+            </div>
+
+            <div class="menu-card-grid">
+              <button type="button" id="menuScenarioCreate" class="menu-action-card menu-action-card--accent">
+                <span class="menu-action-card__eyebrow">Course Forge</span>
+                <strong>Создать новую карту</strong>
+                <span>Открыть редактор дистанции, расставить знаки и подготовить стартовый коридор.</span>
+              </button>
+
+              <button type="button" id="menuScenarioLoadMap" class="menu-action-card">
+                <span class="menu-action-card__eyebrow">Library</span>
+                <strong>Загрузить существующую карту</strong>
+                <span>Выбрать стандартную или пользовательскую карту из серверной библиотеки.</span>
+              </button>
+
+              <button type="button" id="menuScenarioResume" class="menu-action-card">
+                <span class="menu-action-card__eyebrow">Archive</span>
+                <strong>Запустить сохраненную гонку</strong>
+                <span>Продолжить матч из сохраненного момента без потери позиции, ветра и штрафов.</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="menu-screen hidden" data-menu-screen="local">
+            <div class="menu-screen-head">
+              <div>
+                <span class="meta-label">Step 3</span>
+                <h3>Локальный формат</h3>
+              </div>
+              <p>Для локального режима выбираем тип партии. Все текущие настройки дистанции и лодок сохраняются.</p>
+            </div>
+
+            <div class="menu-card-grid">
+              <button type="button" id="menuLocalHotseat" class="menu-action-card menu-action-card--accent">
+                <span class="menu-action-card__eyebrow">Hot Seat</span>
+                <strong>Ходить по очереди</strong>
+                <span>Классический локальный матч: игроки передают ход на одном устройстве.</span>
+              </button>
+
+              <button type="button" id="menuLocalBots" class="menu-action-card">
+                <span class="menu-action-card__eyebrow">Solo Skirmish</span>
+                <strong>Играть с ботами</strong>
+                <span>Лодка 1 остается под человеком, остальные экипажи ведет автопилот.</span>
+              </button>
+
+              <button type="button" id="menuLocalRealtime" class="menu-action-card">
+                <span class="menu-action-card__eyebrow">Bonus Mode</span>
+                <strong>Локальный realtime</strong>
+                <span>Существующий realtime-режим без сети: общий старт и управление курсором.</span>
+              </button>
+            </div>
+
+            <p id="menuLocalHint" class="menu-inline-note"></p>
+          </div>
+
+          <div class="menu-screen hidden" data-menu-screen="network">
+            <div class="menu-screen-head">
+              <div>
+                <span class="meta-label">Step 3</span>
+                <h3>Сетевая комната</h3>
+              </div>
+              <p>
+                Для деплоя вне локальной сети карта и сохранения лежат на сервере. Комната поднимается поверх
+                текущего состояния поля, а при входе в чужую комнату сценарий придет от хоста.
+              </p>
+            </div>
+
+            <div class="menu-form-grid">
+              <label class="control wide-control">
+                <span>Позывной</span>
+                <input id="menuDisplayName" type="text" maxlength="24" placeholder="Skipper" />
+              </label>
+
+              <label class="control">
+                <span>Код комнаты</span>
+                <input id="menuJoinCode" type="text" maxlength="6" placeholder="ABC123" />
+              </label>
+            </div>
+
+            <div class="menu-card-grid">
+              <button type="button" id="menuCreateRoom" class="menu-action-card menu-action-card--accent">
+                <span class="menu-action-card__eyebrow">Host</span>
+                <strong>Создать комнату</strong>
+                <span>Поднять сетевое лобби и раздать код остальным экипажам.</span>
+              </button>
+
+              <button type="button" id="menuJoinRoom" class="menu-action-card">
+                <span class="menu-action-card__eyebrow">Join</span>
+                <strong>Войти по коду</strong>
+                <span>Подключиться к существующей комнате. Сценарий и карта придут от хоста.</span>
+              </button>
+            </div>
+
+            <p id="menuNetworkHint" class="menu-inline-note"></p>
+          </div>
+
+          <div class="menu-screen hidden" data-menu-screen="maps">
+            <div class="menu-screen-head">
+              <div>
+                <span class="meta-label">Course Library</span>
+                <h3>Карты и стандартный набор</h3>
+              </div>
+              <p>
+                Стандартные карты хранятся в репозитории и едут вместе с релизом. Пользовательские карты
+                сохраняются на сервере в отдельную библиотеку и доступны после деплоя из любого места.
+              </p>
+            </div>
+
+            <div class="menu-toolbar">
+              <label class="control grow">
+                <span>Имя текущей карты</span>
+                <input id="mapRecordName" type="text" maxlength="120" placeholder="Например, Ночной треугольник" />
+              </label>
+              <button type="button" id="saveCurrentMap" class="action-primary">Сохранить карту</button>
+            </div>
+
+            <p id="mapsScreenHint" class="menu-inline-note"></p>
+            <div id="savedMapsList" class="library-list"></div>
+          </div>
+
+          <div class="menu-screen hidden" data-menu-screen="races">
+            <div class="menu-screen-head">
+              <div>
+                <span class="meta-label">Race Archive</span>
+                <h3>Сохраненные гонки</h3>
+              </div>
+              <p>
+                Каждое сохранение гонки содержит полный snapshot матча. Можно вернуться к нему локально
+                или поднять из него новую сетевую комнату.
+              </p>
+            </div>
+
+            <div class="menu-toolbar">
+              <label class="control grow">
+                <span>Имя сохранения</span>
+                <input id="raceRecordName" type="text" maxlength="120" placeholder="Например, Финал 3-го лега" />
+              </label>
+              <button type="button" id="saveCurrentRace" class="action-primary">Сохранить гонку</button>
+            </div>
+
+            <p id="racesScreenHint" class="menu-inline-note"></p>
+            <div id="savedRacesList" class="library-list"></div>
+          </div>
+
+          <div class="menu-screen hidden" data-menu-screen="settings">
+            <div class="menu-screen-head">
+              <div>
+                <span class="meta-label">Command Overrides</span>
+                <h3>Настройки и быстрые действия</h3>
+              </div>
+              <p>
+                Все детальные настройки остались на штурманском пульте. Здесь — быстрые переходы,
+                чтобы игровой режим не превращался обратно в сухую админку.
+              </p>
+            </div>
+
+            <div class="menu-card-grid">
+              <button type="button" id="menuOpenDeckSettings" class="menu-action-card menu-action-card--accent">
+                <span class="menu-action-card__eyebrow">Deck</span>
+                <strong>Открыть штурманский пульт</strong>
+                <span>Погода, дистанция, лодки, режимы моделирования и все текущие формы проекта.</span>
+              </button>
+
+              <button type="button" id="menuQuickSaveMap" class="menu-action-card">
+                <span class="menu-action-card__eyebrow">Snapshot</span>
+                <strong>Быстро сохранить карту</strong>
+                <span>Записать текущую конфигурацию дистанции в библиотеку сервера.</span>
+              </button>
+
+              <button type="button" id="menuQuickSaveRace" class="menu-action-card">
+                <span class="menu-action-card__eyebrow">Snapshot</span>
+                <strong>Быстро сохранить гонку</strong>
+                <span>Сделать checkpoint матча и вернуться к нему позже.</span>
+              </button>
+            </div>
+
+            <div id="menuSettingsSummary" class="menu-summary-card__body"></div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+
   <div id="appToast" class="app-toast hidden" aria-live="polite"></div>
 
   <script src="{{ url_for('static', filename='vendor/socket.io.min.js') }}?v={{ version }}"></script>
   <script src="{{ url_for('static', filename='regatta.js') }}?v={{ version }}"></script>
   <script src="{{ url_for('static', filename='multiplayer.js') }}?v={{ version }}"></script>
+  <script src="{{ url_for('static', filename='game_shell.js') }}?v={{ version }}"></script>
 </body>
 </html>

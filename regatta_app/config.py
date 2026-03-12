@@ -23,3 +23,5 @@ class Config:
     SESSION_KEY_PREFIX = "regatta:v2:session:"
 
     SOCKETIO_ASYNC_MODE = os.getenv("SOCKETIO_ASYNC_MODE", "threading")
+    LIBRARY_DIR = os.getenv("LIBRARY_DIR", str(BASE_DIR / ".regatta_library"))
+    STANDARD_MAPS_DIR = os.getenv("STANDARD_MAPS_DIR", str(BASE_DIR / "regatta_app" / "standard_maps"))

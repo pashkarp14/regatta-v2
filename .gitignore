@@ -8,3 +8,6 @@ __pycache__/
 .flask_session/
 node_modules/
 *.log
+.regatta_library/
+output/
+progress.md

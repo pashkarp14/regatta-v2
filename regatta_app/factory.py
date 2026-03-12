@@ -5,6 +5,7 @@ from redis import Redis
 
 from .config import Config
 from .extensions import session_ext, socketio
+from .library_store import LibraryStore
 from .room_store import RoomStore
 from .routes import bp as main_bp
 from . import sockets  # noqa: F401
@@ -35,6 +36,10 @@ def create_app() -> Flask:
 
     app.extensions["redis_client"] = redis_client
     app.extensions["room_store"] = RoomStore(redis_client, app.config["ROOM_TTL_SECONDS"])
+    app.extensions["library_store"] = LibraryStore(
+        app.config["LIBRARY_DIR"],
+        app.config["STANDARD_MAPS_DIR"],
+    )
     app.extensions["socketio"] = socketio
 
     app.register_blueprint(main_bp)

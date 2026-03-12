@@ -1,0 +1,67 @@
+{
+  "id": "std-training-bay",
+  "name": "Тренировочная бухта",
+  "author": "Regatta V3",
+  "description": "Широкая учебная дистанция с понятной геометрией для первых стартов и обгонов.",
+  "sort_index": 1,
+  "tags": [
+    "стандарт",
+    "обучение",
+    "широкая"
+  ],
+  "snapshot": {
+    "version": 2,
+    "world": {
+      "width": 54,
+      "height": 72
+    },
+    "settings": {
+      "windAngleDeg": 0,
+      "deadZoneDeg": 40,
+      "snapThreshold": 0.8,
+      "movesPerTurn": 1,
+      "roundingSide": "port",
+      "playMode": "turns",
+      "interactionMode": "contact",
+      "tackPenaltyFactor": 0.95,
+      "autoGustsEnabled": false,
+      "autoGustIntervalSec": 10,
+      "autoGustDurationSec": 6,
+      "realtimePrepSeconds": 12,
+      "autoFullscreenMode": "off",
+      "finishSeparate": false,
+      "prestartRoundsSetting": 0
+    },
+    "course": {
+      "markCount": 3,
+      "marks": [
+        { "x": 27, "y": 58 },
+        { "x": 16, "y": 36 },
+        { "x": 9, "y": 4 }
+      ],
+      "startA": { "x": 10, "y": 10 },
+      "startB": { "x": 44, "y": 10 },
+      "finishA": { "x": 10, "y": 10 },
+      "finishB": { "x": 44, "y": 10 },
+      "gustRect": null
+    },
+    "race": {
+      "currentPlayer": 0,
+      "raceFinishedCount": 0,
+      "subMovesLeft": 1,
+      "hybridRound": 1,
+      "hybridMovesLeft": [1, 1, 1, 1],
+      "realtimeCountdownEndsAt": 0,
+      "gustExpiresAt": 0,
+      "nextAutoGustAt": 0,
+      "prestartRoundsLeft": 0,
+      "phase": "race"
+    },
+    "boats": [
+      { "x": 16.8, "y": 10, "distance": 0, "turns": 0, "penalties": 0, "collisions": 0, "nextMark": 0, "finished": false, "place": null, "hasHeading": false, "heading": 0, "tack": 0, "color": "#ff595e", "speedCoeff": 1, "currentSpeedUnitsPerSec": 0, "penaltySlowUntil": 0, "lastPenaltyAt": 0, "lastPenaltyKey": "", "lastPenaltyReason": "", "roundInZone": false, "roundSweep": 0, "startDeltaMs": null, "falseStartDeltaMs": null },
+      { "x": 23.6, "y": 10, "distance": 0, "turns": 0, "penalties": 0, "collisions": 0, "nextMark": 0, "finished": false, "place": null, "hasHeading": false, "heading": 0, "tack": 0, "color": "#ffca3a", "speedCoeff": 1, "currentSpeedUnitsPerSec": 0, "penaltySlowUntil": 0, "lastPenaltyAt": 0, "lastPenaltyKey": "", "lastPenaltyReason": "", "roundInZone": false, "roundSweep": 0, "startDeltaMs": null, "falseStartDeltaMs": null },
+      { "x": 30.4, "y": 10, "distance": 0, "turns": 0, "penalties": 0, "collisions": 0, "nextMark": 0, "finished": false, "place": null, "hasHeading": false, "heading": 0, "tack": 0, "color": "#1982c4", "speedCoeff": 1, "currentSpeedUnitsPerSec": 0, "penaltySlowUntil": 0, "lastPenaltyAt": 0, "lastPenaltyKey": "", "lastPenaltyReason": "", "roundInZone": false, "roundSweep": 0, "startDeltaMs": null, "falseStartDeltaMs": null },
+      { "x": 37.2, "y": 10, "distance": 0, "turns": 0, "penalties": 0, "collisions": 0, "nextMark": 0, "finished": false, "place": null, "hasHeading": false, "heading": 0, "tack": 0, "color": "#6a4c93", "speedCoeff": 1, "currentSpeedUnitsPerSec": 0, "penaltySlowUntil": 0, "lastPenaltyAt": 0, "lastPenaltyKey": "", "lastPenaltyReason": "", "roundInZone": false, "roundSweep": 0, "startDeltaMs": null, "falseStartDeltaMs": null }
+    ]
+  }
+}

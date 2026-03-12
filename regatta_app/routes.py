@@ -4,6 +4,7 @@ import time
 
 from flask import Blueprint, current_app, jsonify, render_template, request, session
 
+from .library_store import LibraryStoreError
 from .room_store import (
     RoomForbidden,
     RoomNotFound,
@@ -22,6 +23,10 @@ bp = Blueprint("main", __name__)
 
 def room_store():
     return current_app.extensions["room_store"]
+
+
+def library_store():
+    return current_app.extensions["library_store"]
 
 
 def current_room():
@@ -55,6 +60,10 @@ def json_payload() -> dict:
 
 
 def error_response(exc: RoomStoreError):
+    return jsonify({"error": str(exc)}), exc.status_code
+
+
+def library_error_response(exc: LibraryStoreError):
     return jsonify({"error": str(exc)}), exc.status_code
 
 
@@ -147,6 +156,88 @@ def bootstrap():
         "room": public_room_view(room, session.get("player_token")) if room else None,
     }
     return payload
+
+
+@bp.get("/api/library/maps")
+def list_maps():
+    return {"maps": library_store().list_records("maps")}
+
+
+@bp.get("/api/library/maps/<record_id>")
+def get_map(record_id: str):
+    try:
+        record = library_store().get_record("maps", record_id)
+    except LibraryStoreError as exc:
+        return library_error_response(exc)
+    return {"map": record}
+
+
+@bp.post("/api/library/maps")
+def save_map():
+    payload = json_payload()
+    try:
+        record = library_store().save_record(
+            "maps",
+            name=payload.get("name"),
+            snapshot=payload.get("snapshot"),
+            author=payload.get("author") or session.get("display_name") or "Skipper",
+            description=payload.get("description"),
+            tags=payload.get("tags"),
+            meta=payload.get("meta"),
+        )
+    except LibraryStoreError as exc:
+        return library_error_response(exc)
+    return {"map": record}
+
+
+@bp.delete("/api/library/maps/<record_id>")
+def delete_map(record_id: str):
+    try:
+        library_store().delete_record("maps", record_id)
+    except LibraryStoreError as exc:
+        return library_error_response(exc)
+    return {"deleted": True}
+
+
+@bp.get("/api/library/races")
+def list_races():
+    return {"races": library_store().list_records("races")}
+
+
+@bp.get("/api/library/races/<record_id>")
+def get_race(record_id: str):
+    try:
+        record = library_store().get_record("races", record_id)
+    except LibraryStoreError as exc:
+        return library_error_response(exc)
+    return {"race": record}
+
+
+@bp.post("/api/library/races")
+def save_race():
+    payload = json_payload()
+    try:
+        record = library_store().save_record(
+            "races",
+            name=payload.get("name"),
+            snapshot=payload.get("snapshot"),
+            author=payload.get("author") or session.get("display_name") or "Skipper",
+            description=payload.get("description"),
+            tags=payload.get("tags"),
+            meta=payload.get("meta"),
+        )
+    except LibraryStoreError as exc:
+        return library_error_response(exc)
+    return {"race": record}
+
+
+@bp.delete("/api/library/races/<record_id>")
+def delete_race(record_id: str):
+    try:
+        library_store().delete_record("races", record_id)
+    except LibraryStoreError as exc:
+        return library_error_response(exc)
+    return {"deleted": True}
 
 
 @bp.post("/api/rooms")
