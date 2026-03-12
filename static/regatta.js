@@ -3488,6 +3488,84 @@ document.addEventListener("DOMContentLoaded", () => {
     };
   }
 
+  function normalizeMapBoatSnapshot(rawBoat, idx, maxWorld){
+    const safeWorld = maxWorld || { width: worldW, height: worldH };
+    return {
+      x: clamp(Number.isFinite(rawBoat?.x) ? rawBoat.x : 0, 0, safeWorld.width),
+      y: clamp(Number.isFinite(rawBoat?.y) ? rawBoat.y : 0, 0, safeWorld.height),
+      distance: 0,
+      turns: 0,
+      penalties: 0,
+      collisions: 0,
+      nextMark: 0,
+      finished: false,
+      place: null,
+      hasHeading: false,
+      heading: 0,
+      tack: 0,
+      color: typeof rawBoat?.color === "string" ? rawBoat.color : BOAT_COLORS[idx % BOAT_COLORS.length],
+      speedCoeff: boatSpeedCoeff(rawBoat || {}),
+      currentSpeedUnitsPerSec: 0,
+      penaltySlowUntil: 0,
+      lastPenaltyAt: 0,
+      lastPenaltyKey: "",
+      lastPenaltyReason: "",
+      roundInZone: false,
+      roundSweep: 0,
+      startDeltaMs: null,
+      falseStartDeltaMs: null
+    };
+  }
+
+  function normalizeMapState(snapshot){
+    const exportedState = snapshot && typeof snapshot === "object"
+      ? JSON.parse(JSON.stringify(snapshot))
+      : exportGameState();
+    const world = exportedState.world || {};
+    const settings = exportedState.settings || {};
+    const worldSnapshot = {
+      width: clamp(parseFloat(world.width) || worldW, 8, WORLD_MAX),
+      height: clamp(parseFloat(world.height) || worldH, 8, WORLD_MAX)
+    };
+    const moveBudget = clamp(parseInt(settings.movesPerTurn,10) || movesPerTurn, 1, 10);
+    const prestartBudget = Math.max(0, parseInt(settings.prestartRoundsSetting,10) || 0);
+    const normalizedPlayMode = normalizePlayModeValue(settings.playMode);
+    const scenarioPhase = normalizedPlayMode === "realtime"
+      ? "countdown"
+      : (prestartBudget > 0 ? "prestart" : "race");
+    const incomingBoats = Array.isArray(exportedState.boats) && exportedState.boats.length
+      ? exportedState.boats
+      : exportGameState().boats;
+    const normalizedBoats = incomingBoats.map((boat, idx) => normalizeMapBoatSnapshot(boat, idx, worldSnapshot));
+
+    exportedState.version = 2;
+    exportedState.world = worldSnapshot;
+    exportedState.settings = {
+      ...settings,
+      playMode: normalizedPlayMode,
+      movesPerTurn: moveBudget,
+      prestartRoundsSetting: prestartBudget
+    };
+    exportedState.race = {
+      currentPlayer: 0,
+      raceFinishedCount: 0,
+      subMovesLeft: normalizedPlayMode === "realtime" ? 0 : moveBudget,
+      hybridRound: 1,
+      hybridMovesLeft: normalizedBoats.map(() => moveBudget),
+      realtimeCountdownEndsAt: 0,
+      gustExpiresAt: 0,
+      nextAutoGustAt: 0,
+      prestartRoundsLeft: scenarioPhase === "prestart" ? prestartBudget : 0,
+      phase: scenarioPhase
+    };
+    exportedState.boats = normalizedBoats;
+    return exportedState;
+  }
+
+  function exportMapState(){
+    return normalizeMapState(exportGameState());
+  }
+
   function importGameState(snapshot){
     if (!snapshot || typeof snapshot !== "object") return;
 
@@ -5097,7 +5175,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
   window.RegattaApp = {
     exportState: exportGameState,
+    exportMapState,
     importState: importGameState,
+    normalizeMapState,
     fingerprintState: fingerprintGameState,
     renderGameToText,
     advanceTime,

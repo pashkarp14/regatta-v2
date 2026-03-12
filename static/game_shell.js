@@ -348,9 +348,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
   async function loadMapRecord(record, { localMode = "hotseat", openEditor = false } = {}) {
     await ensureSoloContext();
-    regatta.importState(record.snapshot);
+    regatta.importState(regatta.normalizeMapState?.(record.snapshot) || record.snapshot);
     regatta.setLocalPilotMode?.(localMode);
-    await regatta.resetRaceToReadyState?.();
     regatta.setMode(openEditor ? "marks" : "play");
     if (openEditor) {
       commandDeckEl.classList.remove("is-collapsed");
@@ -372,8 +371,7 @@ document.addEventListener("DOMContentLoaded", () => {
     await ensureSoloContext();
     syncDeckFieldsFromMenu();
     if (kind === "maps") {
-      regatta.importState(record.snapshot);
-      await regatta.resetRaceToReadyState?.();
+      regatta.importState(regatta.normalizeMapState?.(record.snapshot) || record.snapshot);
     } else {
       regatta.importState(record.snapshot);
     }
@@ -390,9 +388,10 @@ document.addEventListener("DOMContentLoaded", () => {
       method: "POST",
       body: {
         name: mapName,
-        snapshot: regatta.exportState(),
+        snapshot: regatta.exportMapState?.() || regatta.exportState(),
         author: currentDisplayName(),
         meta: {
+          record_mode: "map",
           local_pilot_mode: regatta.getLocalPilotMode?.() || "hotseat",
         },
       },
@@ -410,6 +409,7 @@ document.addEventListener("DOMContentLoaded", () => {
         snapshot: regatta.exportState(),
         author: currentDisplayName(),
         meta: {
+          record_mode: "race",
           local_pilot_mode: regatta.getLocalPilotMode?.() || "hotseat",
         },
       },
