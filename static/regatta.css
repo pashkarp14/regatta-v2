@@ -845,6 +845,14 @@ canvas{
   min-height:0;
 }
 
+.menu-overlay[data-screen="home"] .menu-layout{
+  grid-template-columns:1fr;
+}
+
+.menu-overlay[data-screen="home"] .menu-rail{
+  display:none;
+}
+
 .menu-rail{
   display:grid;
   gap:10px;
@@ -887,6 +895,11 @@ canvas{
   gap:10px;
 }
 
+.menu-screen-head--home{
+  gap:4px;
+  margin-bottom:4px;
+}
+
 .menu-screen-head h3{
   font-size:2rem;
 }
@@ -895,6 +908,10 @@ canvas{
   display:grid;
   grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));
   gap:14px;
+}
+
+.menu-card-grid--home{
+  grid-template-columns:1.3fr 1fr 1fr;
 }
 
 .menu-card-grid--two{
@@ -925,6 +942,10 @@ canvas{
   background:
     linear-gradient(180deg, rgba(29, 69, 90, 0.92), rgba(9, 24, 34, 0.88)),
     radial-gradient(circle at top right, rgba(46, 196, 182, 0.22), transparent 34%);
+}
+
+.menu-action-card--hero{
+  min-height:196px;
 }
 
 .menu-action-card strong{
@@ -1176,6 +1197,7 @@ canvas{
   .boat-tuning-grid,
   .menu-summary-grid,
   .menu-form-grid,
+  .menu-card-grid--home,
   .menu-card-grid--two,
   .menu-mode-switch{
     grid-template-columns:1fr;

@@ -6,21 +6,22 @@ from copy import deepcopy
 from typing import Any
 
 
-MARK_RADIUS = 0.35
+MARK_RADIUS = 0.28
 BOAT_RULE_LENGTH = 0.85
-BOAT_FOOTPRINT_LENGTH = 1.70
-BOAT_FOOTPRINT_BEAM = 0.90
+BOAT_FOOTPRINT_LENGTH = 1.55
+BOAT_FOOTPRINT_BEAM = 0.78
 BOAT_COLLISION_RADIUS = BOAT_FOOTPRINT_BEAM / 2
 BOAT_CAPSULE_HALF_SEGMENT = max(0.0, (BOAT_FOOTPRINT_LENGTH - BOAT_FOOTPRINT_BEAM) / 2)
 BOAT_SWEEP_RADIUS = BOAT_CAPSULE_HALF_SEGMENT + BOAT_COLLISION_RADIUS
-BOAT_CLEARANCE_MARGIN = 0.25
-MARK_CLEARANCE_MARGIN = 0.25
+BOAT_CLEARANCE_MARGIN = 0.16
+MARK_CLEARANCE_MARGIN = 0.16
 ROUND_PASS_RADIUS = BOAT_RULE_LENGTH * 3
 ROUNDING_MIN_SWEEP = math.pi / 3
 
 REALTIME_SPEED_UNITS_PER_SEC = 2.4
 REALTIME_DEADZONE_SOFTNESS_DEG = 18.0
 REALTIME_TARGET_EPS = 0.04
+DEFAULT_TURN_RATE_DEG_PER_SEC = 120.0
 RULES_PENALTY_COOLDOWN_MS = 2200
 RULES_PENALTY_SLOW_MS = 4000
 RULES_PENALTY_SPEED_FACTOR = 0.72
@@ -53,6 +54,20 @@ def angle_wrap(angle: float) -> float:
     while angle < -math.pi:
         angle += 2 * math.pi
     return angle
+
+
+def turn_rate_rad_per_second(settings: dict[str, Any]) -> float:
+    raw_rate = float(settings.get("turnRateDegPerSec") or DEFAULT_TURN_RATE_DEG_PER_SEC)
+    return math.radians(clamp(raw_rate, 30.0, 360.0))
+
+
+def steer_heading_toward(boat: dict[str, Any], desired_heading: float, dt_seconds: float, settings: dict[str, Any]) -> float:
+    if not bool(boat.get("hasHeading")) or dt_seconds <= 0.0:
+        return desired_heading
+    current_heading = float(boat.get("heading") or 0.0)
+    max_delta = turn_rate_rad_per_second(settings) * dt_seconds
+    delta = angle_wrap(desired_heading - current_heading)
+    return angle_wrap(current_heading + clamp(delta, -max_delta, max_delta))
 
 
 def point_to_segment(point: dict[str, float], start: dict[str, float], end: dict[str, float]) -> tuple[float, dict[str, float], float]:
@@ -1003,13 +1018,16 @@ def simulate_realtime_tick(game_state: dict[str, Any], controls: dict[int, dict[
             proposals.append(proposal)
             continue
 
+        desired_heading = math.atan2(heading_vec["y"], heading_vec["x"])
+        heading = steer_heading_toward(boat, desired_heading, dt_seconds, settings)
+        actual_direction = {"x": math.cos(heading), "y": math.sin(heading)}
+
         upwind = upwind_vec(wind_angle_deg)
-        angle = angle_between(heading_vec, upwind)
+        angle = angle_between(actual_direction, upwind)
         half_dead = math.radians(dead_zone_deg) / 2.0
         reverse_threshold = half_dead * 0.5
         softness = math.radians(max(2.0, REALTIME_DEADZONE_SOFTNESS_DEG))
-        heading = math.atan2(heading_vec["y"], heading_vec["x"])
-        move_factor = move_factor_for_boat(boat, heading_vec, settings, gust_rect) * realtime_penalty_factor(boat, now_ms)
+        move_factor = move_factor_for_boat(boat, actual_direction, settings, gust_rect) * realtime_penalty_factor(boat, now_ms)
         speed_factor = 0.0 if angle <= half_dead else clamp((angle - half_dead) / softness, 0.0, 1.0)
         reverse_mode = angle <= reverse_threshold
         step_length = (
@@ -1021,7 +1039,7 @@ def simulate_realtime_tick(game_state: dict[str, Any], controls: dict[int, dict[
             proposals.append(proposal)
             continue
 
-        motion_vec = {"x": -heading_vec["x"], "y": -heading_vec["y"]} if reverse_mode else heading_vec
+        motion_vec = {"x": -actual_direction["x"], "y": -actual_direction["y"]} if reverse_mode else actual_direction
         dest = clamp_along_ray_to_field(
             {"x": float(boat["x"]), "y": float(boat["y"])},
             motion_vec,
@@ -1036,7 +1054,7 @@ def simulate_realtime_tick(game_state: dict[str, Any], controls: dict[int, dict[
                 "dest": dest,
                 "heading": heading,
                 "hasHeading": True,
-                "direction": heading_vec,
+                "direction": actual_direction,
                 "motionDirection": motion_vec,
                 "distance": travel_distance,
                 "signedSpeedUnitsPerSec": ((-1.0 if reverse_mode else 1.0) * (travel_distance / dt_seconds)) if dt_seconds > 1e-6 else 0.0,

@@ -27,7 +27,7 @@
       "autoGustsEnabled": false,
       "autoGustIntervalSec": 10,
       "autoGustDurationSec": 6,
-      "realtimePrepSeconds": 12,
+    "realtimePrepSeconds": 18,
       "autoFullscreenMode": "off",
       "finishSeparate": false,
       "prestartRoundsSetting": 0

@@ -27,7 +27,7 @@
       "autoGustsEnabled": true,
       "autoGustIntervalSec": 8,
       "autoGustDurationSec": 5,
-      "realtimePrepSeconds": 10,
+    "realtimePrepSeconds": 18,
       "autoFullscreenMode": "race",
       "finishSeparate": true,
       "prestartRoundsSetting": 0

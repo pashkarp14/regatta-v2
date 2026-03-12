@@ -20,6 +20,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const gridColsInput = document.getElementById("gridCols");
   const gridRowsInput = document.getElementById("gridRows");
   const applyGridBtn  = document.getElementById("applyGrid");
+  const btnRandomCourse = document.getElementById("randomCourse");
 
   const btnModePlay   = document.getElementById("modePlay");
   const btnModeMarks  = document.getElementById("modeMarks");
@@ -37,6 +38,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const snapThresholdInp = document.getElementById("snapThreshold");
   const movesPerTurnInp  = document.getElementById("movesPerTurn");
   const tackPenaltyInp   = document.getElementById("tackPenalty");
+  const turnRateInp = document.getElementById("turnRateDegPerSec");
   const autoGustsSelect = document.getElementById("autoGusts");
   const autoGustIntervalInp = document.getElementById("autoGustInterval");
   const autoGustDurationInp = document.getElementById("autoGustDuration");
@@ -300,7 +302,9 @@ document.addEventListener("DOMContentLoaded", () => {
   let autoGustsEnabled = autoGustsSelect?.value === "on";
   let autoGustIntervalSec = parseFloat(autoGustIntervalInp?.value) || 10;
   let autoGustDurationSec = parseFloat(autoGustDurationInp?.value) || 6;
-  let realtimePrepSeconds = clamp(parseFloat(realtimePrepInp?.value) || 12, 0, 120);
+  const DEFAULT_REALTIME_PREP_SECONDS = 18;
+  let realtimePrepSeconds = clamp(parseFloat(realtimePrepInp?.value) || DEFAULT_REALTIME_PREP_SECONDS, 0, 120);
+  let turnRateDegPerSec = clamp(parseFloat(turnRateInp?.value) || 120, 30, 360);
   let autoFullscreenMode = autoFullscreenModeSelect?.value === "race" ? "race" : "off";
   let showLaylines = false;
   let showTrails = false;
@@ -388,15 +392,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const STEP_RADIUS_BASE = 1.0;
   const BOAT_RULE_LENGTH = 0.85;
-  const BOAT_FOOTPRINT_LENGTH = 1.70;
-  const BOAT_FOOTPRINT_BEAM = 0.90;
+  const BOAT_FOOTPRINT_LENGTH = 1.55;
+  const BOAT_FOOTPRINT_BEAM = 0.78;
   const BOAT_COLLISION_RADIUS = BOAT_FOOTPRINT_BEAM / 2;
   const BOAT_CAPSULE_HALF_SEGMENT = Math.max(0, (BOAT_FOOTPRINT_LENGTH - BOAT_FOOTPRINT_BEAM) / 2);
   const BOAT_SWEEP_RADIUS = BOAT_CAPSULE_HALF_SEGMENT + BOAT_COLLISION_RADIUS;
   const BOAT_PICK_PAD = 0.18;
-  const BOAT_CLEARANCE_MARGIN = 0.25;
-  const MARK_CLEARANCE_MARGIN = 0.25;
-  const MARK_RADIUS = 0.35;                 // геометрический радиус знака
+  const BOAT_CLEARANCE_MARGIN = 0.16;
+  const MARK_CLEARANCE_MARGIN = 0.16;
+  const MARK_RADIUS = 0.28;                 // геометрический радиус знака
   const ROUND_PASS_RADIUS = BOAT_RULE_LENGTH * 3; // огибание засчитывается в радиусе трех длин корпуса
   const ROUNDING_MIN_SWEEP = Math.PI / 3;
   const ROUNDING_SWEEP_BIN_RAD = Math.PI / 12;
@@ -567,6 +571,11 @@ document.addEventListener("DOMContentLoaded", () => {
     return clamp(Number.isFinite(boat?.speedCoeff) ? boat.speedCoeff : 1, 0.5, 1.8);
   }
 
+  function normalizeDegrees(deg){
+    const normalized = deg % 360;
+    return normalized < 0 ? normalized + 360 : normalized;
+  }
+
   function defaultCourseLayout(width=worldW, height=worldH){
     const startY = clamp(height * 0.14, 4, height - 6);
     const startInset = clamp(width * 0.18, 3, Math.max(3, width / 2 - 4));
@@ -612,6 +621,80 @@ document.addEventListener("DOMContentLoaded", () => {
     finishA = layout.finishA;
     finishB = layout.finishB;
     marks = layout.marks;
+  }
+
+  function randomCourseLayout(width=worldW, height=worldH){
+    const startY = clamp(height * (0.13 + Math.random() * 0.05), 4, height - 8);
+    const startInset = clamp(width * (0.16 + Math.random() * 0.08), 3, Math.max(3, width / 2 - 4));
+    const startTilt = (Math.random() - 0.5) * Math.min(height * 0.04, 1.8);
+    const startLeft = { x: startInset, y: clamp(startY + startTilt, 2, height - 2) };
+    const startRight = { x: width - startInset, y: clamp(startY - startTilt, 2, height - 2) };
+    const markTotal = clamp(parseInt(markCountSelect.value,10) || markCount, 1, MARK_MAX);
+    const centerX = (startLeft.x + startRight.x) / 2;
+    const courseSpanY = clamp(height * 0.58, 16, height - startY - 6);
+    const firstMarkY = clamp(startY + courseSpanY, startY + 10, height - 4);
+    const lowerMarkY = clamp(startY - height * (0.04 + Math.random() * 0.08), 2, startY - 1.4);
+    const laneWidth = clamp(width * 0.26, 5, Math.max(5, width * 0.36));
+    const side = Math.random() < 0.5 ? -1 : 1;
+
+    const nextMark = [];
+    for (let i=0; i<markTotal; i++){
+      if (i === 0){
+        nextMark.push({
+          x: clamp(centerX + (Math.random() - 0.5) * width * 0.10, 2.5, width - 2.5),
+          y: firstMarkY
+        });
+        continue;
+      }
+
+      if (i === markTotal - 1){
+        nextMark.push({
+          x: clamp(centerX + side * laneWidth * (0.75 + Math.random() * 0.25), 2.5, width - 2.5),
+          y: lowerMarkY
+        });
+        continue;
+      }
+
+      const progress = i / Math.max(1, markTotal - 1);
+      const laneSign = (i % 2 === 0 ? -side : side);
+      nextMark.push({
+        x: clamp(centerX + laneSign * laneWidth * (0.75 + Math.random() * 0.3), 2.5, width - 2.5),
+        y: clamp(firstMarkY - progress * (firstMarkY - Math.max(startY + 8, height * 0.34)), startY + 8, height - 4)
+      });
+    }
+
+    return {
+      startA: startLeft,
+      startB: startRight,
+      finishA: { ...startLeft },
+      finishB: { ...startRight },
+      marks: nextMark
+    };
+  }
+
+  function applyRandomCourse(){
+    markCount = clamp(parseInt(markCountSelect.value,10) || markCount, 1, MARK_MAX);
+    const layout = randomCourseLayout(worldW, worldH);
+    startA = layout.startA;
+    startB = layout.startB;
+    finishA = finishSeparate ? { ...layout.finishA } : { ...layout.startA };
+    finishB = finishSeparate ? { ...layout.finishB } : { ...layout.startB };
+    marks = layout.marks;
+    windAngleDeg = normalizeDegrees((Math.random() * 30) - 15);
+    gustRect = null;
+    gustExpiresAt = 0;
+    nextAutoGustAt = 0;
+    resetBoats({ randomizeBehindStart: true });
+    ensureMarkOptions();
+    ensureScenarioLegOptions();
+    updateFinishButtonEnabled();
+    updateWindInfo();
+    invalidateSolutions();
+    updateStatus();
+    updateStats();
+    updateOptInfo();
+    render();
+    emitStateChanged();
   }
 
   function ensureMarkOptions(){
@@ -682,7 +765,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function updateResetButtonLabel(){
-    btnReset.textContent = "Новая гонка";
+    btnReset.textContent = "Начать гонку заново";
     updateBoardStartAction();
   }
 
@@ -694,7 +777,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function isLocalBotsMode(){
-    return multiplayerSeatIndex === null && localPilotMode === "bots" && !isRealtimePlayMode();
+    return multiplayerSeatIndex === null && localPilotMode === "bots";
   }
 
   function isHumanControlledBoat(boatIdx){
@@ -715,7 +798,7 @@ document.addEventListener("DOMContentLoaded", () => {
     updateStats();
     updateOptInfo();
     render();
-    if (isLocalBotsMode()){
+    if (isLocalBotsMode() && !isRealtimePlayMode()){
       scheduleLocalBotTurn();
     }
   }
@@ -877,9 +960,12 @@ document.addEventListener("DOMContentLoaded", () => {
     return requestBoardFullscreen();
   }
 
-  async function handleResetAction(){
+  async function handleResetAction(options = {}){
     if (mode !== "play") setMode("play");
-    resetBoats({ armRealtime: false });
+    resetBoats({
+      armRealtime: !!options.armRealtime,
+      randomizeBehindStart: options.randomizeBehindStart ?? null,
+    });
     invalidateSolutions();
     updateStatus();
     updateStats();
@@ -1908,6 +1994,31 @@ document.addEventListener("DOMContentLoaded", () => {
     return a;
   }
 
+  function turnRateRadPerSecond(){
+    return clamp(turnRateDegPerSec, 30, 360) * Math.PI / 180;
+  }
+
+  function steerHeadingToward(boat, desiredHeading, dtSeconds){
+    if (!Number.isFinite(desiredHeading)) return 0;
+    if (!boat?.hasHeading || !Number.isFinite(boat.heading) || !Number.isFinite(dtSeconds) || dtSeconds <= 0){
+      return desiredHeading;
+    }
+    const maxDelta = turnRateRadPerSecond() * dtSeconds;
+    const delta = angleWrap(desiredHeading - boat.heading);
+    return angleWrap(boat.heading + clamp(delta, -maxDelta, maxDelta));
+  }
+
+  function steerDirectionToward(boat, desiredDirection, dtSeconds){
+    if (!desiredDirection) return null;
+    const desiredHeading = Math.atan2(desiredDirection.y, desiredDirection.x);
+    const heading = steerHeadingToward(boat, desiredHeading, dtSeconds);
+    return {
+      heading,
+      direction: { x: Math.cos(heading), y: Math.sin(heading) },
+      desiredHeading
+    };
+  }
+
   function maybeStartGunIfNeeded(){
     if (phase !== "prestart") return;
     if (prestartRoundsLeft > 0) return;
@@ -1939,14 +2050,36 @@ document.addEventListener("DOMContentLoaded", () => {
     statusEl.textContent = "СТАРТ! Продолжаем гонку с текущих позиций.";
   }
 
+  function chooseRealtimeBotDirection(boatIdx){
+    const boat = boats[boatIdx];
+    if (!boat || boat.finished) return null;
+
+    const preferredDest = chooseBotDestination(boatIdx);
+    const target = preferredDest || botGoalPointForBoat(boat);
+    if (!target) return null;
+
+    const direction = norm({ x: target.x - boat.x, y: target.y - boat.y });
+    if (direction.L <= 1e-6){
+      return boat.hasHeading ? boatAxisUnit(boat.heading, boat.hasHeading) : null;
+    }
+    return { x: direction.x, y: direction.y };
+  }
+
   function controlDirectionForLocalBoat(boatIdx){
+    if (!isLocalRealtimeMode()) return null;
+
+    const boat = boats[boatIdx];
+    if (!boat) return null;
+
+    if (isLocalBotsMode() && isBotControlledBoat(boatIdx)){
+      return chooseRealtimeBotDirection(boatIdx);
+    }
+
     const controlledBoatIndex = realtimeControlledBoatIndex();
-    if (!isLocalRealtimeMode() || controlledBoatIndex !== boatIdx){
+    if (controlledBoatIndex !== boatIdx){
       return null;
     }
     refreshRealtimeIntentFromPointer({ emit:false });
-    const boat = boats[boatIdx];
-    if (!boat) return null;
 
     if (realtimeCursorTarget){
       const aim = norm({ x: realtimeCursorTarget.x - boat.x, y: realtimeCursorTarget.y - boat.y });
@@ -2000,13 +2133,19 @@ document.addEventListener("DOMContentLoaded", () => {
         return proposal;
       }
 
+      const steering = steerDirectionToward(boat, direction, dtSeconds);
+      if (!steering?.direction){
+        return proposal;
+      }
+
+      const actualDirection = steering.direction;
       const upwind = upwindVec();
-      const angle = angleBetween(direction, upwind);
+      const angle = angleBetween(actualDirection, upwind);
       const halfDead = (deadZoneDeg * Math.PI / 180) / 2;
       const reverseThreshold = halfDead * 0.5;
       const softness = Math.max(2, REALTIME_DEADZONE_SOFTNESS_DEG) * Math.PI / 180;
-      const heading = Math.atan2(direction.y, direction.x);
-      const moveFactor = stepFactorForMove(boat, direction) * realtimePenaltyFactorForBoat(boat, now);
+      const heading = steering.heading;
+      const moveFactor = stepFactorForMove(boat, actualDirection) * realtimePenaltyFactorForBoat(boat, now);
       const speedFactor = (angle <= halfDead)
         ? 0
         : clamp((angle - halfDead) / softness, 0, 1);
@@ -2020,14 +2159,14 @@ document.addEventListener("DOMContentLoaded", () => {
       }
 
       const motionDirection = reverseMode
-        ? { x: -direction.x, y: -direction.y }
-        : direction;
+        ? { x: -actualDirection.x, y: -actualDirection.y }
+        : actualDirection;
 
       proposal.accepted = true;
       proposal.dest = clampAlongRayToField({ x: boat.x, y: boat.y }, motionDirection, stepLength);
       proposal.heading = heading;
       proposal.hasHeading = true;
-      proposal.direction = direction;
+      proposal.direction = actualDirection;
       proposal.motionDirection = motionDirection;
       proposal.distance = dist(proposal.prev, proposal.dest);
       proposal.signedSpeedUnitsPerSec = dtSeconds > 1e-6
@@ -2353,26 +2492,82 @@ document.addEventListener("DOMContentLoaded", () => {
   // -----------------------------
   // Постановка лодок: спавн
   // -----------------------------
-  function randomSpawnBehindStart(){
+  function spawnHeadingAlongStart(){
+    const d = startLineDirUnit();
+    return Math.atan2(d.y, d.x);
+  }
+
+  function tryRandomSpawnBehindStart({
+    occupiedCapsules = [],
+    minDepth = 0.65,
+    maxDepth = PRESTART_DEPTH,
+    minAlong = 0.08,
+    maxAlong = 0.92,
+  } = {}){
     const d = startLineDirUnit();
     const n = prestartNormalUnit();
     const lineLen = Math.hypot(startB.x-startA.x, startB.y-startA.y);
+    const spawnHeading = spawnHeadingAlongStart();
 
-    for (let attempt=0; attempt<200; attempt++){
-      const t = Math.random();
-      const depth = Math.random() * PRESTART_DEPTH;
-
+    for (let attempt=0; attempt<320; attempt++){
+      const alongT = clamp(minAlong + Math.random() * Math.max(0.02, maxAlong - minAlong), 0.02, 0.98);
+      const depth = clamp(minDepth + Math.random() * Math.max(0.1, maxDepth - minDepth), minDepth, maxDepth);
       const p = {
-        x: startA.x + d.x*(t*lineLen) + n.x*depth,
-        y: startA.y + d.y*(t*lineLen) + n.y*depth
+        x: startA.x + d.x * (alongT * lineLen) + n.x * depth,
+        y: startA.y + d.y * (alongT * lineLen) + n.y * depth
       };
 
       if (!pointInField(p)) continue;
-      if (isTooCloseToMarks(p)) continue;
-      if (isTooCloseToBoats(p, -1)) continue;
-      return p;
+
+      const candidate = boatCapsuleAt(p, spawnHeading, true);
+      let blocked = false;
+      for (let i=0; i<markCount; i++){
+        if (capsuleIntersectsMark(candidate, marks[i], MARK_CLEARANCE_MARGIN)){
+          blocked = true;
+          break;
+        }
+      }
+      if (blocked) continue;
+
+      for (const capsule of occupiedCapsules){
+        if (capsulesOverlap(candidate, capsule, BOAT_CLEARANCE_MARGIN)){
+          blocked = true;
+          break;
+        }
+      }
+      if (blocked) continue;
+
+      return { point: p, heading: spawnHeading, capsule: candidate };
     }
-    return { x:startA.x, y:startA.y };
+
+    const fallback = {
+      x: startA.x + d.x * (lineLen * 0.5) + n.x * clamp(minDepth, 0.2, PRESTART_DEPTH),
+      y: startA.y + d.y * (lineLen * 0.5) + n.y * clamp(minDepth, 0.2, PRESTART_DEPTH),
+    };
+    return {
+      point: fallback,
+      heading: spawnHeading,
+      capsule: boatCapsuleAt(fallback, spawnHeading, true),
+    };
+  }
+
+  function randomSpawnBehindStart(options = {}){
+    const spawn = tryRandomSpawnBehindStart(options);
+    return spawn.point;
+  }
+
+  function placeBoatsBehindStartRandomly({ minDepth=0.65, maxDepth=PRESTART_DEPTH } = {}){
+    const occupiedCapsules = [];
+    const spawnHeading = spawnHeadingAlongStart();
+    for (let i=0; i<boats.length; i++){
+      const spawn = tryRandomSpawnBehindStart({ occupiedCapsules, minDepth, maxDepth });
+      boats[i].x = spawn.point.x;
+      boats[i].y = spawn.point.y;
+      boats[i].heading = spawnHeading;
+      boats[i].hasHeading = true;
+      boats[i].tack = tackSignFromHeadingVec(startLineDirUnit());
+      occupiedCapsules.push(spawn.capsule);
+    }
   }
 
   // -----------------------------
@@ -2761,7 +2956,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (mode === "model"){
       statusEl.textContent =
         "Режим: моделирование. Клик по лодке — выбрать. Клик по полю — поставить лодку (нельзя ставить на лодки/знаки). " +
-        "Выбери лег и следующего игрока, затем нажми «Применить ситуацию».";
+        "Выбери лег и следующего игрока, затем нажми «Запустить ситуацию».";
       return;
     }
 
@@ -2782,7 +2977,10 @@ document.addEventListener("DOMContentLoaded", () => {
         if (countdown.active){
           statusEl.textContent = `ПРЕДСТАРТ. До сигнала ${formatCountdownSeconds(countdown.totalMsLeft)} с. Фальстарт считается только в последние 3.0 с до старта. ${ownLegInfo}`;
         } else if (isLocalRealtimeMode()) {
-          statusEl.textContent = `ЛОКАЛЬНЫЙ REALTIME ГОТОВ. Нажми «Общий старт», чтобы открыть предстарт. В соло курсором управляешь выбранной лодкой. ${ownLegInfo}`;
+          const localRealtimeHint = isLocalBotsMode()
+            ? "Лодка 1 под твоим управлением, остальные экипажи ведёт ИИ."
+            : "Курсором управляешь выбранной лодкой на одном устройстве.";
+          statusEl.textContent = `ЛОКАЛЬНЫЙ REALTIME ГОТОВ. Нажми «Общий старт», чтобы открыть предстарт. ${localRealtimeHint} ${ownLegInfo}`;
         } else {
           statusEl.textContent = `ОЖИДАНИЕ ОБЩЕГО СТАРТА. ${ownLegInfo}`;
         }
@@ -2790,7 +2988,9 @@ document.addEventListener("DOMContentLoaded", () => {
         statusEl.textContent = "Гонка завершена: все лодки финишировали.";
       } else {
         const controlHint = isLocalRealtimeMode()
-          ? "Веди выбранную лодку курсором мыши или касанием по полю."
+          ? (isLocalBotsMode()
+            ? "Веди лодку 1 курсором мыши или касанием по полю, остальные экипажи рулит ИИ."
+            : "Веди выбранную лодку курсором мыши или касанием по полю.")
           : "Веди свою лодку курсором мыши или касанием по полю.";
         statusEl.textContent = `РЕАЛЬНОЕ ВРЕМЯ. Все лодки идут одновременно. ${controlHint} ${ownLegInfo}`;
       }
@@ -3000,11 +3200,14 @@ document.addEventListener("DOMContentLoaded", () => {
   // -----------------------------
   // Инициализация / сброс
   // -----------------------------
-  function resetBoats({ armRealtime=false } = {}){
+  function resetBoats({ armRealtime=false, randomizeBehindStart=null } = {}){
     const n = parseInt(playerCountSelect.value,10) || 2;
     const previousBoats = boats.slice();
     const realtimeStartDepth = Math.min(PRESTART_DEPTH * 0.35, 1.25);
     const prestartNormal = prestartNormalUnit();
+    const shouldRandomizeBehindStart = (randomizeBehindStart === null)
+      ? isRealtimePlayMode()
+      : !!randomizeBehindStart;
 
     boats = [];
     raceFinishedCount = 0;
@@ -3044,12 +3247,11 @@ document.addEventListener("DOMContentLoaded", () => {
       });
     }
 
-    if (phase === "prestart"){
-      for (let i=0;i<n;i++){
-        const p = randomSpawnBehindStart();
-        boats[i].x = p.x;
-        boats[i].y = p.y;
-      }
+    if (phase === "prestart" || shouldRandomizeBehindStart){
+      placeBoatsBehindStartRandomly({
+        minDepth: isRealtimePlayMode() ? 1.0 : 0.55,
+        maxDepth: isRealtimePlayMode() ? Math.max(1.4, PRESTART_DEPTH * 0.9) : Math.max(0.9, PRESTART_DEPTH * 0.7),
+      });
     } else if (isRealtimePlayMode()){
       for (let i=0;i<n;i++){
         const t = (i+1)/(n+1);
@@ -3131,12 +3333,13 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     const totalMsLeft = Math.max(0, realtimeCountdownEndsAt - nowMs);
+    const finalMsLeft = Math.min(totalMsLeft, 3000);
     return {
       active: totalMsLeft > 0,
       totalMsLeft,
-      prepMsLeft: totalMsLeft,
-      finalMsLeft: 0,
-      inFinal: false
+      prepMsLeft: Math.max(0, totalMsLeft - finalMsLeft),
+      finalMsLeft,
+      inFinal: finalMsLeft > 0 && totalMsLeft <= 3000
     };
   }
 
@@ -3147,6 +3350,9 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function realtimeControlledBoatIndex(){
+    if (isLocalBotsMode() && boats[LOCAL_HUMAN_SEAT]){
+      return LOCAL_HUMAN_SEAT;
+    }
     if (multiplayerSeatIndex !== null) return multiplayerSeatIndex;
     if (Number.isInteger(selectedBoatIndex)) return selectedBoatIndex;
     return boats.length ? 0 : null;
@@ -3271,7 +3477,10 @@ document.addEventListener("DOMContentLoaded", () => {
   function canSelectBoatForPlay(boatIdx){
     if (!Number.isInteger(boatIdx)) return false;
     if (!canBoatMoveNow(boatIdx)) return false;
-    if (isLocalBotsMode()) return boatIdx === LOCAL_HUMAN_SEAT && boatIdx === currentPlayer;
+    if (isLocalBotsMode()) {
+      if (isRealtimePlayMode()) return boatIdx === LOCAL_HUMAN_SEAT;
+      return boatIdx === LOCAL_HUMAN_SEAT && boatIdx === currentPlayer;
+    }
     if (!isHybridRaceMode()) return boatIdx === currentPlayer;
     if (multiplayerSeatIndex !== null) return boatIdx === multiplayerSeatIndex;
     return true;
@@ -3432,6 +3641,7 @@ document.addEventListener("DOMContentLoaded", () => {
         playMode,
         interactionMode,
         tackPenaltyFactor,
+        turnRateDegPerSec,
         autoGustsEnabled,
         autoGustIntervalSec,
         autoGustDurationSec,
@@ -3615,6 +3825,7 @@ document.addEventListener("DOMContentLoaded", () => {
     autoGustIntervalSec = clamp(parseFloat(settings.autoGustIntervalSec) || autoGustIntervalSec, 3, 60);
     autoGustDurationSec = clamp(parseFloat(settings.autoGustDurationSec) || autoGustDurationSec, 2, 30);
     realtimePrepSeconds = clamp(parseFloat(settings.realtimePrepSeconds) || realtimePrepSeconds, 0, 120);
+    turnRateDegPerSec = clamp(parseFloat(settings.turnRateDegPerSec) || turnRateDegPerSec, 30, 360);
     autoFullscreenMode = settings.autoFullscreenMode === "race" ? "race" : "off";
     prestartRoundsSetting = Math.max(0, parseInt(settings.prestartRoundsSetting,10) || 0);
 
@@ -3629,6 +3840,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (autoGustIntervalInp) autoGustIntervalInp.value = String(autoGustIntervalSec);
     if (autoGustDurationInp) autoGustDurationInp.value = String(autoGustDurationSec);
     if (realtimePrepInp) realtimePrepInp.value = String(realtimePrepSeconds);
+    if (turnRateInp) turnRateInp.value = String(turnRateDegPerSec);
     if (autoFullscreenModeSelect) autoFullscreenModeSelect.value = autoFullscreenMode;
     prestartRoundsInp.value = String(prestartRoundsSetting);
 
@@ -3759,24 +3971,31 @@ document.addEventListener("DOMContentLoaded", () => {
   function drawWindArrow(){
     const base = worldToScreen({ x: worldW/2, y: worldH - 0.6 });
     const len = 55;
+    const windFrom = upwindVec();
+    const tip = {
+      x: base.x + windFrom.x * (len / 2),
+      y: base.y - windFrom.y * (len / 2)
+    };
+    const tail = {
+      x: base.x - windFrom.x * (len / 2),
+      y: base.y + windFrom.y * (len / 2)
+    };
+    const screenAngle = Math.atan2(tip.y - tail.y, tip.x - tail.x);
 
     ctx.save();
-    ctx.translate(base.x, base.y);
-    ctx.rotate((windAngleDeg + 180) * Math.PI/180);
-
     ctx.strokeStyle = "#d32f2f";
     ctx.fillStyle = "#d32f2f";
     ctx.lineWidth = 3;
 
     ctx.beginPath();
-    ctx.moveTo(0, -len/2);
-    ctx.lineTo(0,  len/2);
+    ctx.moveTo(tail.x, tail.y);
+    ctx.lineTo(tip.x, tip.y);
     ctx.stroke();
 
     ctx.beginPath();
-    ctx.moveTo(0, len/2);
-    ctx.lineTo(-9, len/2 - 14);
-    ctx.lineTo( 9, len/2 - 14);
+    ctx.moveTo(tip.x, tip.y);
+    ctx.lineTo(tip.x - Math.cos(screenAngle - Math.PI / 6) * 16, tip.y - Math.sin(screenAngle - Math.PI / 6) * 16);
+    ctx.lineTo(tip.x - Math.cos(screenAngle + Math.PI / 6) * 16, tip.y - Math.sin(screenAngle + Math.PI / 6) * 16);
     ctx.closePath();
     ctx.fill();
 
@@ -4423,26 +4642,28 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!countdown.active) return;
 
     const primary = `До старта ${formatCountdownSeconds(countdown.totalMsLeft)} с`;
-    const secondary = "Фальстарт считается только в последние 3.0 с до старта";
+    const secondary = countdown.inFinal
+      ? "Последние 3 секунды. Фальстарт считается уже сейчас"
+      : "Фальстарт считается только в последние 3.0 с до старта";
     const boxW = 340;
     const boxH = 68;
     const boxX = (canvas.width - boxW) / 2;
     const boxY = 18;
     ctx.save();
-    ctx.fillStyle = "rgba(255, 253, 248, 0.94)";
-    ctx.strokeStyle = "rgba(23, 48, 66, 0.12)";
-    ctx.lineWidth = 1.5;
+    ctx.fillStyle = countdown.inFinal ? "rgba(183, 28, 28, 0.96)" : "rgba(255, 253, 248, 0.94)";
+    ctx.strokeStyle = countdown.inFinal ? "rgba(255, 235, 238, 0.86)" : "rgba(23, 48, 66, 0.12)";
+    ctx.lineWidth = countdown.inFinal ? 3 : 1.5;
     ctx.beginPath();
     ctx.roundRect(boxX, boxY, boxW, boxH, 18);
     ctx.fill();
     ctx.stroke();
-    ctx.fillStyle = "#173042";
+    ctx.fillStyle = countdown.inFinal ? "#fff8f6" : "#173042";
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
-    ctx.font = "700 24px Georgia, serif";
+    ctx.font = countdown.inFinal ? "700 28px Georgia, serif" : "700 24px Georgia, serif";
     ctx.fillText(primary, canvas.width / 2, boxY + 12);
-    ctx.font = "600 14px system-ui";
-    ctx.fillStyle = "rgba(23, 48, 66, 0.78)";
+    ctx.font = countdown.inFinal ? "700 14px system-ui" : "600 14px system-ui";
+    ctx.fillStyle = countdown.inFinal ? "rgba(255, 248, 246, 0.96)" : "rgba(23, 48, 66, 0.78)";
     ctx.fillText(secondary, canvas.width / 2, boxY + 42);
     ctx.restore();
   }
@@ -5000,8 +5221,14 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   realtimePrepInp?.addEventListener("change", () => {
-    realtimePrepSeconds = clamp(parseFloat(realtimePrepInp.value) || 12, 0, 120);
+    realtimePrepSeconds = clamp(parseFloat(realtimePrepInp.value) || DEFAULT_REALTIME_PREP_SECONDS, 0, 120);
     realtimePrepInp.value = String(realtimePrepSeconds);
+    emitStateChanged();
+  });
+
+  turnRateInp?.addEventListener("change", () => {
+    turnRateDegPerSec = clamp(parseFloat(turnRateInp.value) || 120, 30, 360);
+    turnRateInp.value = String(turnRateDegPerSec);
     emitStateChanged();
   });
 
@@ -5076,7 +5303,14 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Новая гонка: не сбрасывает дистанцию — только лодки
   btnReset.addEventListener("click", async () => {
-    await handleResetAction();
+    await handleResetAction({
+      randomizeBehindStart: true,
+      armRealtime: isLocalRealtimeMode(),
+    });
+  });
+
+  btnRandomCourse?.addEventListener("click", () => {
+    applyRandomCourse();
   });
 
   applyGridBtn.addEventListener("click", () => {
@@ -5276,7 +5510,8 @@ document.addEventListener("DOMContentLoaded", () => {
     autoGustsEnabled = autoGustsSelect?.value === "on";
     autoGustIntervalSec = clamp(parseFloat(autoGustIntervalInp?.value) || 10, 3, 60);
     autoGustDurationSec = clamp(parseFloat(autoGustDurationInp?.value) || 6, 2, 30);
-    realtimePrepSeconds = clamp(parseFloat(realtimePrepInp?.value) || 12, 0, 120);
+    realtimePrepSeconds = clamp(parseFloat(realtimePrepInp?.value) || DEFAULT_REALTIME_PREP_SECONDS, 0, 120);
+    turnRateDegPerSec = clamp(parseFloat(turnRateInp?.value) || 120, 30, 360);
     autoFullscreenMode = autoFullscreenModeSelect?.value === "race" ? "race" : "off";
 
     roundingSide = roundingSideSelect.value;

@@ -71,7 +71,8 @@ def normalize_room_start_state(game_state: dict, *, arm_realtime: bool = True) -
     settings = game_state.setdefault("settings", {})
     race = game_state.setdefault("race", {})
     boats = list(game_state.get("boats") or [])
-    settings.setdefault("realtimePrepSeconds", 12)
+    settings.setdefault("realtimePrepSeconds", 18)
+    settings.setdefault("turnRateDegPerSec", 120)
     settings["interactionMode"] = settings.get("interactionMode") if settings.get("interactionMode") in {"ghost", "rules"} else "contact"
 
     for boat in boats:

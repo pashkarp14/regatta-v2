@@ -174,7 +174,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const roomReady = roomState.room.joined_count === roomState.room.max_players;
     const waitingStart = roomState.room.status === "lobby" || isPendingRealtimeStartRoom();
     regatta.setBoardStartActionOverride({
-      label: waitingStart ? "Старт гонки" : "Новая гонка",
+      label: waitingStart ? "Старт гонки" : "Начать гонку заново",
       title: waitingStart
         ? (roomReady ? "Запустить матч" : "Дождись всех участников")
         : "Перезапустить матч с текущей дистанцией",
@@ -317,7 +317,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (startRoomBtn) {
       startRoomBtn.textContent = (!roomState.room || roomState.room.status === "lobby" || isPendingRealtimeStartRoom())
         ? "Запустить матч"
-        : "Новая гонка";
+        : "Начать гонку заново";
     }
 
     if (!roomState.room) {
@@ -380,7 +380,7 @@ document.addEventListener("DOMContentLoaded", () => {
       );
     } else if (isRealtimeRoom()) {
       if (isPendingRealtimeStartRoom()) {
-        setHint("Новая гонка подготовлена. Лодки возвращены на стартовые позиции, нажми «Старт гонки», когда все готовы.");
+        setHint("Старт заново подготовлен. Лодки возвращены на стартовые позиции, нажми «Старт гонки», когда все готовы.");
         roomStatusEl.textContent = `Гонка · готова к старту`;
         setNotice(
           "Realtime-режим ожидает общего запуска. До нажатия «Старт гонки» отсчёт не идёт и матч ещё не начался.",

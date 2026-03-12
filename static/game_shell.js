@@ -4,6 +4,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const body = document.body;
   const overlay = document.getElementById("mainMenuOverlay");
+  const overlayTitleEl = overlay?.querySelector(".menu-topbar h2");
   const screens = Array.from(document.querySelectorAll("[data-menu-screen]"));
   const navButtons = Array.from(document.querySelectorAll("[data-menu-nav]"));
   const appToastEl = document.getElementById("appToast");
@@ -45,6 +46,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const menuFlowBadgeEl = document.getElementById("menuFlowBadge");
   const menuHomeSummaryEl = document.getElementById("menuHomeSummary");
   const menuHomeLibraryEl = document.getElementById("menuHomeLibrary");
+  const menuContinueDescriptionEl = document.getElementById("menuContinueDescription");
   const menuSettingsSummaryEl = document.getElementById("menuSettingsSummary");
   const menuLocalSelectionSummaryEl = document.getElementById("menuLocalSelectionSummary");
   const menuLocalHintEl = document.getElementById("menuLocalHint");
@@ -86,6 +88,10 @@ document.addEventListener("DOMContentLoaded", () => {
   };
 
   let toastTimer = 0;
+
+  if (overlayTitleEl) {
+    overlayTitleEl.textContent = "Главное меню";
+  }
 
   function showToast(message) {
     const text = String(message || "").trim();
@@ -186,6 +192,9 @@ document.addEventListener("DOMContentLoaded", () => {
       name = "home";
     }
     menuState.screen = name;
+    if (overlay) {
+      overlay.dataset.screen = name;
+    }
     screens.forEach((screen) => {
       screen.classList.toggle("hidden", screen.dataset.menuScreen !== name);
     });
@@ -237,6 +246,15 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  function formatCount(value, forms) {
+    const count = Math.abs(parseInt(value, 10) || 0);
+    const mod10 = count % 10;
+    const mod100 = count % 100;
+    if (mod10 === 1 && mod100 !== 11) return forms[0];
+    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return forms[1];
+    return forms[2];
+  }
+
   function roomSummary() {
     return window.RegattaMultiplayer?.getRoomState?.() || { room: null };
   }
@@ -246,10 +264,17 @@ document.addEventListener("DOMContentLoaded", () => {
     const meta = regatta.getMeta?.() || {};
     const room = roomSummary().room;
     const summary = snapshot?.course || {};
+    const boatCount = meta.playerCount || snapshot.boats?.length || 0;
+    const markCount = summary.markCount || 0;
+    if (menuContinueDescriptionEl) {
+      const modeLabel = room ? "сетевая гонка" : `${formatFormatLabel(null).toLowerCase()} · ${formatPlayModeLabel(meta.playMode).toLowerCase()}`;
+      menuContinueDescriptionEl.textContent = `Сейчас на поле: ${boatCount} ${formatCount(boatCount, ["лодка", "лодки", "лодок"])}, ${markCount} ${formatCount(markCount, ["знак", "знака", "знаков"])}, ${formatPhaseLabel(meta.phase).toLowerCase()}.`;
+      menuContinueBtn?.setAttribute("title", `Вернуться в текущую гонку: ${modeLabel}.`);
+    }
     menuHomeSummaryEl.innerHTML = `
       <div><strong>Поле:</strong> ${snapshot.world?.width || 0} × ${snapshot.world?.height || 0}</div>
-      <div><strong>Лодок:</strong> ${meta.playerCount || snapshot.boats?.length || 0}</div>
-      <div><strong>Знаков:</strong> ${summary.markCount || 0}</div>
+      <div><strong>Лодок:</strong> ${boatCount}</div>
+      <div><strong>Знаков:</strong> ${markCount}</div>
       <div><strong>Режим:</strong> ${room ? "Сетевая гонка" : `${formatFormatLabel(null)} · ${formatPlayModeLabel(meta.playMode)}`}</div>
       <div><strong>Фаза:</strong> ${formatPhaseLabel(meta.phase)}</div>
     `;
@@ -336,9 +361,6 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!menuState.localPlayMode) {
       menuState.localPlayMode = meta.playMode === "realtime" ? "realtime" : "turns";
     }
-    if (menuState.localParty === "bots" && menuState.localPlayMode === "realtime") {
-      menuState.localPlayMode = "turns";
-    }
   }
 
   function localScenarioLabel() {
@@ -364,15 +386,17 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     if (menuLocalPlayModeRealtimeBtn) {
       menuLocalPlayModeRealtimeBtn.classList.toggle("is-active", isRealtime);
-      menuLocalPlayModeRealtimeBtn.disabled = isBots;
-      menuLocalPlayModeRealtimeBtn.setAttribute("aria-disabled", String(isBots));
+      menuLocalPlayModeRealtimeBtn.disabled = false;
+      menuLocalPlayModeRealtimeBtn.setAttribute("aria-disabled", "false");
     }
 
     if (menuLocalSelectionSummaryEl) {
       const partyLabel = isBots ? "Против ботов" : "Несколько игроков на одном устройстве";
       const modeLabel = isRealtime ? "В реальном времени" : "Пошаговая";
       const controlLabel = isBots
-        ? "Лодка 1 остаётся у человека, остальные ходы делает ИИ."
+        ? (isRealtime
+          ? "Лодка 1 остаётся у человека, остальные экипажи ведёт ИИ одновременно с игроком."
+          : "Лодка 1 остаётся у человека, остальные ходы делает ИИ.")
         : (isRealtime
           ? "Все управляют на одном устройстве, гонка идёт без очереди."
           : "Игроки по очереди передают ход на одном устройстве.");
@@ -384,8 +408,8 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     if (menuLocalHintEl) {
-      menuLocalHintEl.textContent = isBots
-        ? `${localScenarioLabel()} Боты доступны только в пошаговом режиме.`
+      menuLocalHintEl.textContent = isBots && isRealtime
+        ? `${localScenarioLabel()} Боты будут рулить одновременно с человеком в realtime.`
         : localScenarioLabel();
     }
 
@@ -423,12 +447,14 @@ document.addEventListener("DOMContentLoaded", () => {
   function libraryMetaHtml(record) {
     const summary = record.summary || {};
     const tags = Array.isArray(record.tags) ? record.tags.map((tag) => `<span class="library-badge">${tag}</span>`).join("") : "";
+    const boatCount = summary.player_count || 0;
+    const markCount = summary.mark_count || 0;
     return `
       <div class="library-card__meta">
         <span>${record.author || "Шкипер"}</span>
         <span>${formatDate(record.updated_at)}</span>
-        <span>${summary.player_count || 0} лодок</span>
-        <span>${summary.mark_count || 0} знака</span>
+        <span>${boatCount} ${formatCount(boatCount, ["лодка", "лодки", "лодок"])}</span>
+        <span>${markCount} ${formatCount(markCount, ["знак", "знака", "знаков"])}</span>
         <span>${formatPlayModeLabel(summary.play_mode)}</span>
         ${record.scope === "standard" ? '<span class="library-badge library-badge--standard">Стандарт</span>' : ""}
       </div>
@@ -437,11 +463,15 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function mapCardActions(record) {
+    const isRealtime = record.summary?.play_mode === "realtime";
+    const localLabel = isRealtime ? "Локально · realtime" : "На одном устройстве";
+    const botsLabel = isRealtime ? "С ботами · realtime" : "Против ботов";
+    const roomLabel = isRealtime ? "Открыть комнату · realtime" : "Открыть комнату";
     return `
       <div class="library-card__actions">
-        <button type="button" class="action-primary" data-library-kind="maps" data-record-id="${record.id}" data-action="local">Локально</button>
-        <button type="button" class="action-secondary" data-library-kind="maps" data-record-id="${record.id}" data-action="bots">С ботами</button>
-        <button type="button" class="action-secondary" data-library-kind="maps" data-record-id="${record.id}" data-action="network">Открыть комнату</button>
+        <button type="button" class="action-primary" data-library-kind="maps" data-record-id="${record.id}" data-action="local">${localLabel}</button>
+        <button type="button" class="action-secondary" data-library-kind="maps" data-record-id="${record.id}" data-action="bots">${botsLabel}</button>
+        <button type="button" class="action-secondary" data-library-kind="maps" data-record-id="${record.id}" data-action="network">${roomLabel}</button>
         <button type="button" class="ghost-btn" data-library-kind="maps" data-record-id="${record.id}" data-action="edit">Редактор</button>
         ${record.scope === "custom" ? `<button type="button" class="ghost-btn" data-library-kind="maps" data-record-id="${record.id}" data-action="delete">Удалить</button>` : ""}
       </div>
@@ -519,13 +549,11 @@ document.addEventListener("DOMContentLoaded", () => {
       : null;
     if (!source) return snapshot;
 
-    if (localMode === "bots") {
-      source.settings = {
-        ...(source.settings || {}),
-        playMode: "turns",
-        autoFullscreenMode: "off",
-      };
-    }
+    source.settings = {
+      ...(source.settings || {}),
+      autoFullscreenMode: "off",
+      realtimePrepSeconds: Math.max(18, parseFloat(source.settings?.realtimePrepSeconds) || 0),
+    };
 
     return regatta.normalizeMapState?.(source) || source;
   }
@@ -536,15 +564,19 @@ document.addEventListener("DOMContentLoaded", () => {
     regatta.importState(preparedState);
     regatta.setLocalPilotMode?.(localMode);
     regatta.setMode(openEditor ? "marks" : "play");
+    if (!openEditor) {
+      await regatta.resetRaceToReadyState?.({
+        randomizeBehindStart: true,
+        armRealtime: preparedState?.settings?.playMode === "realtime",
+      });
+    }
     if (openEditor) {
       commandDeckEl.classList.remove("is-collapsed");
     }
     closeMenu();
-    if (localMode === "bots" && record.snapshot?.settings?.playMode === "realtime") {
-      showToast(`Карта «${record.name}» переведена в пошаговый режим для игры с ботами.`);
-      return;
-    }
-    showToast(`Карта «${record.name}» загружена.`);
+    showToast(openEditor
+      ? `Редактор карты «${record.name}» открыт.`
+      : `Карта «${record.name}» загружена.`);
   }
 
   async function loadRaceRecord(record) {
@@ -560,7 +592,16 @@ document.addEventListener("DOMContentLoaded", () => {
     await ensureSoloContext();
     syncDeckFieldsFromMenu();
     if (kind === "maps") {
-      regatta.importState(regatta.normalizeMapState?.(record.snapshot) || record.snapshot);
+      const hostedMapState = regatta.normalizeMapState?.(record.snapshot) || record.snapshot;
+      hostedMapState.settings = {
+        ...(hostedMapState.settings || {}),
+        realtimePrepSeconds: Math.max(18, parseFloat(hostedMapState.settings?.realtimePrepSeconds) || 0),
+      };
+      regatta.importState(hostedMapState);
+      await regatta.resetRaceToReadyState?.({
+        randomizeBehindStart: true,
+        armRealtime: record.summary?.play_mode === "realtime",
+      });
     } else {
       regatta.importState(record.snapshot);
     }
@@ -629,9 +670,7 @@ document.addEventListener("DOMContentLoaded", () => {
   async function launchLocalSelection() {
     ensureLocalSelectionState();
     const localMode = menuState.localParty === "bots" ? "bots" : "hotseat";
-    const playMode = (localMode === "bots")
-      ? "turns"
-      : (menuState.localPlayMode === "realtime" ? "realtime" : "turns");
+    const playMode = menuState.localPlayMode === "realtime" ? "realtime" : "turns";
     await startFreshLocal({
       playMode,
       localMode,
@@ -772,7 +811,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
   menuLocalPartyBotsBtn?.addEventListener("click", () => {
     menuState.localParty = "bots";
-    menuState.localPlayMode = "turns";
     renderLocalSelection();
   });
 
@@ -782,7 +820,6 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   menuLocalPlayModeRealtimeBtn?.addEventListener("click", () => {
-    if (menuState.localParty === "bots") return;
     menuState.localPlayMode = "realtime";
     renderLocalSelection();
   });

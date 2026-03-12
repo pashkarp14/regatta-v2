@@ -26,7 +26,7 @@
         </p>
 
         <div class="hero-actions">
-          <button type="button" id="openMainMenu" class="action-primary">Меню регаты</button>
+          <button type="button" id="openMainMenu" class="action-primary">Главное меню</button>
           <button type="button" id="toggleCommandDeck" class="action-secondary">Настройки гонки</button>
         </div>
       </div>
@@ -180,9 +180,10 @@
             </label>
           </div>
 
-          <div class="action-row">
+          <div class="action-row wrap-row">
+            <button type="button" id="randomCourse" class="action-secondary" data-room-lock="setup">Случайная карта</button>
             <button type="button" id="applyGrid" class="action-secondary" data-room-lock="setup">Перестроить поле</button>
-            <button type="button" id="resetGame" class="action-secondary" data-room-lock="setup">Новая гонка</button>
+            <button type="button" id="resetGame" class="action-secondary" data-room-lock="setup">Начать гонку заново</button>
           </div>
         </section>
 
@@ -211,7 +212,7 @@
 
             <label class="control wide-control" id="realtimePrepControl">
               <span>Маневры до старта, с</span>
-              <input id="realtimePrepSeconds" type="number" min="0" max="120" step="1" value="12" data-room-lock="setup" />
+              <input id="realtimePrepSeconds" type="number" min="0" max="120" step="1" value="18" data-room-lock="setup" />
             </label>
           </div>
 
@@ -229,7 +230,7 @@
           </div>
 
           <p id="deckModeHint" class="panel-note">
-            Выбери, что именно меняем на поле: знаки, стартовую линию, лодки или моделируемую ситуацию.
+            Выбери, что именно меняем на поле: знаки, стартовую линию, лодки или игровую ситуацию.
           </p>
 
           <div class="chip-group">
@@ -238,7 +239,7 @@
             <button type="button" id="modeStart" data-room-lock="setup">Настроить старт</button>
             <button type="button" id="modeFinish" data-room-lock="setup">Настроить финиш</button>
             <button type="button" id="modeBoats" data-room-lock="setup">Расставить лодки</button>
-            <button type="button" id="modeModel" data-room-lock="setup">Смоделировать ситуацию</button>
+            <button type="button" id="modeModel" data-room-lock="setup">Ситуация на поле</button>
           </div>
 
           <div class="field-grid compact-grid">
@@ -259,7 +260,7 @@
           </div>
 
           <button type="button" id="resumeFromModel" class="action-secondary hidden" data-room-lock="setup">
-            Применить ситуацию
+            Запустить ситуацию
           </button>
         </section>
 
@@ -291,6 +292,11 @@
             <label class="control">
               <span>Штраф смены галса</span>
               <input id="tackPenalty" type="number" min="0.50" max="1.00" step="0.01" value="0.95" data-room-lock="setup" />
+            </label>
+
+            <label class="control">
+              <span>Скорость поворота, °/с</span>
+              <input id="turnRateDegPerSec" type="number" min="30" max="360" step="5" value="120" data-room-lock="setup" />
             </label>
 
             <label class="control">
@@ -412,7 +418,7 @@
       <div class="menu-topbar">
         <div>
           <span class="meta-label">Главное меню</span>
-          <h2>Меню регаты</h2>
+          <h2>Главное меню</h2>
         </div>
         <div class="menu-topbar-actions">
           <button type="button" id="closeMainMenu" class="ghost-btn menu-close-btn" aria-label="Вернуться в игру" title="Вернуться в игру">X</button>
@@ -429,34 +435,23 @@
 
         <section class="menu-main">
           <div class="menu-screen" data-menu-screen="home">
-            <div class="menu-screen-head">
+            <div class="menu-screen-head menu-screen-head--home">
               <div>
-                <span class="meta-label">Старт</span>
-                <h3>Начало</h3>
+                <h3>Выбери действие</h3>
               </div>
-              <p>
-                При запуске открывается игровое меню. Отсюда можно начать новую регату,
-                продолжить текущую партию, выбрать стандартную карту или открыть серверную библиотеку сохранений.
-              </p>
             </div>
 
-            <div class="menu-card-grid">
-              <button type="button" id="menuContinue" class="menu-action-card">
-                <span class="menu-action-card__eyebrow">Быстрый вход</span>
-                <strong>Продолжить</strong>
-                <span>Вернуться на поле и продолжить текущую гонку.</span>
-              </button>
-
-              <button type="button" id="menuNewGame" class="menu-action-card menu-action-card--accent">
+            <div class="menu-card-grid menu-card-grid--home">
+              <button type="button" id="menuNewGame" class="menu-action-card menu-action-card--accent menu-action-card--hero">
                 <span class="menu-action-card__eyebrow">Новая сессия</span>
                 <strong>Новая игра</strong>
-                <span>Выбрать локальный или сетевой запуск и собрать новый сценарий регаты.</span>
+                <span>Сначала выбираем формат запуска, а затем создаём новую карту или загружаем готовую.</span>
               </button>
 
-              <button type="button" id="menuOpenMaps" class="menu-action-card">
-                <span class="menu-action-card__eyebrow">Библиотека</span>
-                <strong>Карты</strong>
-                <span>Стандартные трассы и карты, созданные пользователями на сервере.</span>
+              <button type="button" id="menuContinue" class="menu-action-card">
+                <span class="menu-action-card__eyebrow">Сейчас на поле</span>
+                <strong>Текущая гонка</strong>
+                <span id="menuContinueDescription">Вернуться к гонке, которая уже открыта на поле.</span>
               </button>
 
               <button type="button" id="menuOpenRaces" class="menu-action-card">
@@ -468,12 +463,12 @@
 
             <div class="menu-summary-grid">
               <div class="menu-summary-card">
-                <span class="meta-label">Состояние поля</span>
+                <span class="meta-label">Текущая гонка</span>
                 <div id="menuHomeSummary" class="menu-summary-card__body"></div>
               </div>
 
               <div class="menu-summary-card">
-                <span class="meta-label">Сеть и библиотека</span>
+                <span class="meta-label">Библиотека</span>
                 <div id="menuHomeLibrary" class="menu-summary-card__body"></div>
               </div>
             </div>
@@ -516,7 +511,7 @@
               <button type="button" id="menuScenarioCreate" class="menu-action-card menu-action-card--accent">
                 <span class="menu-action-card__eyebrow">Редактор</span>
                 <strong>Создать новую карту</strong>
-                <span>Открыть редактор дистанции, расставить знаки и подготовить стартовый коридор.</span>
+                <span>Открыть редактор дистанции, расставить знаки, подготовить старт и при необходимости смоделировать ситуацию.</span>
               </button>
 
               <button type="button" id="menuScenarioLoadMap" class="menu-action-card">
@@ -646,14 +641,6 @@
               </p>
             </div>
 
-            <div class="menu-toolbar">
-              <label class="control grow">
-                <span>Имя текущей карты</span>
-                <input id="mapRecordName" type="text" maxlength="120" placeholder="Например, Ночной треугольник" />
-              </label>
-              <button type="button" id="saveCurrentMap" class="action-primary">Сохранить карту</button>
-            </div>
-
             <p id="mapsScreenHint" class="menu-inline-note"></p>
             <div id="savedMapsList" class="library-list"></div>
           </div>
@@ -668,14 +655,6 @@
                 Каждое сохранение гонки содержит полный снимок матча. Можно вернуться к нему локально
                 или поднять из него новую сетевую комнату.
               </p>
-            </div>
-
-            <div class="menu-toolbar">
-              <label class="control grow">
-                <span>Имя сохранения</span>
-                <input id="raceRecordName" type="text" maxlength="120" placeholder="Например, Финал 3-го лега" />
-              </label>
-              <button type="button" id="saveCurrentRace" class="action-primary">Сохранить гонку</button>
             </div>
 
             <p id="racesScreenHint" class="menu-inline-note"></p>
