@@ -39,6 +39,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const movesPerTurnInp  = document.getElementById("movesPerTurn");
   const tackPenaltyInp   = document.getElementById("tackPenalty");
   const turnRateInp = document.getElementById("turnRateDegPerSec");
+  const luffingSpeedInp = document.getElementById("luffingSpeedPercent");
   const autoGustsSelect = document.getElementById("autoGusts");
   const autoGustIntervalInp = document.getElementById("autoGustInterval");
   const autoGustDurationInp = document.getElementById("autoGustDuration");
@@ -305,6 +306,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const DEFAULT_REALTIME_PREP_SECONDS = 18;
   let realtimePrepSeconds = clamp(parseFloat(realtimePrepInp?.value) || DEFAULT_REALTIME_PREP_SECONDS, 0, 120);
   let turnRateDegPerSec = clamp(parseFloat(turnRateInp?.value) || 120, 30, 360);
+  let luffingSpeedPercent = clamp(parseFloat(luffingSpeedInp?.value) || 25, 0, 80);
   let autoFullscreenMode = autoFullscreenModeSelect?.value === "race" ? "race" : "off";
   let showLaylines = false;
   let showTrails = false;
@@ -313,7 +315,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function updateWindInfo(){
     const gustMode = autoGustsEnabled ? "авто" : (gustRect ? "порыв" : "штиль");
-    windInfoEl.textContent = `Ветер: ${windAngleDeg.toFixed(0)}° откуда дует · ${gustMode}`;
+    windInfoEl.textContent = `Ветер: ${normalizedWindAngleDeg().toFixed(0)}° откуда дует · ${gustMode}`;
   }
 
   function currentRaceTimeMs(){
@@ -324,12 +326,47 @@ document.addEventListener("DOMContentLoaded", () => {
     serverClockOffsetMs = Number.isFinite(offsetMs) ? offsetMs : 0;
   }
 
-  // 0° = ветер вниз на экране => в мире это -Y
-  function downwindVec(){
-    const t = windAngleDeg * Math.PI / 180;
-    return { x: Math.sin(t), y: -Math.cos(t) };
+  function normalizedWindAngleDeg(rawDeg=windAngleDeg){
+    return normalizeDegrees(Number.isFinite(rawDeg) ? rawDeg : 0);
   }
-  function upwindVec(){ const d = downwindVec(); return { x: -d.x, y: -d.y }; }
+
+  function setWindAngle(nextAngleDeg){
+    windAngleDeg = normalizedWindAngleDeg(nextAngleDeg);
+    return windAngleDeg;
+  }
+
+  // 0° = ветер приходит с верхней кромки поля и дует вниз по экрану.
+  function windFromVec(){
+    const t = normalizedWindAngleDeg() * Math.PI / 180;
+    return { x: -Math.sin(t), y: Math.cos(t) };
+  }
+
+  function downwindVec(){
+    const windFrom = windFromVec();
+    return { x: -windFrom.x, y: -windFrom.y };
+  }
+  function upwindVec(){ return windFromVec(); }
+  function deadZoneHalfAngleRad(){
+    return (clamp(deadZoneDeg, 0, 180) * Math.PI / 180) / 2;
+  }
+  function realtimeLuffingSpeedFactor(){
+    return clamp(luffingSpeedPercent / 100, 0, 0.95);
+  }
+  function realtimeSpeedFactorForAngle(angleRad){
+    const halfDead = deadZoneHalfAngleRad();
+    if (halfDead <= 1e-6) return 1;
+    const softness = Math.max(2, REALTIME_DEADZONE_SOFTNESS_DEG) * Math.PI / 180;
+    const luffFactor = realtimeLuffingSpeedFactor();
+    if (angleRad <= halfDead){
+      const insideRatio = clamp(angleRad / halfDead, 0, 1);
+      return clamp(luffFactor * (0.45 + insideRatio * 0.55), 0, 1);
+    }
+    return clamp(
+      luffFactor + ((angleRad - halfDead) / softness) * (1 - luffFactor),
+      luffFactor,
+      1
+    );
+  }
   function angleBetween(u, v){
     const du = Math.hypot(u.x,u.y) || 1;
     const dv = Math.hypot(v.x,v.y) || 1;
@@ -340,7 +377,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (deadZoneDeg <= 0) return false;
     const uw = upwindVec();
     const a = angleBetween(moveVec, uw);
-    return a < (deadZoneDeg * Math.PI/180) / 2;
+    return a < deadZoneHalfAngleRad();
   }
 
   // -----------------------------
@@ -382,6 +419,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let realtimeCursorClient = null;
   let activeRealtimePointerId = null;
   let localRealtimeLastTickAt = 0;
+  let realtimeBotDecisionCache = [];
 
   let prestartRoundsSetting = parseInt(prestartRoundsInp.value,10) || 0;
   let prestartRoundsLeft = prestartRoundsSetting;
@@ -680,7 +718,7 @@ document.addEventListener("DOMContentLoaded", () => {
     finishA = finishSeparate ? { ...layout.finishA } : { ...layout.startA };
     finishB = finishSeparate ? { ...layout.finishB } : { ...layout.startB };
     marks = layout.marks;
-    windAngleDeg = normalizeDegrees((Math.random() * 30) - 15);
+    setWindAngle((Math.random() * 30) - 15);
     gustRect = null;
     gustExpiresAt = 0;
     nextAutoGustAt = 0;
@@ -776,6 +814,10 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  function clearRealtimeBotDecisionCache(){
+    realtimeBotDecisionCache = [];
+  }
+
   function isLocalBotsMode(){
     return multiplayerSeatIndex === null && localPilotMode === "bots";
   }
@@ -791,6 +833,7 @@ document.addEventListener("DOMContentLoaded", () => {
   function setLocalPilotMode(nextMode="hotseat"){
     localPilotMode = nextMode === "bots" ? "bots" : "hotseat";
     clearBotTurnTimer();
+    clearRealtimeBotDecisionCache();
     if (isLocalBotsMode() && boats[LOCAL_HUMAN_SEAT]){
       selectedBoatIndex = LOCAL_HUMAN_SEAT;
     }
@@ -1903,6 +1946,62 @@ document.addEventListener("DOMContentLoaded", () => {
     return bestDest;
   }
 
+  function addRealtimeDirectionCandidate(candidates, candidate){
+    if (!candidate) return;
+    const normalized = norm(candidate);
+    if (normalized.L <= 1e-6) return;
+    const direction = { x: normalized.x, y: normalized.y };
+    if (candidates.some((existing) => existing.x * direction.x + existing.y * direction.y > 0.999)){
+      return;
+    }
+    candidates.push(direction);
+  }
+
+  function scoreRealtimeBotDirection(boat, direction, directToTarget, target){
+    const position = { x: boat.x, y: boat.y };
+    const angleToWind = angleBetween(direction, upwindVec());
+    const halfDead = deadZoneHalfAngleRad();
+    const reverseMode = angleToWind <= halfDead * 0.5;
+    const stallMargin = 8 * Math.PI / 180;
+    const speedFactor = reverseMode ? 0.08 : realtimeSpeedFactorForAngle(angleToWind);
+    const motionDirection = reverseMode
+      ? { x: -direction.x, y: -direction.y }
+      : direction;
+    const lookaheadDistance = clamp(
+      Math.max(2.8, REALTIME_SPEED_UNITS_PER_SEC * 2.4, dist(position, target) * 0.35),
+      2.8,
+      7.2
+    );
+    const intendedTravel = lookaheadDistance * Math.max(reverseMode ? 0.16 : speedFactor, 0.18);
+    const projected = clampAlongRayToField(position, motionDirection, intendedTravel);
+    const progress = dist(position, target) - dist(projected, target);
+    const targetPenalty = angleBetween(direction, directToTarget) * 0.85;
+    const headingPenalty = boat.hasHeading
+      ? Math.abs(angleWrap(Math.atan2(direction.y, direction.x) - boat.heading)) * 0.08
+      : 0;
+    const nextTack = tackSignFromHeadingVec(direction);
+    const tackPenalty = (boat.hasHeading && boat.tack !== 0 && nextTack !== 0 && nextTack !== boat.tack)
+      ? 0.45
+      : 0;
+    const boundaryPenalty = dist(position, projected) < intendedTravel * 0.6 ? 1.4 : 0;
+    const reversePenalty = reverseMode ? 5.5 : 0;
+    const luffPenalty = Math.max(0, halfDead - angleToWind) * 14;
+    const stallPenalty = angleToWind < (halfDead + stallMargin)
+      ? ((halfDead + stallMargin - angleToWind) / stallMargin) * 5
+      : 0;
+    const lowSpeedPenalty = (1 - speedFactor) * 1.8;
+    return dist(projected, target)
+      - progress * 0.35
+      + targetPenalty
+      + headingPenalty
+      + tackPenalty
+      + boundaryPenalty
+      + reversePenalty
+      + luffPenalty
+      + stallPenalty
+      + lowSpeedPenalty;
+  }
+
   function scheduleLocalBotTurn({ delayMs=420 } = {}){
     clearBotTurnTimer();
     if (!isLocalBotsMode() || phase === "finished" || isRealtimePlayMode() || botTurnInProgress){
@@ -2054,15 +2153,98 @@ document.addEventListener("DOMContentLoaded", () => {
     const boat = boats[boatIdx];
     if (!boat || boat.finished) return null;
 
-    const preferredDest = chooseBotDestination(boatIdx);
-    const target = preferredDest || botGoalPointForBoat(boat);
+    const now = currentRaceTimeMs();
+    const cachedDecision = realtimeBotDecisionCache[boatIdx];
+    if (
+      cachedDecision?.direction &&
+      cachedDecision.phase === phase &&
+      cachedDecision.nextMark === boat.nextMark &&
+      cachedDecision.refreshAt > now &&
+      dist(cachedDecision.position, { x: boat.x, y: boat.y }) < 2.4
+    ){
+      return { ...cachedDecision.direction };
+    }
+
+    const target = botGoalPointForBoat(boat);
     if (!target) return null;
 
-    const direction = norm({ x: target.x - boat.x, y: target.y - boat.y });
-    if (direction.L <= 1e-6){
+    const direct = norm({ x: target.x - boat.x, y: target.y - boat.y });
+    if (direct.L <= 1e-6){
       return boat.hasHeading ? boatAxisUnit(boat.heading, boat.hasHeading) : null;
     }
-    return { x: direction.x, y: direction.y };
+
+    const directDirection = { x: direct.x, y: direct.y };
+    const candidates = [];
+    const upwind = upwindVec();
+    const halfDead = deadZoneHalfAngleRad();
+    const beatAngle = clamp(
+      halfDead + (14 * Math.PI / 180),
+      35 * Math.PI / 180,
+      85 * Math.PI / 180
+    );
+    const currentHeading = boatAxisUnit(boat.heading, boat.hasHeading);
+    const needsBeat = angleBetween(directDirection, upwind) < (halfDead + 12 * Math.PI / 180);
+    const beatVariants = [0, 8, -8, 16, -16];
+    const addBeatFamily = (baseDirection) => {
+      for (const deg of beatVariants){
+        addRealtimeDirectionCandidate(candidates, rotateVec(baseDirection, deg * Math.PI / 180));
+      }
+    };
+    const beatA = rotateVec(upwind, beatAngle);
+    const beatB = rotateVec(upwind, -beatAngle);
+    const beatATack = tackSignFromHeadingVec(beatA);
+    const beatBTack = tackSignFromHeadingVec(beatB);
+
+    if (needsBeat){
+      if (boat.tack !== 0){
+        if (beatATack === boat.tack){
+          addBeatFamily(beatA);
+          addBeatFamily(beatB);
+        } else {
+          addBeatFamily(beatB);
+          addBeatFamily(beatA);
+        }
+      } else {
+        addBeatFamily(beatA);
+        addBeatFamily(beatB);
+      }
+      if (boat.hasHeading && angleBetween(currentHeading, upwind) >= (halfDead + 6 * Math.PI / 180)){
+        addRealtimeDirectionCandidate(candidates, currentHeading);
+      }
+    } else {
+      const courseTweaks = [0, 8, -8, 16, -16, 28, -28, 40, -40];
+      addRealtimeDirectionCandidate(candidates, directDirection);
+      for (const deg of courseTweaks){
+        if (!deg) continue;
+        addRealtimeDirectionCandidate(candidates, rotateVec(directDirection, deg * Math.PI / 180));
+      }
+      addRealtimeDirectionCandidate(candidates, currentHeading);
+      if (boat.hasHeading){
+        addRealtimeDirectionCandidate(candidates, rotateVec(currentHeading, 12 * Math.PI / 180));
+        addRealtimeDirectionCandidate(candidates, rotateVec(currentHeading, -12 * Math.PI / 180));
+      }
+      addBeatFamily(beatA);
+      addBeatFamily(beatB);
+    }
+
+    let bestDirection = candidates[0] || directDirection;
+    let bestScore = Infinity;
+    for (const candidate of candidates){
+      const score = scoreRealtimeBotDirection(boat, candidate, directDirection, target);
+      if (score < bestScore){
+        bestScore = score;
+        bestDirection = candidate;
+      }
+    }
+
+    realtimeBotDecisionCache[boatIdx] = {
+      direction: { ...bestDirection },
+      position: { x: boat.x, y: boat.y },
+      nextMark: boat.nextMark,
+      phase,
+      refreshAt: now + 650
+    };
+    return bestDirection;
   }
 
   function controlDirectionForLocalBoat(boatIdx){
@@ -2141,16 +2323,13 @@ document.addEventListener("DOMContentLoaded", () => {
       const actualDirection = steering.direction;
       const upwind = upwindVec();
       const angle = angleBetween(actualDirection, upwind);
-      const halfDead = (deadZoneDeg * Math.PI / 180) / 2;
+      const halfDead = deadZoneHalfAngleRad();
       const reverseThreshold = halfDead * 0.5;
-      const softness = Math.max(2, REALTIME_DEADZONE_SOFTNESS_DEG) * Math.PI / 180;
       const heading = steering.heading;
       const moveFactor = stepFactorForMove(boat, actualDirection) * realtimePenaltyFactorForBoat(boat, now);
-      const speedFactor = (angle <= halfDead)
-        ? 0
-        : clamp((angle - halfDead) / softness, 0, 1);
       const reverseSpeed = REALTIME_SPEED_UNITS_PER_SEC * dtSeconds * moveFactor * 0.10;
       const reverseMode = angle <= reverseThreshold;
+      const speedFactor = reverseMode ? 0 : realtimeSpeedFactorForAngle(angle);
       const stepLength = reverseMode
         ? reverseSpeed
         : (REALTIME_SPEED_UNITS_PER_SEC * dtSeconds * speedFactor * moveFactor);
@@ -3210,6 +3389,7 @@ document.addEventListener("DOMContentLoaded", () => {
       : !!randomizeBehindStart;
 
     boats = [];
+    clearRealtimeBotDecisionCache();
     raceFinishedCount = 0;
 
     prestartRoundsSetting = parseInt(prestartRoundsInp.value,10) || 0;
@@ -3364,6 +3544,7 @@ document.addEventListener("DOMContentLoaded", () => {
     realtimeCountdownEndsAt = 0;
     prestartRoundsLeft = 0;
     localRealtimeLastTickAt = 0;
+    clearRealtimeBotDecisionCache();
     for (const boat of boats){
       boat.startDeltaMs = null;
       boat.falseStartDeltaMs = null;
@@ -3633,7 +3814,7 @@ document.addEventListener("DOMContentLoaded", () => {
         height: worldH
       },
       settings: {
-        windAngleDeg,
+        windAngleDeg: normalizedWindAngleDeg(),
         deadZoneDeg,
         snapThreshold,
         movesPerTurn,
@@ -3642,6 +3823,7 @@ document.addEventListener("DOMContentLoaded", () => {
         interactionMode,
         tackPenaltyFactor,
         turnRateDegPerSec,
+        luffingSpeedPercent,
         autoGustsEnabled,
         autoGustIntervalSec,
         autoGustDurationSec,
@@ -3779,6 +3961,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function importGameState(snapshot){
     if (!snapshot || typeof snapshot !== "object") return;
+    clearRealtimeBotDecisionCache();
 
     const world = snapshot.world || {};
     const settings = snapshot.settings || {};
@@ -3813,7 +3996,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     gustRect = normalizeGustZone(course.gustRect);
 
-    windAngleDeg = Number.isFinite(settings.windAngleDeg) ? settings.windAngleDeg : windAngleDeg;
+    setWindAngle(Number.isFinite(settings.windAngleDeg) ? settings.windAngleDeg : windAngleDeg);
     deadZoneDeg = clamp(parseFloat(settings.deadZoneDeg) || deadZoneDeg, 0, 180);
     snapThreshold = clamp(parseFloat(settings.snapThreshold) || snapThreshold, 0, 1);
     movesPerTurn = clamp(parseInt(settings.movesPerTurn,10) || movesPerTurn, 1, 10);
@@ -3821,6 +4004,12 @@ document.addEventListener("DOMContentLoaded", () => {
     playMode = normalizePlayModeValue(settings.playMode);
     interactionMode = normalizeInteractionMode(settings.interactionMode);
     tackPenaltyFactor = clamp(parseFloat(settings.tackPenaltyFactor) || tackPenaltyFactor, 0.5, 1.0);
+    const incomingLuffingSpeed = parseFloat(settings.luffingSpeedPercent);
+    luffingSpeedPercent = clamp(
+      Number.isFinite(incomingLuffingSpeed) ? incomingLuffingSpeed : luffingSpeedPercent,
+      0,
+      80
+    );
     autoGustsEnabled = !!settings.autoGustsEnabled;
     autoGustIntervalSec = clamp(parseFloat(settings.autoGustIntervalSec) || autoGustIntervalSec, 3, 60);
     autoGustDurationSec = clamp(parseFloat(settings.autoGustDurationSec) || autoGustDurationSec, 2, 30);
@@ -3836,6 +4025,7 @@ document.addEventListener("DOMContentLoaded", () => {
     playModeSelect.value = playMode;
     if (interactionModeSelect) interactionModeSelect.value = interactionMode;
     tackPenaltyInp.value = String(tackPenaltyFactor);
+    if (luffingSpeedInp) luffingSpeedInp.value = String(luffingSpeedPercent);
     if (autoGustsSelect) autoGustsSelect.value = autoGustsEnabled ? "on" : "off";
     if (autoGustIntervalInp) autoGustIntervalInp.value = String(autoGustIntervalSec);
     if (autoGustDurationInp) autoGustDurationInp.value = String(autoGustDurationSec);
@@ -3971,7 +4161,7 @@ document.addEventListener("DOMContentLoaded", () => {
   function drawWindArrow(){
     const base = worldToScreen({ x: worldW/2, y: worldH - 0.6 });
     const len = 55;
-    const windFrom = upwindVec();
+    const windFrom = windFromVec();
     const tip = {
       x: base.x + windFrom.x * (len / 2),
       y: base.y - windFrom.y * (len / 2)
@@ -5108,6 +5298,15 @@ document.addEventListener("DOMContentLoaded", () => {
     emitStateChanged();
   });
 
+  luffingSpeedInp?.addEventListener("change", () => {
+    const nextValue = parseFloat(luffingSpeedInp.value);
+    luffingSpeedPercent = clamp(Number.isFinite(nextValue) ? nextValue : 25, 0, 80);
+    luffingSpeedInp.value = String(luffingSpeedPercent);
+    updateOptInfo();
+    render();
+    emitStateChanged();
+  });
+
   autoGustsSelect?.addEventListener("change", () => {
     autoGustsEnabled = autoGustsSelect.value === "on";
     if (autoGustsEnabled){
@@ -5157,7 +5356,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   btnWindLeft.addEventListener("click", () => {
-    windAngleDeg -= WIND_STEP;
+    setWindAngle(windAngleDeg - WIND_STEP);
     updateWindInfo();
     invalidateSolutions();
     updateOptInfo();
@@ -5166,7 +5365,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   btnWindRight.addEventListener("click", () => {
-    windAngleDeg += WIND_STEP;
+    setWindAngle(windAngleDeg + WIND_STEP);
     updateWindInfo();
     invalidateSolutions();
     updateOptInfo();
@@ -5507,6 +5706,8 @@ document.addEventListener("DOMContentLoaded", () => {
     snapThreshold = clamp(parseFloat(snapThresholdInp.value)||0.8, 0, 1);
     movesPerTurn = clamp(parseInt(movesPerTurnInp.value,10)||1, 1, 10);
     tackPenaltyFactor = clamp(parseFloat(tackPenaltyInp.value)||0.95, 0.5, 1.0);
+    const initialLuffingSpeed = parseFloat(luffingSpeedInp?.value);
+    luffingSpeedPercent = clamp(Number.isFinite(initialLuffingSpeed) ? initialLuffingSpeed : 25, 0, 80);
     autoGustsEnabled = autoGustsSelect?.value === "on";
     autoGustIntervalSec = clamp(parseFloat(autoGustIntervalInp?.value) || 10, 3, 60);
     autoGustDurationSec = clamp(parseFloat(autoGustDurationInp?.value) || 6, 2, 30);

@@ -67,6 +67,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const menuJoinCodeInput = document.getElementById("menuJoinCode");
   const playModeSelect = document.getElementById("playMode");
   const finishSeparateSelect = document.getElementById("finishSeparate");
+  const deckRoomSectionEl = document.getElementById("deckRoomSection");
   const modeFinishBtn = document.getElementById("modeFinish");
   const prestartRoundsControlEl = document.getElementById("prestartRoundsControl");
   const realtimePrepControlEl = document.getElementById("realtimePrepControl");
@@ -292,11 +293,14 @@ document.addEventListener("DOMContentLoaded", () => {
     const meta = regatta.getMeta?.() || {};
     const snapshot = regatta.exportState();
     const room = roomSummary().room;
+    const roomLine = room
+      ? `<div><strong>Комната:</strong> ${room.code} · ${room.status}</div>`
+      : "";
     menuSettingsSummaryEl.innerHTML = `
       <div><strong>Формат:</strong> ${formatFormatLabel(room)}</div>
       <div><strong>Режим игры:</strong> ${formatPlayModeLabel(meta.playMode)}</div>
       <div><strong>Фаза:</strong> ${formatPhaseLabel(meta.phase)}</div>
-      <div><strong>Комната:</strong> ${room ? `${room.code} · ${room.status}` : "не активна"}</div>
+      ${roomLine}
       <div><strong>Ветер:</strong> ${Math.round(snapshot.settings?.windAngleDeg || 0)}° откуда дует</div>
       <div><strong>Позывной:</strong> ${currentDisplayName()}</div>
     `;
@@ -304,10 +308,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function renderDeckContext() {
     const meta = regatta.getMeta?.() || {};
+    const room = roomSummary().room;
     const playMode = meta.playMode === "realtime" ? "realtime" : "turns";
     const editorMode = meta.mode || "play";
     const finishSeparate = finishSeparateSelect?.value === "yes";
+    const showRoomSection = !!room && room.status === "lobby";
 
+    deckRoomSectionEl?.classList.toggle("hidden", !showRoomSection);
     prestartRoundsControlEl?.classList.toggle("hidden", playMode === "realtime");
     realtimePrepControlEl?.classList.toggle("hidden", playMode !== "realtime");
     modeFinishBtn?.classList.toggle("hidden", !finishSeparate);
