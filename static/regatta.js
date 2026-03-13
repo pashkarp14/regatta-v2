@@ -40,6 +40,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const tackPenaltyInp   = document.getElementById("tackPenalty");
   const turnRateInp = document.getElementById("turnRateDegPerSec");
   const luffingSpeedInp = document.getElementById("luffingSpeedPercent");
+  const botDifficultySelect = document.getElementById("botDifficulty");
   const autoGustsSelect = document.getElementById("autoGusts");
   const autoGustIntervalInp = document.getElementById("autoGustInterval");
   const autoGustDurationInp = document.getElementById("autoGustDuration");
@@ -234,6 +235,11 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
+  function mix(a,b,t){ return a + (b - a) * t; }
+  function stableNoise01(seed){
+    const raw = Math.sin(seed * 12.9898 + 78.233) * 43758.5453123;
+    return raw - Math.floor(raw);
+  }
   function dist(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
   function norm(v){
     const L = Math.hypot(v.x,v.y) || 1;
@@ -294,6 +300,49 @@ document.addEventListener("DOMContentLoaded", () => {
     return "contact";
   }
 
+  function normalizeBotDifficultyValue(rawValue){
+    return (rawValue === "easy" || rawValue === "hard") ? rawValue : "normal";
+  }
+
+  const BOT_DIFFICULTY_PROFILES = {
+    easy: {
+      turnRateScale: 0.78,
+      decisionMs: 980,
+      aimJitterDeg: 7,
+      scoreNoise: 0.18,
+      routeSlack: 0.03,
+      favoredEndBias: 0.62,
+      clusterWidth: 0.28,
+      earlyDepth: 1.7,
+      lateDepth: 0.72,
+      lineMargin: 0.62
+    },
+    normal: {
+      turnRateScale: 0.84,
+      decisionMs: 700,
+      aimJitterDeg: 5,
+      scoreNoise: 0.12,
+      routeSlack: 0.01,
+      favoredEndBias: 0.76,
+      clusterWidth: 0.20,
+      earlyDepth: 1.45,
+      lateDepth: 0.48,
+      lineMargin: 0.46
+    },
+    hard: {
+      turnRateScale: 0.92,
+      decisionMs: 480,
+      aimJitterDeg: 4,
+      scoreNoise: 0.05,
+      routeSlack: 0,
+      favoredEndBias: 0.76,
+      clusterWidth: 0.2,
+      earlyDepth: 1.35,
+      lateDepth: 0.36,
+      lineMargin: 0.38
+    }
+  };
+
   let snapThreshold = parseFloat(snapThresholdInp.value); // 0..1
   let movesPerTurn  = parseInt(movesPerTurnInp.value,10) || 1;
   let roundingSide  = roundingSideSelect.value; // "port" | "starboard"
@@ -307,6 +356,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let realtimePrepSeconds = clamp(parseFloat(realtimePrepInp?.value) || DEFAULT_REALTIME_PREP_SECONDS, 0, 120);
   let turnRateDegPerSec = clamp(parseFloat(turnRateInp?.value) || 120, 30, 360);
   let luffingSpeedPercent = clamp(parseFloat(luffingSpeedInp?.value) || 25, 0, 80);
+  let botDifficulty = normalizeBotDifficultyValue(botDifficultySelect?.value);
   let autoFullscreenMode = autoFullscreenModeSelect?.value === "race" ? "race" : "off";
   let showLaylines = false;
   let showTrails = false;
@@ -828,6 +878,27 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function isBotControlledBoat(boatIdx){
     return isLocalBotsMode() && !isHumanControlledBoat(boatIdx);
+  }
+
+  function currentBotDifficultyProfile(){
+    return BOT_DIFFICULTY_PROFILES[normalizeBotDifficultyValue(botDifficulty)] || BOT_DIFFICULTY_PROFILES.normal;
+  }
+
+  function botSkillProfile(boatIdx){
+    const baseProfile = currentBotDifficultyProfile();
+    const variance = (stableNoise01((boatIdx + 1) * 17.31) - 0.5) * 0.12;
+    return {
+      turnRateScale: clamp(baseProfile.turnRateScale + variance * 0.55, 0.7, 1.05),
+      decisionMs: clamp(baseProfile.decisionMs * (1 - variance * 0.55), 280, 1400),
+      aimJitterDeg: clamp(baseProfile.aimJitterDeg * (1 - variance * 0.55), 0, 22),
+      scoreNoise: clamp(baseProfile.scoreNoise + Math.abs(variance) * 0.18, 0, 1.1),
+      routeSlack: clamp(baseProfile.routeSlack + Math.abs(variance) * 0.12, 0, 0.28),
+      favoredEndBias: clamp(baseProfile.favoredEndBias + variance * 0.8, 0.54, 0.92),
+      clusterWidth: clamp(baseProfile.clusterWidth + Math.abs(variance) * 0.12, 0.10, 0.34),
+      earlyDepth: clamp(baseProfile.earlyDepth + variance * 0.7, 0.9, PRESTART_DEPTH - 0.15),
+      lateDepth: clamp(baseProfile.lateDepth + variance * 0.35, 0.18, PRESTART_DEPTH - 0.1),
+      lineMargin: clamp(baseProfile.lineMargin + variance * 0.3, 0.18, 0.9)
+    };
   }
 
   function setLocalPilotMode(nextMode="hotseat"){
@@ -1893,6 +1964,76 @@ document.addEventListener("DOMContentLoaded", () => {
     };
   }
 
+  function botControlledBoatIndices(){
+    const controlled = [];
+    for (let i=0; i<boats.length; i++){
+      if (isBotControlledBoat(i) && !boats[i]?.finished){
+        controlled.push(i);
+      }
+    }
+    return controlled;
+  }
+
+  function favoredStartEndIsB(){
+    const wind = upwindVec();
+    const scoreA = startA.x * wind.x + startA.y * wind.y;
+    const scoreB = startB.x * wind.x + startB.y * wind.y;
+    return scoreB >= scoreA;
+  }
+
+  function realtimeBotCountdownGuideTarget(boat, boatIdx, now=currentRaceTimeMs()){
+    if (!boat || boat.finished || phase !== "countdown" || realtimeCountdownEndsAt <= now){
+      return null;
+    }
+
+    const profile = botSkillProfile(boatIdx);
+    const d = startLineDirUnit();
+    const n = prestartNormalUnit();
+    const lineLen = lineLengthUnits(startA, startB);
+    if (lineLen <= 1e-6){
+      return null;
+    }
+
+    const controlled = botControlledBoatIndices();
+    const rank = Math.max(0, controlled.indexOf(boatIdx));
+    const count = Math.max(1, controlled.length);
+    const slotCenter = favoredStartEndIsB() ? profile.favoredEndBias : (1 - profile.favoredEndBias);
+    const slotSpread = count > 1 ? profile.clusterWidth : 0;
+    const slotOffset = count > 1 ? ((rank / (count - 1)) - 0.5) * slotSpread : 0;
+    const driftNoise = (stableNoise01((boatIdx + 1) * 43.77) - 0.5) * Math.min(1.4, lineLen * 0.04);
+    const jockey = Math.sin(now / 1100 + boatIdx * 0.9) * Math.min(0.42, lineLen * 0.015);
+    const alongFraction = clamp(slotCenter + slotOffset, 0.06, 0.94);
+    const along = clamp(lineLen * alongFraction + driftNoise + jockey, lineLen * 0.05, lineLen * 0.95);
+
+    const totalMs = Math.max(1000, realtimePrepSeconds * 1000);
+    const msLeft = Math.max(0, realtimeCountdownEndsAt - now);
+    const urgency = 1 - clamp(msLeft / totalMs, 0, 1);
+    let depth = clamp(mix(profile.earlyDepth, profile.lateDepth, urgency), 0.2, PRESTART_DEPTH - 0.08);
+    const currentMargin = Math.max(0, -startLineSideValue(boat));
+    if (msLeft <= 4200 && currentMargin < profile.lineMargin){
+      depth = Math.max(depth, profile.lineMargin + 0.12);
+    }
+    if (startLineSideValue(boat) > -0.04){
+      depth = Math.max(depth, profile.lineMargin + 0.32);
+    }
+
+    return {
+      x: clamp(startA.x + d.x * along + n.x * depth, 0, worldW),
+      y: clamp(startA.y + d.y * along + n.y * depth, 0, worldH)
+    };
+  }
+
+  function applyBotDirectionBias(direction, boatIdx, now, scale=1){
+    const profile = botSkillProfile(boatIdx);
+    const jitterDeg = clamp(profile.aimJitterDeg * scale, 0, 24);
+    if (jitterDeg <= 0.01){
+      return direction;
+    }
+    const jitterSeed = Math.floor(now / 850) + (boatIdx + 1) * 19;
+    const jitterAngle = ((stableNoise01(jitterSeed) * 2) - 1) * (jitterDeg * Math.PI / 180);
+    return rotateVec(direction, jitterAngle);
+  }
+
   function realtimeBotRoundingGuideTarget(boat){
     if (!boat || boat.finished || boat.nextMark >= markCount) return null;
     const markPos = marks[boat.nextMark];
@@ -1902,7 +2043,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (fromMark.L <= 1e-6) return null;
 
     const distanceToMark = fromMark.L;
-    const activationRadius = ROUND_PASS_RADIUS + 4.5;
+    const activationRadius = ROUND_PASS_RADIUS + 12;
     if (!boat.roundInZone && distanceToMark > activationRadius){
       return null;
     }
@@ -1936,6 +2077,7 @@ document.addEventListener("DOMContentLoaded", () => {
   function chooseBotDestination(boatIdx){
     const boat = boats[boatIdx];
     if (!boat || boat.finished) return null;
+    const profile = botSkillProfile(boatIdx);
 
     const planned = planOptimalFrom(
       { x: boat.x, y: boat.y },
@@ -1948,7 +2090,8 @@ document.addEventListener("DOMContentLoaded", () => {
     );
     if (planned?.path?.length >= 2){
       const plannedDest = proposeDestination(boatIdx, planned.path[1]);
-      if (plannedDest){
+      const skipOptimal = stableNoise01((boatIdx + 1) * 31.7 + (boat.turns + 1) * 2.1 + boat.nextMark * 7.3) < profile.routeSlack;
+      if (plannedDest && !skipOptimal){
         return plannedDest;
       }
     }
@@ -2000,7 +2143,8 @@ document.addEventListener("DOMContentLoaded", () => {
         boatSpeedCoeff(boat),
       );
       const routePenalty = route?.distance ?? remaining;
-      const score = remaining + routePenalty * 0.45 + Math.abs(angle) * 0.12;
+      const decisionNoise = ((stableNoise01((boatIdx + 1) * 9.7 + angle * 13 + boat.nextMark * 5.1) * 2) - 1) * profile.scoreNoise;
+      const score = remaining + routePenalty * 0.45 + Math.abs(angle) * 0.12 + decisionNoise;
       if (score < bestScore){
         bestScore = score;
         bestDest = dest;
@@ -2021,8 +2165,13 @@ document.addEventListener("DOMContentLoaded", () => {
     candidates.push(direction);
   }
 
-  function scoreRealtimeBotDirection(boat, direction, directToTarget, target){
+  function scoreRealtimeBotDirection(boat, direction, directToTarget, target, options={}){
     const position = { x: boat.x, y: boat.y };
+    const boatIdx = Number.isInteger(options.boatIdx) ? options.boatIdx : -1;
+    const profile = boatIdx >= 0 ? botSkillProfile(boatIdx) : currentBotDifficultyProfile();
+    const countdownTarget = !!options.countdownTarget;
+    const roundingGuide = !!options.roundingGuide;
+    const noiseScale = (countdownTarget || roundingGuide) ? profile.scoreNoise * 0.22 : profile.scoreNoise;
     const angleToWind = angleBetween(direction, upwindVec());
     const halfDead = deadZoneHalfAngleRad();
     const reverseMode = angleToWind <= halfDead * 0.5;
@@ -2054,6 +2203,18 @@ document.addEventListener("DOMContentLoaded", () => {
       ? ((halfDead + stallMargin - angleToWind) / stallMargin) * 5
       : 0;
     const lowSpeedPenalty = (1 - speedFactor) * 1.8;
+    const startLineMargin = Math.max(0, -startLineSideValue(projected));
+    const countdownCrossing = countdownTarget ? classifyStartLineCrossing(position, projected) : null;
+    const countdownPenalty = !countdownTarget
+      ? 0
+      : (
+        (countdownCrossing === "toCourse" || startLineSideValue(projected) > -0.04)
+          ? 9
+          : (Math.max(0, profile.lineMargin - startLineMargin) * 5.5) + (pointInPrestartZone(projected) ? 0 : 1.8)
+      );
+    const decisionNoise = boatIdx < 0
+      ? 0
+      : (((stableNoise01((boatIdx + 1) * 11.37 + projected.x * 0.91 + projected.y * 0.53 + Math.floor((options.nowMs || currentRaceTimeMs()) / 700)) * 2) - 1) * noiseScale);
     return dist(projected, target)
       - progress * 0.35
       + targetPenalty
@@ -2063,7 +2224,9 @@ document.addEventListener("DOMContentLoaded", () => {
       + reversePenalty
       + luffPenalty
       + stallPenalty
-      + lowSpeedPenalty;
+      + lowSpeedPenalty
+      + countdownPenalty
+      + decisionNoise;
   }
 
   function scheduleLocalBotTurn({ delayMs=420 } = {}){
@@ -2157,24 +2320,24 @@ document.addEventListener("DOMContentLoaded", () => {
     return a;
   }
 
-  function turnRateRadPerSecond(){
-    return clamp(turnRateDegPerSec, 30, 360) * Math.PI / 180;
+  function turnRateRadPerSecond(turnRateScale=1){
+    return clamp(turnRateDegPerSec, 30, 360) * Math.max(0.45, turnRateScale || 1) * Math.PI / 180;
   }
 
-  function steerHeadingToward(boat, desiredHeading, dtSeconds){
+  function steerHeadingToward(boat, desiredHeading, dtSeconds, turnRateScale=1){
     if (!Number.isFinite(desiredHeading)) return 0;
     if (!boat?.hasHeading || !Number.isFinite(boat.heading) || !Number.isFinite(dtSeconds) || dtSeconds <= 0){
       return desiredHeading;
     }
-    const maxDelta = turnRateRadPerSecond() * dtSeconds;
+    const maxDelta = turnRateRadPerSecond(turnRateScale) * dtSeconds;
     const delta = angleWrap(desiredHeading - boat.heading);
     return angleWrap(boat.heading + clamp(delta, -maxDelta, maxDelta));
   }
 
-  function steerDirectionToward(boat, desiredDirection, dtSeconds){
+  function steerDirectionToward(boat, desiredDirection, dtSeconds, turnRateScale=1){
     if (!desiredDirection) return null;
     const desiredHeading = Math.atan2(desiredDirection.y, desiredDirection.x);
-    const heading = steerHeadingToward(boat, desiredHeading, dtSeconds);
+    const heading = steerHeadingToward(boat, desiredHeading, dtSeconds, turnRateScale);
     return {
       heading,
       direction: { x: Math.cos(heading), y: Math.sin(heading) },
@@ -2218,13 +2381,20 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!boat || boat.finished) return null;
 
     const now = currentRaceTimeMs();
+    const profile = botSkillProfile(boatIdx);
+    const countdownGuideTarget = realtimeBotCountdownGuideTarget(boat, boatIdx, now);
     const roundingGuideTarget = realtimeBotRoundingGuideTarget(boat);
     const roundingProgressKey = Math.round(roundingProgressForBoat(boat) * 4) / 4;
+    const countdownBucket = phase === "countdown"
+      ? Math.ceil(Math.max(0, realtimeCountdownEndsAt - now) / 1000)
+      : -1;
     const cachedDecision = realtimeBotDecisionCache[boatIdx];
     if (
       cachedDecision?.direction &&
       cachedDecision.phase === phase &&
       cachedDecision.nextMark === boat.nextMark &&
+      cachedDecision.countdownBucket === countdownBucket &&
+      cachedDecision.countdownGuideActive === !!countdownGuideTarget &&
       cachedDecision.guideActive === !!roundingGuideTarget &&
       cachedDecision.roundInZone === !!boat.roundInZone &&
       cachedDecision.roundingProgressKey === roundingProgressKey &&
@@ -2234,7 +2404,7 @@ document.addEventListener("DOMContentLoaded", () => {
       return { ...cachedDecision.direction };
     }
 
-    const target = roundingGuideTarget || botGoalPointForBoat(boat);
+    const target = countdownGuideTarget || roundingGuideTarget || botGoalPointForBoat(boat);
     if (!target) return null;
 
     const direct = norm({ x: target.x - boat.x, y: target.y - boat.y });
@@ -2242,7 +2412,12 @@ document.addEventListener("DOMContentLoaded", () => {
       return boat.hasHeading ? boatAxisUnit(boat.heading, boat.hasHeading) : null;
     }
 
-    const directDirection = { x: direct.x, y: direct.y };
+    const directDirection = applyBotDirectionBias(
+      { x: direct.x, y: direct.y },
+      boatIdx,
+      now,
+      countdownGuideTarget ? 0.22 : (roundingGuideTarget ? 0.35 : 1)
+    );
     const candidates = [];
     const upwind = upwindVec();
     const halfDead = deadZoneHalfAngleRad();
@@ -2299,7 +2474,12 @@ document.addEventListener("DOMContentLoaded", () => {
     let bestDirection = candidates[0] || directDirection;
     let bestScore = Infinity;
     for (const candidate of candidates){
-      const score = scoreRealtimeBotDirection(boat, candidate, directDirection, target);
+      const score = scoreRealtimeBotDirection(boat, candidate, directDirection, target, {
+        boatIdx,
+        nowMs: now,
+        countdownTarget: !!countdownGuideTarget,
+        roundingGuide: !!roundingGuideTarget
+      });
       if (score < bestScore){
         bestScore = score;
         bestDirection = candidate;
@@ -2310,11 +2490,13 @@ document.addEventListener("DOMContentLoaded", () => {
       direction: { ...bestDirection },
       position: { x: boat.x, y: boat.y },
       nextMark: boat.nextMark,
+      countdownBucket,
+      countdownGuideActive: !!countdownGuideTarget,
       guideActive: !!roundingGuideTarget,
       roundInZone: !!boat.roundInZone,
       roundingProgressKey,
       phase,
-      refreshAt: now + 650
+      refreshAt: now + profile.decisionMs
     };
     return bestDirection;
   }
@@ -2353,6 +2535,7 @@ document.addEventListener("DOMContentLoaded", () => {
     let changed = false;
     const now = currentRaceTimeMs();
     let tickStartMs = now - dtSeconds * 1000;
+    const countdownActive = phase === "countdown" && realtimeCountdownEndsAt > now;
 
     if (phase === "countdown" && realtimeCountdownEndsAt > 0 && now >= realtimeCountdownEndsAt){
       tickStartMs = Math.max(tickStartMs, realtimeCountdownEndsAt);
@@ -2365,7 +2548,7 @@ document.addEventListener("DOMContentLoaded", () => {
       return changed;
     }
 
-    if (phase !== "race"){
+    if (phase !== "race" && !countdownActive){
       let zeroedAnySpeed = false;
       for (const boat of boats){
         if (!boat) continue;
@@ -2400,7 +2583,16 @@ document.addEventListener("DOMContentLoaded", () => {
         return proposal;
       }
 
-      const steering = steerDirectionToward(boat, direction, dtSeconds);
+      const nearActiveMark = boat.nextMark < markCount && !!marks[boat.nextMark]
+        ? dist(boat, marks[boat.nextMark]) <= (ROUND_PASS_RADIUS + 8.5)
+        : false;
+      const turnRateScale = isBotControlledBoat(index)
+        ? Math.max(
+          botSkillProfile(index).turnRateScale,
+          (phase === "countdown" || boat.roundInZone || nearActiveMark) ? 0.96 : 0
+        )
+        : 1;
+      const steering = steerDirectionToward(boat, direction, dtSeconds, turnRateScale);
       if (!steering?.direction){
         return proposal;
       }
@@ -2464,6 +2656,14 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       if (invalid.has(i)) continue;
 
+      if (countdownActive && isBotControlledBoat(i)){
+        const crossing = classifyStartLineCrossing(proposal.prev, proposal.dest);
+        if (crossing === "toCourse" || startLineSideValue(proposal.dest) > -0.02){
+          invalid.add(i);
+          continue;
+        }
+      }
+
       if (boatsPhysicalCollisionsEnabled()){
         for (let j=0; j<boats.length; j++){
           if (j === i) continue;
@@ -2521,12 +2721,14 @@ document.addEventListener("DOMContentLoaded", () => {
         const dest = proposal.dest;
         if (Math.abs(dest.x - boat.x) > 1e-9 || Math.abs(dest.y - boat.y) > 1e-9){
           changed = true;
-          if (boat.hasHeading && Math.abs(angleWrap(proposal.heading - boat.heading)) > (12 * Math.PI / 180)){
+          if (phase === "race" && boat.hasHeading && Math.abs(angleWrap(proposal.heading - boat.heading)) > (12 * Math.PI / 180)){
             boat.turns += 1;
           }
           boat.x = dest.x;
           boat.y = dest.y;
-          boat.distance += proposal.distance;
+          if (phase === "race"){
+            boat.distance += proposal.distance;
+          }
           boat.heading = proposal.heading;
           boat.hasHeading = proposal.hasHeading;
           boat.tack = tackSignFromHeadingVec(proposal.direction);
@@ -3909,6 +4111,7 @@ document.addEventListener("DOMContentLoaded", () => {
         tackPenaltyFactor,
         turnRateDegPerSec,
         luffingSpeedPercent,
+        botDifficulty,
         autoGustsEnabled,
         autoGustIntervalSec,
         autoGustDurationSec,
@@ -4095,6 +4298,7 @@ document.addEventListener("DOMContentLoaded", () => {
       0,
       80
     );
+    botDifficulty = normalizeBotDifficultyValue(settings.botDifficulty);
     autoGustsEnabled = !!settings.autoGustsEnabled;
     autoGustIntervalSec = clamp(parseFloat(settings.autoGustIntervalSec) || autoGustIntervalSec, 3, 60);
     autoGustDurationSec = clamp(parseFloat(settings.autoGustDurationSec) || autoGustDurationSec, 2, 30);
@@ -4111,6 +4315,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (interactionModeSelect) interactionModeSelect.value = interactionMode;
     tackPenaltyInp.value = String(tackPenaltyFactor);
     if (luffingSpeedInp) luffingSpeedInp.value = String(luffingSpeedPercent);
+    if (botDifficultySelect) botDifficultySelect.value = botDifficulty;
     if (autoGustsSelect) autoGustsSelect.value = autoGustsEnabled ? "on" : "off";
     if (autoGustIntervalInp) autoGustIntervalInp.value = String(autoGustIntervalSec);
     if (autoGustDurationInp) autoGustDurationInp.value = String(autoGustDurationSec);
@@ -5392,6 +5597,16 @@ document.addEventListener("DOMContentLoaded", () => {
     emitStateChanged();
   });
 
+  botDifficultySelect?.addEventListener("change", () => {
+    botDifficulty = normalizeBotDifficultyValue(botDifficultySelect.value);
+    botDifficultySelect.value = botDifficulty;
+    clearRealtimeBotDecisionCache();
+    updateStatus();
+    updateStats();
+    render();
+    emitStateChanged();
+  });
+
   autoGustsSelect?.addEventListener("change", () => {
     autoGustsEnabled = autoGustsSelect.value === "on";
     if (autoGustsEnabled){
@@ -5611,6 +5826,7 @@ document.addEventListener("DOMContentLoaded", () => {
       phase,
       playMode,
       localPilotMode,
+      botDifficulty,
       world: { width: worldW, height: worldH, origin: "bottom-left" },
       race: {
         currentPlayer,
@@ -5763,7 +5979,8 @@ document.addEventListener("DOMContentLoaded", () => {
       playerCount: boats.length,
       phase,
       markCount,
-      localPilotMode
+      localPilotMode,
+      botDifficulty
     })
   };
 
@@ -5793,6 +6010,8 @@ document.addEventListener("DOMContentLoaded", () => {
     tackPenaltyFactor = clamp(parseFloat(tackPenaltyInp.value)||0.95, 0.5, 1.0);
     const initialLuffingSpeed = parseFloat(luffingSpeedInp?.value);
     luffingSpeedPercent = clamp(Number.isFinite(initialLuffingSpeed) ? initialLuffingSpeed : 25, 0, 80);
+    botDifficulty = normalizeBotDifficultyValue(botDifficultySelect?.value);
+    if (botDifficultySelect) botDifficultySelect.value = botDifficulty;
     autoGustsEnabled = autoGustsSelect?.value === "on";
     autoGustIntervalSec = clamp(parseFloat(autoGustIntervalInp?.value) || 10, 3, 60);
     autoGustDurationSec = clamp(parseFloat(autoGustDurationInp?.value) || 6, 2, 30);
