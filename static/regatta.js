@@ -1869,6 +1869,70 @@ document.addEventListener("DOMContentLoaded", () => {
     return midpoint(finishLeft, finishRight);
   }
 
+  function roundingSideSign(){
+    return roundingSide === "port" ? 1 : -1;
+  }
+
+  function roundingProgressForBoat(boat){
+    const sweep = Number.isFinite(boat?.roundSweep) ? boat.roundSweep : 0;
+    return roundingSide === "port" ? sweep : -sweep;
+  }
+
+  function botGoalPointAfterMark(markIdx){
+    if (markIdx + 1 < markCount){
+      return marks[markIdx + 1] || null;
+    }
+    const [finishLeft, finishRight] = finishLine();
+    return midpoint(finishLeft, finishRight);
+  }
+
+  function pointAroundMark(markPos, angle, radius){
+    return {
+      x: clamp(markPos.x + Math.cos(angle) * radius, 0, worldW),
+      y: clamp(markPos.y + Math.sin(angle) * radius, 0, worldH)
+    };
+  }
+
+  function realtimeBotRoundingGuideTarget(boat){
+    if (!boat || boat.finished || boat.nextMark >= markCount) return null;
+    const markPos = marks[boat.nextMark];
+    if (!markPos) return null;
+
+    const fromMark = norm({ x: boat.x - markPos.x, y: boat.y - markPos.y });
+    if (fromMark.L <= 1e-6) return null;
+
+    const distanceToMark = fromMark.L;
+    const activationRadius = ROUND_PASS_RADIUS + 4.5;
+    if (!boat.roundInZone && distanceToMark > activationRadius){
+      return null;
+    }
+
+    const sideSign = roundingSideSign();
+    const baseAngle = Math.atan2(boat.y - markPos.y, boat.x - markPos.x);
+    const safeInnerRadius = MARK_RADIUS + BOAT_SWEEP_RADIUS + MARK_CLEARANCE_MARGIN + 0.5;
+    const orbitRadius = clamp(ROUND_PASS_RADIUS - 0.28, safeInnerRadius, ROUND_PASS_RADIUS - 0.05);
+    const exitRadius = ROUND_PASS_RADIUS + 1.15;
+    const progress = roundingProgressForBoat(boat);
+
+    if (!boat.roundInZone){
+      const leadAngle = baseAngle + sideSign * Math.PI / 3;
+      return pointAroundMark(markPos, leadAngle, orbitRadius);
+    }
+
+    if (progress < ROUNDING_MIN_SWEEP + Math.PI / 10){
+      const orbitAngle = baseAngle + sideSign * Math.PI / 3;
+      return pointAroundMark(markPos, orbitAngle, orbitRadius);
+    }
+
+    const nextGoal = botGoalPointAfterMark(boat.nextMark) || botGoalPointForBoat(boat);
+    const nextGoalAngle = nextGoal
+      ? Math.atan2(nextGoal.y - markPos.y, nextGoal.x - markPos.x)
+      : baseAngle;
+    const exitAngle = baseAngle + sideSign * Math.PI / 4;
+    const blendedAngle = angleWrap(exitAngle * 0.65 + nextGoalAngle * 0.35);
+    return pointAroundMark(markPos, blendedAngle, exitRadius);
+  }
+
   function chooseBotDestination(boatIdx){
     const boat = boats[boatIdx];
     if (!boat || boat.finished) return null;
@@ -2154,18 +2218,23 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!boat || boat.finished) return null;
 
     const now = currentRaceTimeMs();
+    const roundingGuideTarget = realtimeBotRoundingGuideTarget(boat);
+    const roundingProgressKey = Math.round(roundingProgressForBoat(boat) * 4) / 4;
     const cachedDecision = realtimeBotDecisionCache[boatIdx];
     if (
       cachedDecision?.direction &&
       cachedDecision.phase === phase &&
       cachedDecision.nextMark === boat.nextMark &&
+      cachedDecision.guideActive === !!roundingGuideTarget &&
+      cachedDecision.roundInZone === !!boat.roundInZone &&
+      cachedDecision.roundingProgressKey === roundingProgressKey &&
       cachedDecision.refreshAt > now &&
       dist(cachedDecision.position, { x: boat.x, y: boat.y }) < 2.4
     ){
       return { ...cachedDecision.direction };
     }
 
-    const target = botGoalPointForBoat(boat);
+    const target = roundingGuideTarget || botGoalPointForBoat(boat);
     if (!target) return null;
 
     const direct = norm({ x: target.x - boat.x, y: target.y - boat.y });
@@ -2241,6 +2310,9 @@ document.addEventListener("DOMContentLoaded", () => {
       direction: { ...bestDirection },
       position: { x: boat.x, y: boat.y },
       nextMark: boat.nextMark,
+      guideActive: !!roundingGuideTarget,
+      roundInZone: !!boat.roundInZone,
+      roundingProgressKey,
       phase,
       refreshAt: now + 650
     };
@@ -2279,17 +2351,30 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function simulateLocalRealtimeTick(dtSeconds){
     let changed = false;
-    const now = Date.now();
-    const tickStartMs = now - dtSeconds * 1000;
-    const countdownActive = phase === "countdown" && realtimeCountdownEndsAt > now;
+    const now = currentRaceTimeMs();
+    let tickStartMs = now - dtSeconds * 1000;
 
     if (phase === "countdown" && realtimeCountdownEndsAt > 0 && now >= realtimeCountdownEndsAt){
+      tickStartMs = Math.max(tickStartMs, realtimeCountdownEndsAt);
       phase = "race";
+      realtimeBotDecisionCache = [];
       changed = true;
     }
 
-    if (!isLocalRealtimeMode() || (phase !== "race" && !countdownActive)){
+    if (!isLocalRealtimeMode()){
       return changed;
+    }
+
+    if (phase !== "race"){
+      let zeroedAnySpeed = false;
+      for (const boat of boats){
+        if (!boat) continue;
+        if (boat.currentSpeedUnitsPerSec !== 0){
+          boat.currentSpeedUnitsPerSec = 0;
+          zeroedAnySpeed = true;
+        }
+      }
+      return changed || zeroedAnySpeed;
     }
 
     const proposals = boats.map((boat, index) => {
