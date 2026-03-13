@@ -603,6 +603,17 @@
 
   function simulateLocalRealtimeTick(dtSeconds){
     let changed = false;
+    if (isLocalRealtimePaused()){
+      let zeroedAnySpeed = false;
+      for (const boat of boats){
+        if (!boat) continue;
+        if (boat.currentSpeedUnitsPerSec !== 0){
+          boat.currentSpeedUnitsPerSec = 0;
+          zeroedAnySpeed = true;
+        }
+      }
+      return zeroedAnySpeed;
+    }
     const now = currentRaceTimeMs();
     let tickStartMs = now - dtSeconds * 1000;
     const countdownActive = phase === "countdown" && realtimeCountdownEndsAt > now;
@@ -830,15 +841,18 @@
     let changed = false;
 
     if (multiplayerSeatIndex === null && phase !== "finished"){
-      const weatherChanged = updateAutoGustState(Date.now());
+      const weatherChanged = updateAutoGustState(currentRaceTimeMs());
       if (weatherChanged){
         changed = true;
       }
     }
 
     if (isLocalRealtimeMode()){
+      if (isLocalRealtimePaused()){
+        localRealtimeLastTickAt = 0;
+      }
       const now = Number.isFinite(frameTime) ? frameTime : performance.now();
-      const dtSeconds = localRealtimeLastTickAt > 0
+      const dtSeconds = localRealtimeLastTickAt > 0 && !isLocalRealtimePaused()
         ? clamp((now - localRealtimeLastTickAt) / 1000, 0, 0.08)
         : 0;
       localRealtimeLastTickAt = now;

@@ -73,8 +73,9 @@
     placementSelectedBoat = null;
     subMovesLeft = movesPerTurn;
     resetHybridState();
+    resetLocalRealtimePauseState();
     realtimeCountdownEndsAt = (isLocalRealtimeMode() && armRealtime)
-      ? (Date.now() + (realtimePrepSeconds * 1000))
+      ? (currentRaceTimeMs() + (realtimePrepSeconds * 1000))
       : 0;
     realtimeCursorTarget = null;
     realtimeCursorDirection = null;
@@ -86,7 +87,7 @@
     resetBoatTrails();
     clearGust();
     if (autoGustsEnabled){
-      scheduleNextAutoGust(Date.now());
+      scheduleNextAutoGust(currentRaceTimeMs());
     }
 
     ensureNextPlayerOptions();
@@ -122,6 +123,49 @@
 
   function isRealtimeRaceMode(){
     return isRealtimePlayMode() && phase === "race";
+  }
+
+  function canToggleLocalRealtimePause(){
+    return isLocalRealtimeMode()
+      && mode === "play"
+      && (phase === "countdown" || phase === "race")
+      && phase !== "finished"
+      && !isRaceComplete();
+  }
+
+  function isLocalRealtimePaused(){
+    return localRealtimePauseStartedAtMs > 0;
+  }
+
+  function setLocalRealtimePaused(nextPaused){
+    if (nextPaused){
+      if (!canToggleLocalRealtimePause() || isLocalRealtimePaused()) return false;
+      localRealtimePauseStartedAtMs = Date.now();
+      localRealtimeLastTickAt = 0;
+      clearRealtimeIntent();
+      clearRealtimeBotDecisionCache();
+      for (const boat of boats){
+        if (!boat) continue;
+        boat.currentSpeedUnitsPerSec = 0;
+      }
+    } else {
+      if (!isLocalRealtimePaused()) return false;
+      localRealtimePausedDurationMs += Math.max(0, Date.now() - localRealtimePauseStartedAtMs);
+      localRealtimePauseStartedAtMs = 0;
+      localRealtimeLastTickAt = 0;
+      clearRealtimeBotDecisionCache();
+    }
+
+    updateStatus();
+    updateStats();
+    updateOptInfo();
+    render();
+    emitStateChanged();
+    return true;
+  }
+
+  function toggleLocalRealtimePause(){
+    return setLocalRealtimePaused(!isLocalRealtimePaused());
   }
 
   function realtimeCountdownValue(){
@@ -162,6 +206,7 @@
 
   function setRealtimeReadyState(){
     if (!isLocalRealtimeMode()) return;
+    resetLocalRealtimePauseState();
     phase = "countdown";
     realtimeCountdownEndsAt = 0;
     prestartRoundsLeft = 0;
@@ -689,11 +734,12 @@
     } else {
       hybridMovesLeft = boats.map((boat) => boat.finished ? 0 : movesPerTurn);
     }
+    resetLocalRealtimePauseState();
     realtimeCountdownEndsAt = Math.max(0, parseInt(race.realtimeCountdownEndsAt,10) || 0);
     gustExpiresAt = Math.max(0, parseInt(race.gustExpiresAt,10) || 0);
     nextAutoGustAt = Math.max(0, parseInt(race.nextAutoGustAt,10) || 0);
     if (autoGustsEnabled && !gustRect && nextAutoGustAt === 0){
-      scheduleNextAutoGust(Date.now());
+      scheduleNextAutoGust(currentRaceTimeMs());
     }
     const resetTrails = previousTrails.length !== boats.length || phase === "countdown" || phase === "prestart";
     boatTrails = boats.map((boat, index) => {

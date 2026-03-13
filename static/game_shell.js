@@ -17,9 +17,11 @@ document.addEventListener("DOMContentLoaded", () => {
   const deckOverlayEl = document.getElementById("deckOverlay");
 
   const dockMenuBtn = document.getElementById("dockMenu");
+  let dockPauseRaceBtn = document.getElementById("dockPauseRace");
   const dockSaveMapBtn = document.getElementById("dockSaveMap");
   const dockSaveRaceBtn = document.getElementById("dockSaveRace");
   const dockToggleDeckBtn = document.getElementById("dockToggleDeck");
+  const resetGameBtn = document.getElementById("resetGame");
 
   const menuContinueBtn = document.getElementById("menuContinue");
   const menuNewGameBtn = document.getElementById("menuNewGame");
@@ -90,6 +92,16 @@ document.addEventListener("DOMContentLoaded", () => {
 
   let toastTimer = 0;
 
+  if (!dockPauseRaceBtn && dockMenuBtn?.parentElement) {
+    dockPauseRaceBtn = document.createElement("button");
+    dockPauseRaceBtn.type = "button";
+    dockPauseRaceBtn.id = "dockPauseRace";
+    dockPauseRaceBtn.className = "dock-btn hidden";
+    dockPauseRaceBtn.setAttribute("aria-hidden", "true");
+    dockPauseRaceBtn.textContent = "Пауза";
+    dockMenuBtn.insertAdjacentElement("afterend", dockPauseRaceBtn);
+  }
+
   if (overlayTitleEl) {
     overlayTitleEl.textContent = "Главное меню";
   }
@@ -133,7 +145,9 @@ document.addEventListener("DOMContentLoaded", () => {
     return mode === "realtime" ? "В реальном времени" : "Пошаговая";
   }
 
-  function formatPhaseLabel(phase) {
+  function formatPhaseLabel(phase, { paused = false } = {}) {
+    if (paused) return "Пауза";
+    if (phase === "paused") return "Пауза";
     if (phase === "countdown") return "Обратный отсчёт";
     if (phase === "prestart") return "Предстарт";
     return "Гонка";
@@ -304,6 +318,22 @@ document.addEventListener("DOMContentLoaded", () => {
       <div><strong>Ветер:</strong> ${Math.round(snapshot.settings?.windAngleDeg || 0)}° откуда дует</div>
       <div><strong>Позывной:</strong> ${currentDisplayName()}</div>
     `;
+  }
+
+  function renderDockPauseControl() {
+    if (!dockPauseRaceBtn) return;
+    const canPause = !!regatta.canToggleLocalRealtimePause?.();
+    const paused = !!regatta.isLocalRealtimePaused?.();
+    const shouldShow = canPause || paused;
+    dockPauseRaceBtn.classList.toggle("hidden", !shouldShow);
+    dockPauseRaceBtn.classList.toggle("dock-btn-accent", paused);
+    dockPauseRaceBtn.disabled = !canPause;
+    dockPauseRaceBtn.textContent = paused ? "Продолжить" : "Пауза";
+    dockPauseRaceBtn.setAttribute("aria-hidden", String(!shouldShow));
+    dockPauseRaceBtn.title = paused
+      ? "Снять realtime-гонку с паузы"
+      : "Поставить realtime-гонку на паузу";
+    dockPauseRaceBtn.setAttribute("aria-label", dockPauseRaceBtn.title);
   }
 
   function renderDeckContext() {
@@ -773,11 +803,22 @@ document.addEventListener("DOMContentLoaded", () => {
   openMainMenuBtn?.addEventListener("click", () => openMenu("home"));
   closeMainMenuBtn?.addEventListener("click", closeMenu);
   dockMenuBtn?.addEventListener("click", () => openMenu("home"));
+  dockPauseRaceBtn?.addEventListener("click", () => {
+    const pausedBeforeToggle = !!regatta.isLocalRealtimePaused?.();
+    const changed = regatta.toggleLocalRealtimePause?.();
+    if (!changed) {
+      renderDockPauseControl();
+      return;
+    }
+    renderDockPauseControl();
+    showToast(pausedBeforeToggle ? "Realtime-гонка продолжена." : "Realtime-гонка поставлена на паузу.");
+  });
 
   toggleCommandDeckBtn?.addEventListener("click", () => toggleCommandDeck());
   collapseCommandDeckBtn?.addEventListener("click", () => toggleCommandDeck(false));
   dockToggleDeckBtn?.addEventListener("click", () => toggleCommandDeck());
   deckOverlayEl?.addEventListener("click", () => toggleCommandDeck(false));
+  resetGameBtn?.addEventListener("click", () => setCommandDeckOpen(false));
 
   menuContinueBtn?.addEventListener("click", closeMenu);
   menuNewGameBtn?.addEventListener("click", () => showScreen("mode"));
@@ -930,6 +971,7 @@ document.addEventListener("DOMContentLoaded", () => {
     renderHomeSummary();
     renderSettingsSummary();
     renderDeckContext();
+    renderDockPauseControl();
   });
 
   window.addEventListener("regatta:room-state", () => {
@@ -939,6 +981,14 @@ document.addEventListener("DOMContentLoaded", () => {
   window.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && body.classList.contains("deck-open")) {
       toggleCommandDeck(false);
+      return;
+    }
+    if (event.key.toLowerCase() === "p") {
+      if (event.target && /input|textarea|select/i.test(event.target.tagName)) return;
+      const changed = regatta.toggleLocalRealtimePause?.();
+      if (changed) {
+        renderDockPauseControl();
+      }
       return;
     }
     if (event.key.toLowerCase() !== "m") return;
@@ -954,6 +1004,7 @@ document.addEventListener("DOMContentLoaded", () => {
   renderLocalSelection();
   renderHints();
   renderDeckContext();
+  renderDockPauseControl();
   refreshLibrary().catch((error) => {
     showToast(error.message || "Не удалось загрузить библиотеку.");
   });

@@ -3,6 +3,11 @@
   // -----------------------------
   function updateRealtimeIntentFromClient(clientX, clientY){
     if (mode !== "play" || !isRealtimePlayMode()) return;
+    if (isLocalRealtimePaused()){
+      resetRealtimePointer();
+      render();
+      return;
+    }
     realtimeCursorClient = { clientX, clientY };
     const boatIdx = realtimeControlledBoatIndex();
     if (!Number.isInteger(boatIdx) || !boats[boatIdx] || boats[boatIdx].finished || phase === "finished"){
@@ -45,6 +50,10 @@
 
   canvas.addEventListener("pointerdown", (e) => {
     if (mode !== "play" || !isRealtimePlayMode()) return;
+    if (isLocalRealtimePaused()){
+      e.preventDefault();
+      return;
+    }
     const point = screenToWorld(e.clientX, e.clientY);
     if (isLocalRealtimeMode() && point){
       const hitBoat = getBoatAtPoint(point);

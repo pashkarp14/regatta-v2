@@ -188,7 +188,7 @@
     nextAutoGustAt = nowMs + intervalMs * factor;
   }
 
-  function spawnGust(nextRect=null, nowMs=Date.now()){
+  function spawnGust(nextRect=null, nowMs=currentRaceTimeMs()){
     gustRect = normalizeGustZone(nextRect) || gustRectRandom();
     gustExpiresAt = nowMs + clamp(autoGustDurationSec, 2, 30) * 1000;
   }
@@ -201,7 +201,7 @@
     }
   }
 
-  function updateAutoGustState(nowMs=Date.now()){
+  function updateAutoGustState(nowMs=currentRaceTimeMs()){
     let changed = false;
     if (gustRect && gustExpiresAt > 0 && nowMs >= gustExpiresAt){
       clearGust({ keepSchedule:true });

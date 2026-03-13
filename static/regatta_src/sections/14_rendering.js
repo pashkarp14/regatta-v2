@@ -678,6 +678,34 @@
 
     drawRealtimeHudPanel();
 
+    if (isLocalRealtimePaused()){
+      const pausePrimary = phase === "countdown" ? "Пауза перед стартом" : "Гонка на паузе";
+      const pauseSecondary = phase === "countdown"
+        ? "Отсчёт и движение лодок остановлены"
+        : "Лодки остановлены. Нажми «Продолжить»";
+      const pauseBoxW = 360;
+      const pauseBoxH = 76;
+      const pauseBoxX = (canvas.width - pauseBoxW) / 2;
+      const pauseBoxY = canvas.height * 0.12;
+      ctx.save();
+      ctx.fillStyle = "rgba(10, 24, 34, 0.88)";
+      ctx.strokeStyle = "rgba(120, 229, 217, 0.72)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.roundRect(pauseBoxX, pauseBoxY, pauseBoxW, pauseBoxH, 18);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = "#f2f6f8";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      ctx.font = "700 28px Georgia, serif";
+      ctx.fillText(pausePrimary, canvas.width / 2, pauseBoxY + 12);
+      ctx.font = "600 14px system-ui";
+      ctx.fillStyle = "rgba(226, 238, 242, 0.86)";
+      ctx.fillText(pauseSecondary, canvas.width / 2, pauseBoxY + 46);
+      ctx.restore();
+    }
+
     const countdown = realtimeCountdownState();
     if (!countdown.active) return;
 

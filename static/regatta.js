@@ -362,18 +362,29 @@ document.addEventListener("DOMContentLoaded", () => {
   let showTrails = false;
   let boardStartActionOverride = null;
   let serverClockOffsetMs = 0;
+  let localRealtimePauseStartedAtMs = 0;
+  let localRealtimePausedDurationMs = 0;
 
   function updateWindInfo(){
     const gustMode = autoGustsEnabled ? "авто" : (gustRect ? "порыв" : "штиль");
     windInfoEl.textContent = `Ветер: ${normalizedWindAngleDeg().toFixed(0)}° откуда дует · ${gustMode}`;
   }
 
-  function currentRaceTimeMs(){
-    return Date.now() + serverClockOffsetMs;
+  function currentRaceTimeMs(rawNowMs=Date.now()){
+    const wallNowMs = Number.isFinite(rawNowMs) ? rawNowMs : Date.now();
+    const effectiveWallNowMs = localRealtimePauseStartedAtMs > 0
+      ? localRealtimePauseStartedAtMs
+      : wallNowMs;
+    return effectiveWallNowMs + serverClockOffsetMs - localRealtimePausedDurationMs;
   }
 
   function setServerClockOffset(offsetMs=0){
     serverClockOffsetMs = Number.isFinite(offsetMs) ? offsetMs : 0;
+  }
+
+  function resetLocalRealtimePauseState(){
+    localRealtimePauseStartedAtMs = 0;
+    localRealtimePausedDurationMs = 0;
   }
 
   function normalizedWindAngleDeg(rawDeg=windAngleDeg){
@@ -620,7 +631,7 @@ document.addEventListener("DOMContentLoaded", () => {
     nextAutoGustAt = nowMs + intervalMs * factor;
   }
 
-  function spawnGust(nextRect=null, nowMs=Date.now()){
+  function spawnGust(nextRect=null, nowMs=currentRaceTimeMs()){
     gustRect = normalizeGustZone(nextRect) || gustRectRandom();
     gustExpiresAt = nowMs + clamp(autoGustDurationSec, 2, 30) * 1000;
   }
@@ -633,7 +644,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  function updateAutoGustState(nowMs=Date.now()){
+  function updateAutoGustState(nowMs=currentRaceTimeMs()){
     let changed = false;
     if (gustRect && gustExpiresAt > 0 && nowMs >= gustExpiresAt){
       clearGust({ keepSchedule:true });
@@ -2533,6 +2544,17 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function simulateLocalRealtimeTick(dtSeconds){
     let changed = false;
+    if (isLocalRealtimePaused()){
+      let zeroedAnySpeed = false;
+      for (const boat of boats){
+        if (!boat) continue;
+        if (boat.currentSpeedUnitsPerSec !== 0){
+          boat.currentSpeedUnitsPerSec = 0;
+          zeroedAnySpeed = true;
+        }
+      }
+      return zeroedAnySpeed;
+    }
     const now = currentRaceTimeMs();
     let tickStartMs = now - dtSeconds * 1000;
     const countdownActive = phase === "countdown" && realtimeCountdownEndsAt > now;
@@ -2760,15 +2782,18 @@ document.addEventListener("DOMContentLoaded", () => {
     let changed = false;
 
     if (multiplayerSeatIndex === null && phase !== "finished"){
-      const weatherChanged = updateAutoGustState(Date.now());
+      const weatherChanged = updateAutoGustState(currentRaceTimeMs());
       if (weatherChanged){
         changed = true;
       }
     }
 
     if (isLocalRealtimeMode()){
+      if (isLocalRealtimePaused()){
+        localRealtimeLastTickAt = 0;
+      }
       const now = Number.isFinite(frameTime) ? frameTime : performance.now();
-      const dtSeconds = localRealtimeLastTickAt > 0
+      const dtSeconds = localRealtimeLastTickAt > 0 && !isLocalRealtimePaused()
         ? clamp((now - localRealtimeLastTickAt) / 1000, 0, 0.08)
         : 0;
       localRealtimeLastTickAt = now;
@@ -3529,6 +3554,15 @@ document.addEventListener("DOMContentLoaded", () => {
       const ownLegInfo = ownBoat && !ownBoat.finished
         ? ` \u0422\u0432\u043e\u044f \u043b\u043e\u0434\u043a\u0430: ${controlledBoatIndex + 1}. \u0421\u043b\u0435\u0434\u0443\u044e\u0449\u0438\u0439 \u0437\u043d\u0430\u043a: ${Math.min(ownBoat.nextMark + 1, markCount)} \u0438\u0437 ${markCount}.`
         : "";
+      if (isLocalRealtimePaused()){
+        if (phase === "countdown"){
+          const countdown = realtimeCountdownState();
+          statusEl.textContent = `\u041f\u0430\u0443\u0437\u0430. \u041e\u0442\u0441\u0447\u0435\u0442 \u043e\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d \u043d\u0430 ${formatCountdownSeconds(countdown.totalMsLeft)} \u0441. \u041d\u0430\u0436\u043c\u0438 \u00ab\u041f\u0440\u043e\u0434\u043e\u043b\u0436\u0438\u0442\u044c\u00bb, \u0447\u0442\u043e\u0431\u044b \u0432\u0435\u0440\u043d\u0443\u0442\u044c\u0441\u044f \u043a \u0441\u0442\u0430\u0440\u0442\u0443.${ownLegInfo}`;
+        } else {
+          statusEl.textContent = `\u041f\u0430\u0443\u0437\u0430. Realtime-\u0433\u043e\u043d\u043a\u0430 \u043e\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u0430. \u041d\u0430\u0436\u043c\u0438 \u00ab\u041f\u0440\u043e\u0434\u043e\u043b\u0436\u0438\u0442\u044c\u00bb, \u0447\u0442\u043e\u0431\u044b \u0432\u0435\u0440\u043d\u0443\u0442\u044c \u043b\u043e\u0434\u043a\u0438 \u0432 \u0433\u043e\u043d\u043a\u0443.${ownLegInfo}`;
+        }
+        return;
+      }
       if (phase === "countdown"){
         const countdown = realtimeCountdownState();
         if (countdown.active){
@@ -3653,7 +3687,9 @@ document.addEventListener("DOMContentLoaded", () => {
       extra += `<div style="margin-top:6px;">⚠️ Не удалось найти маршрут (попробуй уменьшить поле / мёртвую зону / сдвинуть знаки/финиш).</div>`;
     }
 
-    const phaseLabel = phase === "prestart"
+    const phaseLabel = isLocalRealtimePaused()
+      ? "пауза"
+      : phase === "prestart"
       ? "предстарт"
       : phase === "countdown"
         ? "отсчет"
@@ -3738,8 +3774,9 @@ document.addEventListener("DOMContentLoaded", () => {
     placementSelectedBoat = null;
     subMovesLeft = movesPerTurn;
     resetHybridState();
+    resetLocalRealtimePauseState();
     realtimeCountdownEndsAt = (isLocalRealtimeMode() && armRealtime)
-      ? (Date.now() + (realtimePrepSeconds * 1000))
+      ? (currentRaceTimeMs() + (realtimePrepSeconds * 1000))
       : 0;
     realtimeCursorTarget = null;
     realtimeCursorDirection = null;
@@ -3751,7 +3788,7 @@ document.addEventListener("DOMContentLoaded", () => {
     resetBoatTrails();
     clearGust();
     if (autoGustsEnabled){
-      scheduleNextAutoGust(Date.now());
+      scheduleNextAutoGust(currentRaceTimeMs());
     }
 
     ensureNextPlayerOptions();
@@ -3787,6 +3824,49 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function isRealtimeRaceMode(){
     return isRealtimePlayMode() && phase === "race";
+  }
+
+  function canToggleLocalRealtimePause(){
+    return isLocalRealtimeMode()
+      && mode === "play"
+      && (phase === "countdown" || phase === "race")
+      && phase !== "finished"
+      && !isRaceComplete();
+  }
+
+  function isLocalRealtimePaused(){
+    return localRealtimePauseStartedAtMs > 0;
+  }
+
+  function setLocalRealtimePaused(nextPaused){
+    if (nextPaused){
+      if (!canToggleLocalRealtimePause() || isLocalRealtimePaused()) return false;
+      localRealtimePauseStartedAtMs = Date.now();
+      localRealtimeLastTickAt = 0;
+      clearRealtimeIntent();
+      clearRealtimeBotDecisionCache();
+      for (const boat of boats){
+        if (!boat) continue;
+        boat.currentSpeedUnitsPerSec = 0;
+      }
+    } else {
+      if (!isLocalRealtimePaused()) return false;
+      localRealtimePausedDurationMs += Math.max(0, Date.now() - localRealtimePauseStartedAtMs);
+      localRealtimePauseStartedAtMs = 0;
+      localRealtimeLastTickAt = 0;
+      clearRealtimeBotDecisionCache();
+    }
+
+    updateStatus();
+    updateStats();
+    updateOptInfo();
+    render();
+    emitStateChanged();
+    return true;
+  }
+
+  function toggleLocalRealtimePause(){
+    return setLocalRealtimePaused(!isLocalRealtimePaused());
   }
 
   function realtimeCountdownValue(){
@@ -3827,6 +3907,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function setRealtimeReadyState(){
     if (!isLocalRealtimeMode()) return;
+    resetLocalRealtimePauseState();
     phase = "countdown";
     realtimeCountdownEndsAt = 0;
     prestartRoundsLeft = 0;
@@ -4354,11 +4435,12 @@ document.addEventListener("DOMContentLoaded", () => {
     } else {
       hybridMovesLeft = boats.map((boat) => boat.finished ? 0 : movesPerTurn);
     }
+    resetLocalRealtimePauseState();
     realtimeCountdownEndsAt = Math.max(0, parseInt(race.realtimeCountdownEndsAt,10) || 0);
     gustExpiresAt = Math.max(0, parseInt(race.gustExpiresAt,10) || 0);
     nextAutoGustAt = Math.max(0, parseInt(race.nextAutoGustAt,10) || 0);
     if (autoGustsEnabled && !gustRect && nextAutoGustAt === 0){
-      scheduleNextAutoGust(Date.now());
+      scheduleNextAutoGust(currentRaceTimeMs());
     }
     const resetTrails = previousTrails.length !== boats.length || phase === "countdown" || phase === "prestart";
     boatTrails = boats.map((boat, index) => {
@@ -5118,6 +5200,34 @@ document.addEventListener("DOMContentLoaded", () => {
 
     drawRealtimeHudPanel();
 
+    if (isLocalRealtimePaused()){
+      const pausePrimary = phase === "countdown" ? "Пауза перед стартом" : "Гонка на паузе";
+      const pauseSecondary = phase === "countdown"
+        ? "Отсчёт и движение лодок остановлены"
+        : "Лодки остановлены. Нажми «Продолжить»";
+      const pauseBoxW = 360;
+      const pauseBoxH = 76;
+      const pauseBoxX = (canvas.width - pauseBoxW) / 2;
+      const pauseBoxY = canvas.height * 0.12;
+      ctx.save();
+      ctx.fillStyle = "rgba(10, 24, 34, 0.88)";
+      ctx.strokeStyle = "rgba(120, 229, 217, 0.72)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.roundRect(pauseBoxX, pauseBoxY, pauseBoxW, pauseBoxH, 18);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = "#f2f6f8";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      ctx.font = "700 28px Georgia, serif";
+      ctx.fillText(pausePrimary, canvas.width / 2, pauseBoxY + 12);
+      ctx.font = "600 14px system-ui";
+      ctx.fillStyle = "rgba(226, 238, 242, 0.86)";
+      ctx.fillText(pauseSecondary, canvas.width / 2, pauseBoxY + 46);
+      ctx.restore();
+    }
+
     const countdown = realtimeCountdownState();
     if (!countdown.active) return;
 
@@ -5181,6 +5291,11 @@ document.addEventListener("DOMContentLoaded", () => {
   // -----------------------------
   function updateRealtimeIntentFromClient(clientX, clientY){
     if (mode !== "play" || !isRealtimePlayMode()) return;
+    if (isLocalRealtimePaused()){
+      resetRealtimePointer();
+      render();
+      return;
+    }
     realtimeCursorClient = { clientX, clientY };
     const boatIdx = realtimeControlledBoatIndex();
     if (!Number.isInteger(boatIdx) || !boats[boatIdx] || boats[boatIdx].finished || phase === "finished"){
@@ -5223,6 +5338,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
   canvas.addEventListener("pointerdown", (e) => {
     if (mode !== "play" || !isRealtimePlayMode()) return;
+    if (isLocalRealtimePaused()){
+      e.preventDefault();
+      return;
+    }
     const point = screenToWorld(e.clientX, e.clientY);
     if (isLocalRealtimeMode() && point){
       const hitBoat = getBoatAtPoint(point);
@@ -5503,6 +5622,7 @@ document.addEventListener("DOMContentLoaded", () => {
   playModeSelect.addEventListener("change", () => {
     playMode = normalizePlayModeValue(playModeSelect.value);
     resetHybridState();
+    resetLocalRealtimePauseState();
     selectedBoatIndex = null;
     realtimeCountdownEndsAt = 0;
     localRealtimeLastTickAt = 0;
@@ -5611,7 +5731,7 @@ document.addEventListener("DOMContentLoaded", () => {
     autoGustsEnabled = autoGustsSelect.value === "on";
     if (autoGustsEnabled){
       if (!gustRect){
-        scheduleNextAutoGust(Date.now());
+        scheduleNextAutoGust(currentRaceTimeMs());
       }
     } else {
       nextAutoGustAt = 0;
@@ -5627,7 +5747,7 @@ document.addEventListener("DOMContentLoaded", () => {
     autoGustIntervalSec = clamp(parseFloat(autoGustIntervalInp.value) || 10, 3, 60);
     autoGustIntervalInp.value = String(autoGustIntervalSec);
     if (autoGustsEnabled && !gustRect){
-      scheduleNextAutoGust(Date.now());
+      scheduleNextAutoGust(currentRaceTimeMs());
     }
     updateWindInfo();
     emitStateChanged();
@@ -5637,7 +5757,7 @@ document.addEventListener("DOMContentLoaded", () => {
     autoGustDurationSec = clamp(parseFloat(autoGustDurationInp.value) || 6, 2, 30);
     autoGustDurationInp.value = String(autoGustDurationSec);
     if (gustRect){
-      gustExpiresAt = Date.now() + autoGustDurationSec * 1000;
+      gustExpiresAt = currentRaceTimeMs() + autoGustDurationSec * 1000;
     }
     updateWindInfo();
     emitStateChanged();
@@ -5688,7 +5808,7 @@ document.addEventListener("DOMContentLoaded", () => {
   btnClearGust.addEventListener("click", () => {
     clearGust({ keepSchedule:autoGustsEnabled });
     if (autoGustsEnabled){
-      scheduleNextAutoGust(Date.now());
+      scheduleNextAutoGust(currentRaceTimeMs());
     }
     updateWindInfo();
     invalidateSolutions();
@@ -5824,6 +5944,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const payload = {
       mode,
       phase,
+      realtimePaused: isLocalRealtimePaused(),
       playMode,
       localPilotMode,
       botDifficulty,
@@ -5834,6 +5955,7 @@ document.addEventListener("DOMContentLoaded", () => {
         raceFinishedCount,
         prestartRoundsLeft,
         realtimeCountdownEndsAt,
+        realtimePaused: isLocalRealtimePaused(),
       },
       boats: boats.map((boat, index) => ({
         index,
@@ -5927,6 +6049,9 @@ document.addEventListener("DOMContentLoaded", () => {
     exitBoardFullscreen,
     isBoardFullscreenActive: isFullscreenActive,
     armLocalRealtimeStart,
+    canToggleLocalRealtimePause,
+    isLocalRealtimePaused,
+    toggleLocalRealtimePause,
     resetRaceToReadyState: handleResetAction,
     setServerClockOffset,
     setBoardStartActionOverride,
@@ -5934,6 +6059,9 @@ document.addEventListener("DOMContentLoaded", () => {
     setMultiplayerContext: ({ seatIndex=null } = {}) => {
       multiplayerSeatIndex = Number.isInteger(seatIndex) ? seatIndex : null;
       localRealtimeLastTickAt = 0;
+      if (!isLocalRealtimeMode()){
+        resetLocalRealtimePauseState();
+      }
       clearBotTurnTimer();
       const candidateBoat = Number.isInteger(selectedBoatIndex) ? selectedBoatIndex : multiplayerSeatIndex;
       if (multiplayerSeatIndex !== null && isHybridRaceMode() && !canSelectBoatForPlay(candidateBoat)){
@@ -5977,7 +6105,8 @@ document.addEventListener("DOMContentLoaded", () => {
       hybridMovesLeft: hybridMovesLeft.slice(),
       realtimeCountdownEndsAt,
       playerCount: boats.length,
-      phase,
+      phase: isLocalRealtimePaused() ? "paused" : phase,
+      realtimePaused: isLocalRealtimePaused(),
       markCount,
       localPilotMode,
       botDifficulty

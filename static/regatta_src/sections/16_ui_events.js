@@ -76,6 +76,7 @@
   playModeSelect.addEventListener("change", () => {
     playMode = normalizePlayModeValue(playModeSelect.value);
     resetHybridState();
+    resetLocalRealtimePauseState();
     selectedBoatIndex = null;
     realtimeCountdownEndsAt = 0;
     localRealtimeLastTickAt = 0;
@@ -184,7 +185,7 @@
     autoGustsEnabled = autoGustsSelect.value === "on";
     if (autoGustsEnabled){
       if (!gustRect){
-        scheduleNextAutoGust(Date.now());
+        scheduleNextAutoGust(currentRaceTimeMs());
       }
     } else {
       nextAutoGustAt = 0;
@@ -200,7 +201,7 @@
     autoGustIntervalSec = clamp(parseFloat(autoGustIntervalInp.value) || 10, 3, 60);
     autoGustIntervalInp.value = String(autoGustIntervalSec);
     if (autoGustsEnabled && !gustRect){
-      scheduleNextAutoGust(Date.now());
+      scheduleNextAutoGust(currentRaceTimeMs());
     }
     updateWindInfo();
     emitStateChanged();
@@ -210,7 +211,7 @@
     autoGustDurationSec = clamp(parseFloat(autoGustDurationInp.value) || 6, 2, 30);
     autoGustDurationInp.value = String(autoGustDurationSec);
     if (gustRect){
-      gustExpiresAt = Date.now() + autoGustDurationSec * 1000;
+      gustExpiresAt = currentRaceTimeMs() + autoGustDurationSec * 1000;
     }
     updateWindInfo();
     emitStateChanged();
@@ -261,7 +262,7 @@
   btnClearGust.addEventListener("click", () => {
     clearGust({ keepSchedule:autoGustsEnabled });
     if (autoGustsEnabled){
-      scheduleNextAutoGust(Date.now());
+      scheduleNextAutoGust(currentRaceTimeMs());
     }
     updateWindInfo();
     invalidateSolutions();
@@ -397,6 +398,7 @@
     const payload = {
       mode,
       phase,
+      realtimePaused: isLocalRealtimePaused(),
       playMode,
       localPilotMode,
       botDifficulty,
@@ -407,6 +409,7 @@
         raceFinishedCount,
         prestartRoundsLeft,
         realtimeCountdownEndsAt,
+        realtimePaused: isLocalRealtimePaused(),
       },
       boats: boats.map((boat, index) => ({
         index,
@@ -500,6 +503,9 @@
     exitBoardFullscreen,
     isBoardFullscreenActive: isFullscreenActive,
     armLocalRealtimeStart,
+    canToggleLocalRealtimePause,
+    isLocalRealtimePaused,
+    toggleLocalRealtimePause,
     resetRaceToReadyState: handleResetAction,
     setServerClockOffset,
     setBoardStartActionOverride,
@@ -507,6 +513,9 @@
     setMultiplayerContext: ({ seatIndex=null } = {}) => {
       multiplayerSeatIndex = Number.isInteger(seatIndex) ? seatIndex : null;
       localRealtimeLastTickAt = 0;
+      if (!isLocalRealtimeMode()){
+        resetLocalRealtimePauseState();
+      }
       clearBotTurnTimer();
       const candidateBoat = Number.isInteger(selectedBoatIndex) ? selectedBoatIndex : multiplayerSeatIndex;
       if (multiplayerSeatIndex !== null && isHybridRaceMode() && !canSelectBoatForPlay(candidateBoat)){
@@ -550,7 +559,8 @@
       hybridMovesLeft: hybridMovesLeft.slice(),
       realtimeCountdownEndsAt,
       playerCount: boats.length,
-      phase,
+      phase: isLocalRealtimePaused() ? "paused" : phase,
+      realtimePaused: isLocalRealtimePaused(),
       markCount,
       localPilotMode,
       botDifficulty

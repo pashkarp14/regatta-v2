@@ -76,18 +76,29 @@
   let showTrails = false;
   let boardStartActionOverride = null;
   let serverClockOffsetMs = 0;
+  let localRealtimePauseStartedAtMs = 0;
+  let localRealtimePausedDurationMs = 0;
 
   function updateWindInfo(){
     const gustMode = autoGustsEnabled ? "авто" : (gustRect ? "порыв" : "штиль");
     windInfoEl.textContent = `Ветер: ${normalizedWindAngleDeg().toFixed(0)}° откуда дует · ${gustMode}`;
   }
 
-  function currentRaceTimeMs(){
-    return Date.now() + serverClockOffsetMs;
+  function currentRaceTimeMs(rawNowMs=Date.now()){
+    const wallNowMs = Number.isFinite(rawNowMs) ? rawNowMs : Date.now();
+    const effectiveWallNowMs = localRealtimePauseStartedAtMs > 0
+      ? localRealtimePauseStartedAtMs
+      : wallNowMs;
+    return effectiveWallNowMs + serverClockOffsetMs - localRealtimePausedDurationMs;
   }
 
   function setServerClockOffset(offsetMs=0){
     serverClockOffsetMs = Number.isFinite(offsetMs) ? offsetMs : 0;
+  }
+
+  function resetLocalRealtimePauseState(){
+    localRealtimePauseStartedAtMs = 0;
+    localRealtimePausedDurationMs = 0;
   }
 
   function normalizedWindAngleDeg(rawDeg=windAngleDeg){
