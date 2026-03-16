@@ -14,6 +14,8 @@ from redis import Redis
 ROOM_PREFIX = "regatta:v2:room:"
 ROOM_CODE_ALPHABET = string.ascii_uppercase + string.digits
 MAX_GAME_STATE_BYTES = 500_000
+MIN_ROOM_PLAYERS = 2
+MAX_ROOM_PLAYERS = 20
 
 
 class RoomStoreError(Exception):
@@ -195,8 +197,10 @@ class RoomStore:
             self._memory_rooms.pop(room_code, None)
 
     def create_room(self, host_name: str, max_players: int, game_state: dict[str, Any]) -> tuple[dict[str, Any], str]:
-        if not isinstance(max_players, int) or not (2 <= max_players <= 8):
-            raise RoomValidationError("Room size must be between 2 and 8 players.")
+        if not isinstance(max_players, int) or not (MIN_ROOM_PLAYERS <= max_players <= MAX_ROOM_PLAYERS):
+            raise RoomValidationError(
+                f"Room size must be between {MIN_ROOM_PLAYERS} and {MAX_ROOM_PLAYERS} players."
+            )
 
         for _ in range(12):
             room_code = make_room_code()

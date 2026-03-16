@@ -44,7 +44,14 @@
   let phase = (prestartRoundsSetting > 0) ? "prestart" : "race"; // prestart | race
   let lastPhaseForFullscreen = phase;
 
-  const BOAT_COLORS = ["#e53935","#1e88e5","#43a047","#fdd835","#8e24aa","#ff8f00","#00acc1","#6d4c41"];
+  const PLAYER_COUNT_MIN = 2;
+  const PLAYER_COUNT_MAX = 20;
+  const BOAT_COLORS = [
+    "#e53935", "#1e88e5", "#43a047", "#fdd835", "#8e24aa",
+    "#ff8f00", "#00acc1", "#6d4c41", "#d81b60", "#3949ab",
+    "#00897b", "#7cb342", "#fb8c00", "#8d6e63", "#5e35b1",
+    "#039be5", "#c0ca33", "#f4511e", "#546e7a", "#ef5350"
+  ];
 
   const STEP_RADIUS_BASE = 1.0;
   const BOAT_RULE_LENGTH = 0.85;
@@ -78,6 +85,26 @@
 
   const START_PICK_TOL = 0.35;
   const PRESTART_DEPTH = 3.0;
+
+  function ensurePlayerCountOptions(){
+    if (!playerCountSelect) return;
+    const selectedValue = clamp(parseInt(playerCountSelect.value, 10) || PLAYER_COUNT_MIN, PLAYER_COUNT_MIN, PLAYER_COUNT_MAX);
+    if (playerCountSelect.options.length === (PLAYER_COUNT_MAX - PLAYER_COUNT_MIN + 1)
+      && playerCountSelect.options[0]?.value === String(PLAYER_COUNT_MIN)
+      && playerCountSelect.options[playerCountSelect.options.length - 1]?.value === String(PLAYER_COUNT_MAX)){
+      playerCountSelect.value = String(selectedValue);
+      return;
+    }
+
+    playerCountSelect.innerHTML = "";
+    for (let value = PLAYER_COUNT_MIN; value <= PLAYER_COUNT_MAX; value++){
+      const option = document.createElement("option");
+      option.value = String(value);
+      option.textContent = String(value);
+      playerCountSelect.appendChild(option);
+    }
+    playerCountSelect.value = String(selectedValue);
+  }
 
   // --- оптимальные решения (маршрут/старт) ---
   let showOptimal = false;

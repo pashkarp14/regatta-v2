@@ -487,7 +487,14 @@ document.addEventListener("DOMContentLoaded", () => {
   let phase = (prestartRoundsSetting > 0) ? "prestart" : "race"; // prestart | race
   let lastPhaseForFullscreen = phase;
 
-  const BOAT_COLORS = ["#e53935","#1e88e5","#43a047","#fdd835","#8e24aa","#ff8f00","#00acc1","#6d4c41"];
+  const PLAYER_COUNT_MIN = 2;
+  const PLAYER_COUNT_MAX = 20;
+  const BOAT_COLORS = [
+    "#e53935", "#1e88e5", "#43a047", "#fdd835", "#8e24aa",
+    "#ff8f00", "#00acc1", "#6d4c41", "#d81b60", "#3949ab",
+    "#00897b", "#7cb342", "#fb8c00", "#8d6e63", "#5e35b1",
+    "#039be5", "#c0ca33", "#f4511e", "#546e7a", "#ef5350"
+  ];
 
   const STEP_RADIUS_BASE = 1.0;
   const BOAT_RULE_LENGTH = 0.85;
@@ -521,6 +528,26 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const START_PICK_TOL = 0.35;
   const PRESTART_DEPTH = 3.0;
+
+  function ensurePlayerCountOptions(){
+    if (!playerCountSelect) return;
+    const selectedValue = clamp(parseInt(playerCountSelect.value, 10) || PLAYER_COUNT_MIN, PLAYER_COUNT_MIN, PLAYER_COUNT_MAX);
+    if (playerCountSelect.options.length === (PLAYER_COUNT_MAX - PLAYER_COUNT_MIN + 1)
+      && playerCountSelect.options[0]?.value === String(PLAYER_COUNT_MIN)
+      && playerCountSelect.options[playerCountSelect.options.length - 1]?.value === String(PLAYER_COUNT_MAX)){
+      playerCountSelect.value = String(selectedValue);
+      return;
+    }
+
+    playerCountSelect.innerHTML = "";
+    for (let value = PLAYER_COUNT_MIN; value <= PLAYER_COUNT_MAX; value++){
+      const option = document.createElement("option");
+      option.value = String(value);
+      option.textContent = String(value);
+      playerCountSelect.appendChild(option);
+    }
+    playerCountSelect.value = String(selectedValue);
+  }
 
   // --- оптимальные решения (маршрут/старт) ---
   let showOptimal = false;
@@ -3703,7 +3730,8 @@ document.addEventListener("DOMContentLoaded", () => {
   // Инициализация / сброс
   // -----------------------------
   function resetBoats({ armRealtime=false, randomizeBehindStart=null } = {}){
-    const n = parseInt(playerCountSelect.value,10) || 2;
+    const n = clamp(parseInt(playerCountSelect.value,10) || PLAYER_COUNT_MIN, PLAYER_COUNT_MIN, PLAYER_COUNT_MAX);
+    playerCountSelect.value = String(n);
     const previousBoats = boats.slice();
     const realtimeStartDepth = Math.min(PRESTART_DEPTH * 0.35, 1.25);
     const prestartNormal = prestartNormalUnit();
@@ -4296,7 +4324,7 @@ document.addEventListener("DOMContentLoaded", () => {
       ? "countdown"
       : (prestartBudget > 0 ? "prestart" : "race");
     const incomingBoats = Array.isArray(exportedState.boats) && exportedState.boats.length
-      ? exportedState.boats
+      ? exportedState.boats.slice(0, PLAYER_COUNT_MAX)
       : exportGameState().boats;
     const normalizedBoats = incomingBoats.map((boat, idx) => normalizeMapBoatSnapshot(boat, idx, worldSnapshot));
 
@@ -4405,9 +4433,14 @@ document.addEventListener("DOMContentLoaded", () => {
     if (autoFullscreenModeSelect) autoFullscreenModeSelect.value = autoFullscreenMode;
     prestartRoundsInp.value = String(prestartRoundsSetting);
 
-    const incomingBoats = Array.isArray(snapshot.boats) ? snapshot.boats : [];
+    const incomingBoats = Array.isArray(snapshot.boats) ? snapshot.boats.slice(0, PLAYER_COUNT_MAX) : [];
     const previousTrails = boatTrails.map((trail) => Array.isArray(trail) ? trail.map((point) => ({ ...point })) : []);
-    const playerCount = clamp(incomingBoats.length || parseInt(playerCountSelect.value,10) || 2, 2, 8);
+    ensurePlayerCountOptions();
+    const playerCount = clamp(
+      incomingBoats.length || parseInt(playerCountSelect.value,10) || PLAYER_COUNT_MIN,
+      PLAYER_COUNT_MIN,
+      PLAYER_COUNT_MAX
+    );
     playerCountSelect.value = String(playerCount);
     resetBoats();
 
@@ -6129,6 +6162,7 @@ document.addEventListener("DOMContentLoaded", () => {
     gridColsInput.value = gridColsInput.value || String(DEFAULT_WORLD_W);
     gridRowsInput.value = gridRowsInput.value || String(DEFAULT_WORLD_H);
 
+    ensurePlayerCountOptions();
     markCount = parseInt(markCountSelect.value,10);
     ensureMarkOptions();
     ensureScenarioLegOptions();

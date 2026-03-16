@@ -83,6 +83,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const menuState = {
     screen: "home",
     transport: null,
+    networkAction: null,
     scenario: null,
     localParty: null,
     localPlayMode: null,
@@ -155,6 +156,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function formatFormatLabel(room) {
     if (room) return "По сети";
+    if (pendingRoomDraft()) return "Подготовка сетевой комнаты";
     return regatta.getLocalPilotMode?.() === "bots"
       ? "Локально против ботов"
       : "Локально на одном устройстве";
@@ -219,6 +221,9 @@ document.addEventListener("DOMContentLoaded", () => {
     if (name === "local") {
       renderLocalSelection();
     }
+    if (name === "maps" || name === "races") {
+      renderLibraryLists();
+    }
     renderFlowBadge();
     renderHints();
   }
@@ -234,6 +239,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function resetScenarioFlow(nextScreen = "home") {
     menuState.transport = null;
+    menuState.networkAction = null;
     menuState.scenario = null;
     showScreen(nextScreen);
   }
@@ -243,6 +249,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const labels = [];
     if (menuState.transport === "local") labels.push("Локальная");
     if (menuState.transport === "network") labels.push("Сеть");
+    if (menuState.networkAction === "create") labels.push("Новая комната");
+    if (menuState.networkAction === "join") labels.push("Вход по коду");
     if (menuState.scenario === "create") labels.push("Новая карта");
     if (menuState.scenario === "map") labels.push("Карта");
     if (menuState.scenario === "race") labels.push("Сохраненная гонка");
@@ -274,10 +282,19 @@ document.addEventListener("DOMContentLoaded", () => {
     return window.RegattaMultiplayer?.getRoomState?.() || { room: null };
   }
 
+  function pendingRoomDraft() {
+    return window.RegattaMultiplayer?.getPendingRoomDraft?.() || null;
+  }
+
+  function clearPendingRoomDraft() {
+    window.RegattaMultiplayer?.clearPendingRoomDraft?.();
+  }
+
   function renderHomeSummary() {
     const snapshot = regatta.exportState();
     const meta = regatta.getMeta?.() || {};
     const room = roomSummary().room;
+    const draft = pendingRoomDraft();
     const summary = snapshot?.course || {};
     const boatCount = meta.playerCount || snapshot.boats?.length || 0;
     const markCount = summary.markCount || 0;
@@ -297,7 +314,7 @@ document.addEventListener("DOMContentLoaded", () => {
     menuHomeLibraryEl.innerHTML = `
       <div><strong>Карты на сервере:</strong> ${menuState.maps.length}</div>
       <div><strong>Сохраненных гонок:</strong> ${menuState.races.length}</div>
-      <div><strong>Комната:</strong> ${room ? `${room.code} · ${room.status}` : "нет"}</div>
+      <div><strong>Комната:</strong> ${room ? `${room.code} · ${room.status}` : (draft ? `черновик · ${draft.maxPlayers} мест` : "нет")}</div>
       <div><strong>Последнее обновление:</strong> ${formatDate(new Date().toISOString())}</div>
     `;
   }
@@ -307,9 +324,10 @@ document.addEventListener("DOMContentLoaded", () => {
     const meta = regatta.getMeta?.() || {};
     const snapshot = regatta.exportState();
     const room = roomSummary().room;
+    const draft = pendingRoomDraft();
     const roomLine = room
       ? `<div><strong>Комната:</strong> ${room.code} · ${room.status}</div>`
-      : "";
+      : (draft ? `<div><strong>Комната:</strong> черновик · ${draft.maxPlayers} мест</div>` : "");
     menuSettingsSummaryEl.innerHTML = `
       <div><strong>Формат:</strong> ${formatFormatLabel(room)}</div>
       <div><strong>Режим игры:</strong> ${formatPlayModeLabel(meta.playMode)}</div>
@@ -339,10 +357,11 @@ document.addEventListener("DOMContentLoaded", () => {
   function renderDeckContext() {
     const meta = regatta.getMeta?.() || {};
     const room = roomSummary().room;
+    const draft = pendingRoomDraft();
     const playMode = meta.playMode === "realtime" ? "realtime" : "turns";
     const editorMode = meta.mode || "play";
     const finishSeparate = finishSeparateSelect?.value === "yes";
-    const showRoomSection = !!room && room.status === "lobby";
+    const showRoomSection = (!!room && room.status === "lobby") || (!!draft && !room);
 
     deckRoomSectionEl?.classList.toggle("hidden", !showRoomSection);
     prestartRoundsControlEl?.classList.toggle("hidden", playMode === "realtime");
@@ -463,20 +482,20 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     if (menuNetworkHintEl) {
-      menuNetworkHintEl.textContent = menuState.scenario === "create"
-        ? "При создании комнаты хост получит свежую карту и сможет продолжить настройку в лобби."
-        : "Если входишь в чужую комнату, карта и гонка будут синхронизированы от хоста.";
+      menuNetworkHintEl.textContent = menuState.networkAction === "create"
+        ? "Сначала выбери новую или готовую карту. Комната появится только после того, как ты подготовишь дистанцию и откроешь её из панели комнаты."
+        : "Если входишь в чужую комнату, карта, ветер и гонка придут от хоста автоматически.";
     }
 
     if (mapsScreenHintEl) {
-      mapsScreenHintEl.textContent = menuState.transport === "network"
-        ? "Для сетевого сценария нажми «Открыть комнату». Для локальной подготовки доступны быстрые кнопки запуска и редактора."
+      mapsScreenHintEl.textContent = menuState.transport === "network" && menuState.networkAction === "create"
+        ? "Для сетевой комнаты выбери карту, открой её в редакторе и только потом подними комнату из панели «Комната»."
         : "Стандартные карты идут с релизом, пользовательские лежат в серверной библиотеке.";
     }
 
     if (racesScreenHintEl) {
-      racesScreenHintEl.textContent = menuState.transport === "network"
-        ? "Сохраненную гонку можно поднять как новый онлайн-матч для удаленных игроков."
+      racesScreenHintEl.textContent = menuState.transport === "network" && menuState.networkAction === "create"
+        ? "Сохранённую гонку тоже можно подготовить для сети: сначала открыть снимок, проверить состояние на поле и только потом создать комнату."
         : "Продолжение локально загрузит полный снимок гонки и сохранит все текущие настройки.";
     }
   }
@@ -503,7 +522,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const isRealtime = record.summary?.play_mode === "realtime";
     const localLabel = isRealtime ? "Локально · realtime" : "На одном устройстве";
     const botsLabel = isRealtime ? "С ботами · realtime" : "Против ботов";
-    const roomLabel = isRealtime ? "Открыть комнату · realtime" : "Открыть комнату";
+    const roomLabel = isRealtime ? "Подготовить для сети · realtime" : "Подготовить для сети";
     return `
       <div class="library-card__actions">
         <button type="button" class="action-primary" data-library-kind="maps" data-record-id="${record.id}" data-action="local">${localLabel}</button>
@@ -516,10 +535,11 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function raceCardActions(record) {
+    const roomLabel = "Подготовить для сети";
     return `
       <div class="library-card__actions">
         <button type="button" class="action-primary" data-library-kind="races" data-record-id="${record.id}" data-action="local">Продолжить</button>
-        <button type="button" class="action-secondary" data-library-kind="races" data-record-id="${record.id}" data-action="network">Открыть комнату</button>
+        <button type="button" class="action-secondary" data-library-kind="races" data-record-id="${record.id}" data-action="network">${roomLabel}</button>
         ${record.scope === "custom" ? `<button type="button" class="ghost-btn" data-library-kind="races" data-record-id="${record.id}" data-action="delete">Удалить</button>` : ""}
       </div>
     `;
@@ -574,10 +594,29 @@ document.addEventListener("DOMContentLoaded", () => {
     return payload[kind === "maps" ? "map" : "race"];
   }
 
-  async function ensureSoloContext() {
+  async function ensureSoloContext({ clearDraft = true } = {}) {
     const multiplayer = window.RegattaMultiplayer;
+    if (clearDraft) {
+      clearPendingRoomDraft();
+    }
     if (!multiplayer?.getRoomState?.().room) return;
     await multiplayer.leaveRoom();
+  }
+
+  function syncPendingRoomDraft(source = "map", mode = "edit") {
+    syncDeckFieldsFromMenu();
+    window.RegattaMultiplayer?.setPendingRoomDraft?.({
+      display_name: currentDisplayName(),
+      max_players: regatta.exportState()?.boats?.length || parseInt(document.getElementById("playerCount")?.value, 10) || 2,
+      source,
+      mode,
+    });
+  }
+
+  function revealPendingRoomDraft(message) {
+    closeMenu();
+    focusDeckSection("deckRoomSection");
+    showToast(message);
   }
 
   function prepareMapSnapshotForLocalMode(snapshot, localMode = "hotseat") {
@@ -625,28 +664,24 @@ document.addEventListener("DOMContentLoaded", () => {
     showToast(`Гонка «${record.name}» восстановлена.`);
   }
 
-  async function hostRecordOnline(record, kind) {
-    await ensureSoloContext();
-    syncDeckFieldsFromMenu();
+  async function prepareRecordForNetworkRoom(record, kind) {
+    await ensureSoloContext({ clearDraft: false });
+    clearPendingRoomDraft();
     if (kind === "maps") {
-      const hostedMapState = regatta.normalizeMapState?.(record.snapshot) || record.snapshot;
-      hostedMapState.settings = {
-        ...(hostedMapState.settings || {}),
-        realtimePrepSeconds: Math.max(18, parseFloat(hostedMapState.settings?.realtimePrepSeconds) || 0),
-      };
+      const hostedMapState = prepareMapSnapshotForLocalMode(record.snapshot, "hotseat");
       regatta.importState(hostedMapState);
-      await regatta.resetRaceToReadyState?.({
-        randomizeBehindStart: true,
-        armRealtime: record.summary?.play_mode === "realtime",
-      });
-    } else {
-      regatta.importState(record.snapshot);
+      regatta.setLocalPilotMode?.("hotseat");
+      regatta.setMode("marks");
+      syncPendingRoomDraft("map", "edit");
+      revealPendingRoomDraft(`Карта «${record.name}» подготовлена для сети. Теперь доведи дистанцию и открой комнату.`);
+      return;
     }
-    regatta.setMode(kind === "maps" ? "play" : "play");
-    await window.RegattaMultiplayer?.createRoom?.();
-    closeMenu();
-    commandDeckEl.classList.remove("is-collapsed");
-    showToast(`Комната поднята из ${kind === "maps" ? "карты" : "сохранения"} «${record.name}».`);
+
+    regatta.importState(record.snapshot);
+    regatta.setLocalPilotMode?.("hotseat");
+    regatta.setMode("play");
+    syncPendingRoomDraft("race", "play");
+    revealPendingRoomDraft(`Сохранение «${record.name}» подготовлено для сети. Проверь состояние и открой комнату, когда всё готово.`);
   }
 
   async function saveCurrentMap(name) {
@@ -716,14 +751,14 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   async function createFreshRoom() {
-    await ensureSoloContext();
+    await ensureSoloContext({ clearDraft: false });
+    clearPendingRoomDraft();
     syncDeckFieldsFromMenu();
+    regatta.setLocalPilotMode?.("hotseat");
     await regatta.resetRaceToReadyState?.();
-    regatta.setMode(menuState.scenario === "create" ? "marks" : "play");
-    await window.RegattaMultiplayer?.createRoom?.();
-    closeMenu();
-    commandDeckEl.classList.remove("is-collapsed");
-    showToast("Сетевая комната создана.");
+    regatta.setMode("marks");
+    syncPendingRoomDraft("map", "edit");
+    revealPendingRoomDraft("Новая карта подготовлена для сетевой комнаты. Теперь настрой дистанцию и открой комнату.");
   }
 
   function setCommandDeckOpen(nextOpen) {
@@ -785,7 +820,7 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
       }
       if (kind === "maps" && action === "network") {
-        await hostRecordOnline(record, "maps");
+        await prepareRecordForNetworkRoom(record, "maps");
         return;
       }
       if (kind === "races" && action === "local") {
@@ -793,7 +828,7 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
       }
       if (kind === "races" && action === "network") {
-        await hostRecordOnline(record, "races");
+        await prepareRecordForNetworkRoom(record, "races");
       }
     } catch (error) {
       showToast(error.message || "Не удалось выполнить действие.");
@@ -821,25 +856,40 @@ document.addEventListener("DOMContentLoaded", () => {
   resetGameBtn?.addEventListener("click", () => setCommandDeckOpen(false));
 
   menuContinueBtn?.addEventListener("click", closeMenu);
-  menuNewGameBtn?.addEventListener("click", () => showScreen("mode"));
-  menuOpenMapsBtn?.addEventListener("click", () => { menuState.transport = null; menuState.scenario = "map"; showScreen("maps"); });
-  menuOpenRacesBtn?.addEventListener("click", () => { menuState.transport = null; menuState.scenario = "race"; showScreen("races"); });
+  menuNewGameBtn?.addEventListener("click", () => {
+    menuState.transport = null;
+    menuState.networkAction = null;
+    menuState.scenario = null;
+    showScreen("mode");
+  });
+  menuOpenMapsBtn?.addEventListener("click", () => { menuState.transport = null; menuState.networkAction = null; menuState.scenario = "map"; showScreen("maps"); });
+  menuOpenRacesBtn?.addEventListener("click", () => { menuState.transport = null; menuState.networkAction = null; menuState.scenario = "race"; showScreen("races"); });
 
   menuChooseLocalBtn?.addEventListener("click", () => {
     menuState.transport = "local";
+    menuState.networkAction = null;
     menuState.scenario = null;
     showScreen("scenario");
   });
 
   menuChooseNetworkBtn?.addEventListener("click", () => {
     menuState.transport = "network";
+    menuState.networkAction = null;
     menuState.scenario = null;
-    showScreen("scenario");
+    showScreen("network");
   });
 
-  menuScenarioCreateBtn?.addEventListener("click", () => {
+  menuScenarioCreateBtn?.addEventListener("click", async () => {
     menuState.scenario = "create";
-    showScreen(menuState.transport === "network" ? "network" : "local");
+    if (menuState.transport === "network" && menuState.networkAction === "create") {
+      try {
+        await createFreshRoom();
+      } catch (error) {
+        showToast(error.message || "Не удалось подготовить новую карту для сетевой комнаты.");
+      }
+      return;
+    }
+    showScreen("local");
   });
 
   menuScenarioLoadMapBtn?.addEventListener("click", () => {
@@ -881,15 +931,16 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   menuCreateRoomBtn?.addEventListener("click", async () => {
-    try {
-      await createFreshRoom();
-    } catch (error) {
-      showToast(error.message || "Не удалось создать комнату.");
-    }
+    menuState.transport = "network";
+    menuState.networkAction = "create";
+    menuState.scenario = null;
+    showScreen("scenario");
   });
 
   menuJoinRoomBtn?.addEventListener("click", async () => {
     try {
+      menuState.transport = "network";
+      menuState.networkAction = "join";
       await ensureSoloContext();
       syncDeckFieldsFromMenu();
       await window.RegattaMultiplayer?.joinRoom?.();
@@ -950,6 +1001,9 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
       }
       if (target === "mode") {
+        menuState.transport = null;
+        menuState.networkAction = null;
+        menuState.scenario = null;
         showScreen("mode");
         return;
       }
@@ -975,7 +1029,29 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   window.addEventListener("regatta:room-state", () => {
+    const room = roomSummary().room;
+    if (room) {
+      menuState.transport = "network";
+      menuState.networkAction = null;
+    }
     renderHomeSummary();
+    renderSettingsSummary();
+    renderDeckContext();
+    renderHints();
+  });
+
+  window.addEventListener("regatta:room-draft", () => {
+    const draft = pendingRoomDraft();
+    if (draft) {
+      menuState.transport = "network";
+      menuState.networkAction = "create";
+    } else if (!roomSummary().room) {
+      menuState.networkAction = null;
+    }
+    renderHomeSummary();
+    renderSettingsSummary();
+    renderDeckContext();
+    renderHints();
   });
 
   window.addEventListener("keydown", (event) => {

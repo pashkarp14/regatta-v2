@@ -8,6 +8,8 @@ from typing import Any
 
 
 MAX_LIBRARY_SNAPSHOT_BYTES = 500_000
+MIN_SNAPSHOT_BOATS = 2
+MAX_SNAPSHOT_BOATS = 20
 SUPPORTED_KINDS = {"maps", "races"}
 
 
@@ -82,8 +84,10 @@ def validate_snapshot(snapshot: Any) -> dict[str, Any]:
         raise LibraryValidationError("Snapshot payload is too large.")
 
     boats = snapshot.get("boats")
-    if not isinstance(boats, list) or not (2 <= len(boats) <= 8):
-        raise LibraryValidationError("Snapshot must contain between 2 and 8 boats.")
+    if not isinstance(boats, list) or not (MIN_SNAPSHOT_BOATS <= len(boats) <= MAX_SNAPSHOT_BOATS):
+        raise LibraryValidationError(
+            f"Snapshot must contain between {MIN_SNAPSHOT_BOATS} and {MAX_SNAPSHOT_BOATS} boats."
+        )
 
     race = snapshot.get("race") or {}
     current_player = race.get("currentPlayer")

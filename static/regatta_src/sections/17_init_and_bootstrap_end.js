@@ -5,6 +5,7 @@
     gridColsInput.value = gridColsInput.value || String(DEFAULT_WORLD_W);
     gridRowsInput.value = gridRowsInput.value || String(DEFAULT_WORLD_H);
 
+    ensurePlayerCountOptions();
     markCount = parseInt(markCountSelect.value,10);
     ensureMarkOptions();
     ensureScenarioLegOptions();

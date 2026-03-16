@@ -2,7 +2,8 @@
   // Инициализация / сброс
   // -----------------------------
   function resetBoats({ armRealtime=false, randomizeBehindStart=null } = {}){
-    const n = parseInt(playerCountSelect.value,10) || 2;
+    const n = clamp(parseInt(playerCountSelect.value,10) || PLAYER_COUNT_MIN, PLAYER_COUNT_MIN, PLAYER_COUNT_MAX);
+    playerCountSelect.value = String(n);
     const previousBoats = boats.slice();
     const realtimeStartDepth = Math.min(PRESTART_DEPTH * 0.35, 1.25);
     const prestartNormal = prestartNormalUnit();
@@ -595,7 +596,7 @@
       ? "countdown"
       : (prestartBudget > 0 ? "prestart" : "race");
     const incomingBoats = Array.isArray(exportedState.boats) && exportedState.boats.length
-      ? exportedState.boats
+      ? exportedState.boats.slice(0, PLAYER_COUNT_MAX)
       : exportGameState().boats;
     const normalizedBoats = incomingBoats.map((boat, idx) => normalizeMapBoatSnapshot(boat, idx, worldSnapshot));
 
@@ -704,9 +705,14 @@
     if (autoFullscreenModeSelect) autoFullscreenModeSelect.value = autoFullscreenMode;
     prestartRoundsInp.value = String(prestartRoundsSetting);
 
-    const incomingBoats = Array.isArray(snapshot.boats) ? snapshot.boats : [];
+    const incomingBoats = Array.isArray(snapshot.boats) ? snapshot.boats.slice(0, PLAYER_COUNT_MAX) : [];
     const previousTrails = boatTrails.map((trail) => Array.isArray(trail) ? trail.map((point) => ({ ...point })) : []);
-    const playerCount = clamp(incomingBoats.length || parseInt(playerCountSelect.value,10) || 2, 2, 8);
+    ensurePlayerCountOptions();
+    const playerCount = clamp(
+      incomingBoats.length || parseInt(playerCountSelect.value,10) || PLAYER_COUNT_MIN,
+      PLAYER_COUNT_MIN,
+      PLAYER_COUNT_MAX
+    );
     playerCountSelect.value = String(playerCount);
     resetBoats();
 

@@ -14,12 +14,16 @@ document.addEventListener("DOMContentLoaded", () => {
   const roomPlayersEl = document.getElementById("roomPlayers");
   const roomNoticeEl = document.getElementById("roomNotice");
   const roomHintEl = document.getElementById("roomHint");
+  const roomPanelNoteEl = document.getElementById("roomPanelNote");
   const syncIndicatorEl = document.getElementById("syncIndicator");
   const roomPhaseLabelEl = document.getElementById("roomPhaseLabel");
   const interactionLockEl = document.getElementById("interactionLock");
   const appToastEl = document.getElementById("appToast");
   const playerCountSelect = document.getElementById("playerCount");
   const movesPerTurnInput = document.getElementById("movesPerTurn");
+  const MIN_ROOM_PLAYERS = 2;
+  const MAX_ROOM_PLAYERS = 20;
+  const DEFAULT_ROOM_PANEL_NOTE = "Создание и вход в комнату находятся в главном меню. Здесь остаются только статус лобби, запуск гонки и состав экипажей.";
 
   const originalDisabledState = new WeakMap();
   const originalMovesPerTurnDisabled = !!movesPerTurnInput?.disabled;
@@ -45,6 +49,13 @@ document.addEventListener("DOMContentLoaded", () => {
     lastRealtimeIntentSentAt: 0,
     serverClockOffsetMs: 0,
   };
+  const pendingRoomDraft = {
+    active: false,
+    displayName: "",
+    maxPlayers: MIN_ROOM_PLAYERS,
+    source: "map",
+    mode: "edit",
+  };
   let toastTimer = 0;
   let roomStartPending = false;
 
@@ -55,6 +66,80 @@ document.addEventListener("DOMContentLoaded", () => {
         selfSeatIndex: roomState.selfSeatIndex,
       },
     }));
+  }
+
+  function emitRoomDraftChanged() {
+    window.dispatchEvent(new CustomEvent("regatta:room-draft", {
+      detail: {
+        draft: pendingRoomDraft.active ? { ...pendingRoomDraft } : null,
+      },
+    }));
+  }
+
+  function hasPendingRoomDraft() {
+    return !roomState.room && pendingRoomDraft.active;
+  }
+
+  function normalizePendingRoomDraft(draft = {}) {
+    if (!draft || typeof draft !== "object") return null;
+    return {
+      active: true,
+      displayName: typeof draft.display_name === "string"
+        ? draft.display_name.trim().slice(0, 24)
+        : "",
+      maxPlayers: Math.max(
+        MIN_ROOM_PLAYERS,
+        Math.min(MAX_ROOM_PLAYERS, parseInt(draft.max_players, 10) || parseInt(playerCountSelect?.value, 10) || MIN_ROOM_PLAYERS)
+      ),
+      source: draft.source === "race" ? "race" : "map",
+      mode: draft.mode === "play" ? "play" : "edit",
+    };
+  }
+
+  function setPendingRoomDraft(draft) {
+    const normalized = normalizePendingRoomDraft(draft);
+    pendingRoomDraft.active = !!normalized;
+    pendingRoomDraft.displayName = normalized?.displayName || "";
+    pendingRoomDraft.maxPlayers = normalized?.maxPlayers || MIN_ROOM_PLAYERS;
+    pendingRoomDraft.source = normalized?.source || "map";
+    pendingRoomDraft.mode = normalized?.mode || "edit";
+    roomStartPending = false;
+
+    if (pendingRoomDraft.active) {
+      if (displayNameInput && pendingRoomDraft.displayName) {
+        displayNameInput.value = pendingRoomDraft.displayName;
+      }
+      if (playerCountSelect) {
+        playerCountSelect.value = String(pendingRoomDraft.maxPlayers);
+      }
+    }
+
+    emitRoomDraftChanged();
+    renderRoom(roomState.room);
+  }
+
+  function clearPendingRoomDraft({ silent = false } = {}) {
+    pendingRoomDraft.active = false;
+    pendingRoomDraft.displayName = "";
+    pendingRoomDraft.maxPlayers = MIN_ROOM_PLAYERS;
+    pendingRoomDraft.source = "map";
+    pendingRoomDraft.mode = "edit";
+    roomStartPending = false;
+    if (!silent) {
+      emitRoomDraftChanged();
+    }
+    renderRoom(roomState.room);
+  }
+
+  function pendingDraftMaxPlayers() {
+    return Math.max(
+      MIN_ROOM_PLAYERS,
+      Math.min(MAX_ROOM_PLAYERS, regatta.exportState()?.boats?.length || parseInt(playerCountSelect?.value, 10) || pendingRoomDraft.maxPlayers || MIN_ROOM_PLAYERS)
+    );
+  }
+
+  function pendingDraftDisplayName() {
+    return displayNameInput?.value?.trim() || pendingRoomDraft.displayName || "";
   }
 
   function roomPlayer() {
@@ -296,6 +381,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function applyPermissions() {
+    const pendingDraft = hasPendingRoomDraft();
     const setupDisabled = !canEditSetup();
     for (const control of setupLockedControls()) {
       const originalDisabled = originalDisabledFor(control);
@@ -305,19 +391,27 @@ document.addEventListener("DOMContentLoaded", () => {
       movesPerTurnInput.disabled = originalMovesPerTurnDisabled || !canEditTurnBudget();
     }
 
-    createRoomBtn.disabled = !!roomState.room;
+    createRoomBtn.disabled = !!roomState.room || pendingDraft;
     joinRoomBtn.disabled = !!roomState.room;
     joinRoomCodeInput.disabled = !!roomState.room;
-    leaveRoomBtn.disabled = !roomState.room;
+    leaveRoomBtn.disabled = !roomState.room && !pendingDraft;
     copyRoomCodeBtn.disabled = !roomState.room;
-    startRoomBtn.disabled = !roomState.room
-      || roomStartPending
-      || !isRoomHost()
-      || roomState.room.joined_count !== roomState.room.max_players;
+    startRoomBtn.disabled = roomStartPending || (
+      roomState.room
+        ? (!isRoomHost() || roomState.room.joined_count !== roomState.room.max_players)
+        : !pendingDraft
+    );
     if (startRoomBtn) {
-      startRoomBtn.textContent = (!roomState.room || roomState.room.status === "lobby" || isPendingRealtimeStartRoom())
-        ? "Запустить матч"
-        : "Начать гонку заново";
+      if (!roomState.room) {
+        startRoomBtn.textContent = pendingDraft ? "Открыть комнату" : "Запустить матч";
+      } else {
+        startRoomBtn.textContent = (roomState.room.status === "lobby" || isPendingRealtimeStartRoom())
+          ? "Запустить матч"
+          : "Начать гонку заново";
+      }
+    }
+    if (leaveRoomBtn) {
+      leaveRoomBtn.textContent = roomState.room ? "Выйти" : (pendingDraft ? "Отменить" : "Выйти");
     }
 
     if (!roomState.room) {
@@ -346,19 +440,48 @@ document.addEventListener("DOMContentLoaded", () => {
     renderRoster(roomState.room);
 
     if (!roomState.room) {
+      const pendingDraft = hasPendingRoomDraft();
       roomState.serverClockOffsetMs = 0;
       regatta.setServerClockOffset?.(0);
       roomCodeValueEl.textContent = "-";
-      roomStatusEl.textContent = "Готов к локальной игре";
-      roomPhaseLabelEl.textContent = "Соло";
-      setHint("Размер комнаты берётся из настройки «Лодок». Хост настраивает дистанцию, остальные игроки подключаются по коду и ждут старта.");
-      setNotice("Сетевой слой не активен, пока ты не создашь комнату.", "neutral");
-      setSyncLabel("Локальный режим", false);
+      if (pendingDraft) {
+        const pendingMaxPlayers = pendingDraftMaxPlayers();
+        const sourceLabel = pendingRoomDraft.source === "race" ? "сохранённая гонка" : "карта";
+        roomStatusEl.textContent = `Черновик комнаты · ${pendingMaxPlayers} мест`;
+        roomPhaseLabelEl.textContent = "Подготовка комнаты";
+        setHint(`Сейчас готовится сетевой запуск: ${sourceLabel}. Доведи дистанцию до нужного вида и нажми «Открыть комнату», когда всё будет готово.`);
+        setNotice("Комната ещё не создана. Пока можно менять карту, ветер, число лодок и остальные настройки без лишних подключений.", "neutral");
+        setSyncLabel("Черновик комнаты", true);
+        if (roomPanelNoteEl) {
+          roomPanelNoteEl.textContent = "Сначала подготовь карту, затем открой комнату и раздай код участникам. Пока комнаты нет, в настройки никто не вмешивается.";
+        }
+      } else {
+        roomStatusEl.textContent = "Готов к локальной игре";
+        roomPhaseLabelEl.textContent = "Соло";
+        setHint("Размер комнаты берётся из настройки «Лодок». Хост настраивает дистанцию, остальные игроки подключаются по коду и ждут старта.");
+        setNotice("Сетевой слой не активен, пока ты не создашь комнату.", "neutral");
+        setSyncLabel("Локальный режим", false);
+        if (roomPanelNoteEl) {
+          roomPanelNoteEl.textContent = DEFAULT_ROOM_PANEL_NOTE;
+        }
+      }
       roomState.lastRealtimeIntentKey = "";
       syncBoardStartAction();
       applyPermissions();
       emitRoomStateChanged();
       return;
+    }
+
+    if (pendingRoomDraft.active) {
+      pendingRoomDraft.active = false;
+      pendingRoomDraft.displayName = "";
+      pendingRoomDraft.maxPlayers = MIN_ROOM_PLAYERS;
+      pendingRoomDraft.source = "map";
+      pendingRoomDraft.mode = "edit";
+      emitRoomDraftChanged();
+    }
+    if (roomPanelNoteEl) {
+      roomPanelNoteEl.textContent = DEFAULT_ROOM_PANEL_NOTE;
     }
 
     roomCodeValueEl.textContent = roomState.room.code;
@@ -485,23 +608,33 @@ document.addEventListener("DOMContentLoaded", () => {
     renderRoom(room);
   }
 
-  async function createRoom() {
+  async function createRoom(overrides = {}) {
     const payload = await apiRequest("/api/rooms", {
       method: "POST",
       body: {
-        display_name: displayNameInput.value.trim(),
-        max_players: parseInt(playerCountSelect.value, 10) || 2,
-        game_state: regatta.exportState(),
+        display_name: typeof overrides.display_name === "string" ? overrides.display_name : displayNameInput.value.trim(),
+        max_players: Math.max(
+          MIN_ROOM_PLAYERS,
+          Math.min(MAX_ROOM_PLAYERS, parseInt(overrides.max_players, 10) || parseInt(playerCountSelect.value, 10) || MIN_ROOM_PLAYERS)
+        ),
+        game_state: overrides.game_state || regatta.exportState(),
       },
     });
 
     roomStartPending = false;
+    pendingRoomDraft.active = false;
+    pendingRoomDraft.displayName = "";
+    pendingRoomDraft.maxPlayers = MIN_ROOM_PLAYERS;
+    pendingRoomDraft.source = "map";
+    pendingRoomDraft.mode = "edit";
     roomState.lastFingerprint = regatta.fingerprintState();
     renderRoom(payload.room);
     ensureSocket();
+    emitRoomDraftChanged();
   }
 
   async function joinRoom() {
+    clearPendingRoomDraft({ silent: true });
     const payload = await apiRequest("/api/rooms/join", {
       method: "POST",
       body: {
@@ -551,7 +684,30 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   async function handleRoomStartAction() {
-    if (!roomState.room || roomStartPending) return;
+    if (roomStartPending) return;
+
+    if (!roomState.room) {
+      if (!hasPendingRoomDraft()) return;
+
+      roomStartPending = true;
+      syncBoardStartAction();
+      applyPermissions();
+
+      try {
+        await createRoom({
+          display_name: pendingDraftDisplayName(),
+          max_players: pendingDraftMaxPlayers(),
+          game_state: regatta.exportState(),
+        });
+        setNotice("Комната создана. Теперь можно копировать код и собирать экипажи.", "success");
+      } catch (error) {
+        setNotice(error.message, "danger");
+      } finally {
+        roomStartPending = false;
+        renderRoom(roomState.room);
+      }
+      return;
+    }
 
     roomStartPending = true;
     syncBoardStartAction();
@@ -575,6 +731,10 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   async function leaveRoom() {
+    if (!roomState.room) {
+      clearPendingRoomDraft();
+      return;
+    }
     await apiRequest("/api/rooms/leave", { method: "POST" });
     disconnectSocket();
     roomState.room = null;
@@ -711,6 +871,17 @@ document.addEventListener("DOMContentLoaded", () => {
     joinRoom,
     leaveRoom,
     startRoom,
+    setPendingRoomDraft,
+    clearPendingRoomDraft,
+    getPendingRoomDraft: () => (
+      pendingRoomDraft.active
+        ? {
+            ...pendingRoomDraft,
+            displayName: pendingDraftDisplayName(),
+            maxPlayers: pendingDraftMaxPlayers(),
+          }
+        : null
+    ),
     getRoomState: () => ({
       room: roomState.room,
       selfSeatIndex: roomState.selfSeatIndex,

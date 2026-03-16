@@ -82,7 +82,7 @@
               </div>
             </div>
 
-            <p class="room-panel-note">
+            <p class="room-panel-note" id="roomPanelNote">
               Создание и вход в комнату находятся в главном меню. Здесь остаются только статус лобби, запуск гонки и состав экипажей.
             </p>
 
@@ -129,6 +129,18 @@
                 <option value="6">6</option>
                 <option value="7">7</option>
                 <option value="8">8</option>
+                <option value="9">9</option>
+                <option value="10">10</option>
+                <option value="11">11</option>
+                <option value="12">12</option>
+                <option value="13">13</option>
+                <option value="14">14</option>
+                <option value="15">15</option>
+                <option value="16">16</option>
+                <option value="17">17</option>
+                <option value="18">18</option>
+                <option value="19">19</option>
+                <option value="20">20</option>
               </select>
             </label>
 
@@ -605,12 +617,12 @@
           <div class="menu-screen hidden" data-menu-screen="network">
             <div class="menu-screen-head">
               <div>
-                <span class="meta-label">Шаг 3</span>
-                <h3>Сетевая комната</h3>
+                <span class="meta-label">Шаг 2</span>
+                <h3>Сетевая игра</h3>
               </div>
               <p>
-                Для деплоя вне локальной сети карта и сохранения лежат на сервере. Комната поднимается поверх
-                текущего состояния поля, а при входе в чужую комнату сценарий придет от хоста.
+                Сначала решаем, поднимаешь ли ты новую комнату или входишь в уже готовую. Для новой комнаты сначала
+                выбираем карту и настраиваем её в редакторе, а саму комнату открываем уже после подготовки дистанции.
               </p>
             </div>
 
@@ -630,7 +642,7 @@
               <button type="button" id="menuCreateRoom" class="menu-action-card menu-action-card--accent">
                 <span class="menu-action-card__eyebrow">Создать</span>
                 <strong>Создать комнату</strong>
-                <span>Поднять сетевое лобби и раздать код остальным экипажам.</span>
+                <span>Сначала выбрать новую или готовую карту, при необходимости поправить её в редакторе и только потом открыть комнату.</span>
               </button>
 
               <button type="button" id="menuJoinRoom" class="menu-action-card">
