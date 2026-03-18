@@ -10,6 +10,8 @@ from typing import Any
 
 from redis import Redis
 
+from .game_state import normalize_lobby_preview_state as build_lobby_preview_state
+
 
 ROOM_PREFIX = "regatta:v2:room:"
 ROOM_CODE_ALPHABET = string.ascii_uppercase + string.digits
@@ -120,57 +122,10 @@ def next_open_seat(room: dict[str, Any]) -> int | None:
 
 
 def normalize_lobby_preview_state(game_state: Any) -> dict[str, Any]:
-    if not isinstance(game_state, dict):
-        raise RoomValidationError("Game state must be a JSON object.")
-
-    preview_state = deepcopy(game_state)
-    settings = preview_state.setdefault("settings", {})
-    race = preview_state.setdefault("race", {})
-    boats = list(preview_state.get("boats") or [])
-    preview_state["boats"] = boats
-
-    for boat in boats:
-        if not isinstance(boat, dict):
-            continue
-        boat.setdefault("distance", 0)
-        boat.setdefault("turns", 0)
-        boat.setdefault("penalties", 0)
-        boat.setdefault("collisions", 0)
-        boat.setdefault("nextMark", 0)
-        boat.setdefault("finished", False)
-        boat.setdefault("place", None)
-        boat.setdefault("hasHeading", False)
-        boat.setdefault("heading", 0)
-        boat.setdefault("tack", 0)
-        boat.setdefault("speedCoeff", 1.0)
-        boat["currentSpeedUnitsPerSec"] = 0.0
-        boat["penaltySlowUntil"] = 0
-        boat["lastPenaltyAt"] = 0
-        boat["lastPenaltyKey"] = ""
-        boat["lastPenaltyReason"] = ""
-        boat.setdefault("roundInZone", False)
-        boat.setdefault("roundSweep", 0.0)
-        boat["startDeltaMs"] = None
-        boat["falseStartDeltaMs"] = None
-
-    race["phase"] = "race"
-    race["realtimeCountdownEndsAt"] = 0
-    race["isLobbyPreview"] = True
-    race["subMovesLeft"] = 0
-    race["prestartRoundsLeft"] = 0
-    race["raceFinishedCount"] = int(race.get("raceFinishedCount") or sum(1 for boat in boats if boat.get("finished")))
-    current_player = race.get("currentPlayer")
-    if not isinstance(current_player, int) or not (0 <= current_player < len(boats)):
-        race["currentPlayer"] = next((idx for idx, boat in enumerate(boats) if not boat.get("finished")), 0)
-
-    if settings.get("playMode") in {"hybrid"}:
-        settings["playMode"] = "turns"
-        race.pop("hybridRound", None)
-        race.pop("hybridMovesLeft", None)
-
-    race.setdefault("gustExpiresAt", 0)
-    race.setdefault("nextAutoGustAt", 0)
-    return preview_state
+    try:
+        return build_lobby_preview_state(game_state)
+    except TypeError as exc:
+        raise RoomValidationError(str(exc)) from exc
 
 
 def public_room_view(room: dict[str, Any], player_token: str | None) -> dict[str, Any]:

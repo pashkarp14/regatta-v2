@@ -5,57 +5,35 @@ import time
 from copy import deepcopy
 from typing import Any
 
-from flask import current_app, session
+from flask import current_app
 from flask_socketio import emit, join_room
 
+from .app_state import room_store
 from .extensions import socketio
+from .game_state import (
+    apply_room_view_settings,
+    normalize_view_settings_payload,
+    room_requires_live_loop,
+    state_play_mode,
+)
 from .realtime_engine import simulate_realtime_tick, simulate_weather_tick
+from .room_events import broadcast_room_presence, broadcast_room_state, serialize_room
 from .room_store import (
     RoomForbidden,
     RoomStoreError,
     normalize_lobby_preview_state,
+    player_for_token,
     player_is_observer,
-    public_room_view,
     validate_game_state,
 )
+from .session_state import current_session_state
 
 
 REALTIME_TICK_HZ = 12
 _realtime_lock = threading.Lock()
 _realtime_loops: set[str] = set()
 _realtime_controls: dict[str, dict[int, dict[str, Any]]] = {}
-
-
-def room_store():
-    return current_app.extensions["room_store"]
-
-
-def room_actor(room: dict[str, Any], player_token: str | None):
-    return next((player for player in room.get("players", []) if player.get("token") == player_token), None)
-
-
-def state_play_mode(game_state: dict[str, Any] | None) -> str:
-    if not isinstance(game_state, dict):
-        return "turns"
-    settings = game_state.get("settings") or {}
-    mode = settings.get("playMode")
-    if mode in {"realtime", "hybrid"}:
-        return "realtime"
-    return "turns"
-
-
-def state_auto_gusts_enabled(game_state: dict[str, Any] | None) -> bool:
-    if not isinstance(game_state, dict):
-        return False
-    settings = game_state.get("settings") or {}
-    return bool(settings.get("autoGustsEnabled"))
-
-
-def room_requires_live_loop(room: dict[str, Any] | None) -> bool:
-    if not isinstance(room, dict) or room.get("status") != "live":
-        return False
-    game_state = room.get("game_state")
-    return state_play_mode(game_state) == "realtime" or state_auto_gusts_enabled(game_state)
+_handlers_registered = False
 
 
 def normalize_control_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
@@ -87,32 +65,6 @@ def normalize_control_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
     return normalized
 
 
-def normalize_view_settings_payload(payload: dict[str, Any] | None) -> dict[str, bool]:
-    raw_settings = (payload or {}).get("settings")
-    if not isinstance(raw_settings, dict):
-        return {}
-
-    normalized: dict[str, bool] = {}
-    for key in ("showWindArrow", "showOptimal", "showBestStart", "showLaylines", "showTrails"):
-        if key in raw_settings:
-            normalized[key] = bool(raw_settings.get(key))
-    return normalized
-
-
-def apply_room_view_settings(room: dict[str, Any], view_settings: dict[str, bool]) -> bool:
-    changed = False
-    for state_key in ("start_state", "game_state"):
-        game_state = room.get(state_key)
-        if not isinstance(game_state, dict):
-            continue
-        settings = game_state.setdefault("settings", {})
-        for key, value in view_settings.items():
-            if settings.get(key) != value:
-                settings[key] = value
-                changed = True
-    return changed
-
-
 def set_realtime_control(room_code: str, seat_index: int, payload: dict[str, Any] | None) -> None:
     control = normalize_control_payload(payload)
     with _realtime_lock:
@@ -133,7 +85,7 @@ def pop_realtime_control(room_code: str, seat_index: int | None = None) -> None:
             _realtime_controls.pop(room_code, None)
 
 
-def realtime_controls_snapshot(room_code: str, now_ms: int) -> dict[int, dict[str, Any]]:
+def realtime_controls_snapshot(room_code: str) -> dict[int, dict[str, Any]]:
     with _realtime_lock:
         room_controls = _realtime_controls.get(room_code, {})
         return {seat_index: deepcopy(control) for seat_index, control in room_controls.items()}
@@ -157,13 +109,12 @@ def run_realtime_room_loop(app, room_code: str) -> None:
     try:
         while True:
             with app.app_context():
-                store = room_store()
-                room = store.get_room(room_code)
+                room = room_store().get_room(room_code)
                 if room is None:
                     break
 
                 now_ms = int(time.time() * 1000)
-                controls = realtime_controls_snapshot(room_code, now_ms)
+                controls = realtime_controls_snapshot(room_code)
                 changed = False
 
                 if room.get("status") == "lobby":
@@ -181,12 +132,8 @@ def run_realtime_room_loop(app, room_code: str) -> None:
                         changed = simulate_weather_tick(room["game_state"], now_ms)
                 if changed:
                     room["revision"] += 1
-                    store.save_room(room)
-                    socketio.emit(
-                        "room:state_updated",
-                        {"room": public_room_view(room, None)},
-                        to=room["code"],
-                    )
+                    room_store().save_room(room)
+                    broadcast_room_state(room)
             socketio.sleep(tick_dt)
     finally:
         with _realtime_lock:
@@ -194,138 +141,132 @@ def run_realtime_room_loop(app, room_code: str) -> None:
         pop_realtime_control(room_code)
 
 
-@socketio.on("room:join_socket")
-def on_room_join_socket(payload):
-    room_code = (payload or {}).get("room_code") or session.get("room_code")
-    player_token = session.get("player_token")
+def emit_room_error(message: str) -> None:
+    emit("room:error", {"error": message})
+
+
+def load_socket_room(payload: dict[str, Any] | None) -> tuple[dict[str, Any] | None, str | None]:
+    session_state = current_session_state()
+    room_code = (payload or {}).get("room_code") or session_state.room_code
     room = room_store().get_room(room_code)
-    if room is None or player_token is None:
-        emit("room:error", {"error": "Room session is not available."})
+    if room is None or session_state.player_token is None:
+        emit_room_error("Room session is not available.")
+        return None, None
+    return room, session_state.player_token
+
+
+def register_socket_handlers() -> None:
+    global _handlers_registered
+
+    if _handlers_registered:
         return
+    _handlers_registered = True
 
-    join_room(room["code"])
-    emit("room:snapshot", {"room": public_room_view(room, player_token)})
-    socketio.emit(
-        "room:presence",
-        {"room": public_room_view(room, None)},
-        to=room["code"],
-    )
-    if room_requires_live_loop(room):
-        ensure_realtime_room_loop(room["code"])
+    @socketio.on("room:join_socket")
+    def on_room_join_socket(payload: dict[str, Any] | None):
+        room, player_token = load_socket_room(payload)
+        if room is None or player_token is None:
+            return
 
+        join_room(room["code"])
+        emit("room:snapshot", serialize_room(room, player_token))
+        broadcast_room_presence(room)
+        if room_requires_live_loop(room):
+            ensure_realtime_room_loop(room["code"])
 
-@socketio.on("room:push_state")
-def on_room_push_state(payload):
-    room_code = (payload or {}).get("room_code") or session.get("room_code")
-    player_token = session.get("player_token")
-    room = room_store().get_room(room_code)
-    if room is None or player_token is None:
-        emit("room:error", {"error": "Room session is not available."})
-        return
+    @socketio.on("room:push_state")
+    def on_room_push_state(payload: dict[str, Any] | None):
+        room, player_token = load_socket_room(payload)
+        if room is None or player_token is None:
+            return
 
-    try:
-        game_state = validate_game_state(room, (payload or {}).get("state"))
-        actor = room_actor(room, player_token)
+        try:
+            game_state = validate_game_state(room, (payload or {}).get("state"))
+            actor = player_for_token(room, player_token)
 
-        if room["status"] == "lobby":
-            if room["host_token"] != player_token:
-                raise RoomForbidden("Only the host can edit the course before the start.")
-            room["start_state"] = deepcopy(game_state)
-            room["game_state"] = normalize_lobby_preview_state(game_state)
-        else:
-            if actor is None:
-                raise RoomForbidden("You are not part of this room.")
-            if state_play_mode(room.get("game_state")) == "realtime":
-                raise RoomForbidden("Realtime rooms use cursor controls instead of turn snapshots.")
-            current_player = (room.get("game_state", {}).get("race") or {}).get("currentPlayer")
-            if actor["seat_index"] != current_player:
-                raise RoomForbidden("It is not your turn.")
-            room["game_state"] = game_state
+            if room["status"] == "lobby":
+                if room["host_token"] != player_token:
+                    raise RoomForbidden("Only the host can edit the course before the start.")
+                room["start_state"] = deepcopy(game_state)
+                room["game_state"] = normalize_lobby_preview_state(game_state)
+            else:
+                if actor is None:
+                    raise RoomForbidden("You are not part of this room.")
+                if state_play_mode(room.get("game_state")) == "realtime":
+                    raise RoomForbidden("Realtime rooms use cursor controls instead of turn snapshots.")
+                current_player = (room.get("game_state", {}).get("race") or {}).get("currentPlayer")
+                if actor["seat_index"] != current_player:
+                    raise RoomForbidden("It is not your turn.")
+                room["game_state"] = game_state
 
-        room["revision"] += 1
-        room_store().save_room(room)
-    except RoomStoreError as exc:
-        emit("room:error", {"error": str(exc)})
-        return
+            room["revision"] += 1
+            room_store().save_room(room)
+        except RoomStoreError as exc:
+            emit_room_error(str(exc))
+            return
 
-    if room_requires_live_loop(room):
-        ensure_realtime_room_loop(room["code"])
-    socketio.emit(
-        "room:state_updated",
-        {"room": public_room_view(room, None)},
-        to=room["code"],
-    )
+        if room_requires_live_loop(room):
+            ensure_realtime_room_loop(room["code"])
+        broadcast_room_state(room)
 
+    @socketio.on("room:control")
+    def on_room_control(payload: dict[str, Any] | None):
+        room, player_token = load_socket_room(payload)
+        if room is None or player_token is None:
+            return
 
-@socketio.on("room:control")
-def on_room_control(payload):
-    room_code = (payload or {}).get("room_code") or session.get("room_code")
-    player_token = session.get("player_token")
-    room = room_store().get_room(room_code)
-    if room is None or player_token is None:
-        emit("room:error", {"error": "Room session is not available."})
-        return
+        actor = player_for_token(room, player_token)
+        if actor is None:
+            emit_room_error("You are not part of this room.")
+            return
+        if player_is_observer(actor) or not isinstance(actor.get("seat_index"), int):
+            return
+        if room.get("status") == "lobby":
+            set_realtime_control(room["code"], actor["seat_index"], payload)
+            ensure_realtime_room_loop(room["code"])
+            return
+        if room.get("status") != "live" or state_play_mode(room.get("game_state")) != "realtime":
+            return
 
-    actor = room_actor(room, player_token)
-    if actor is None:
-        emit("room:error", {"error": "You are not part of this room."})
-        return
-    if player_is_observer(actor) or not isinstance(actor.get("seat_index"), int):
-        return
-    if room.get("status") == "lobby":
         set_realtime_control(room["code"], actor["seat_index"], payload)
         ensure_realtime_room_loop(room["code"])
-        return
-    if room.get("status") != "live" or state_play_mode(room.get("game_state")) != "realtime":
-        return
 
-    set_realtime_control(room["code"], actor["seat_index"], payload)
-    ensure_realtime_room_loop(room["code"])
-
-
-@socketio.on("room:view_settings")
-def on_room_view_settings(payload):
-    room_code = (payload or {}).get("room_code") or session.get("room_code")
-    player_token = session.get("player_token")
-    room = room_store().get_room(room_code)
-    if room is None or player_token is None:
-        emit("room:error", {"error": "Room session is not available."})
-        return
-
-    try:
-        if room.get("host_token") != player_token:
-            raise RoomForbidden("Only the host can change shared room hints.")
-        view_settings = normalize_view_settings_payload(payload)
-        if not view_settings:
+    @socketio.on("room:view_settings")
+    def on_room_view_settings(payload: dict[str, Any] | None):
+        room, player_token = load_socket_room(payload)
+        if room is None or player_token is None:
             return
-        if not apply_room_view_settings(room, view_settings):
+
+        try:
+            if room.get("host_token") != player_token:
+                raise RoomForbidden("Only the host can change shared room hints.")
+            view_settings = normalize_view_settings_payload(payload)
+            if not view_settings:
+                return
+            if not apply_room_view_settings(room, view_settings):
+                return
+            room["revision"] += 1
+            room_store().save_room(room)
+        except RoomStoreError as exc:
+            emit_room_error(str(exc))
             return
-        room["revision"] += 1
-        room_store().save_room(room)
-    except RoomStoreError as exc:
-        emit("room:error", {"error": str(exc)})
-        return
 
-    socketio.emit(
-        "room:state_updated",
-        {"room": public_room_view(room, None)},
-        to=room["code"],
-    )
+        broadcast_room_state(room)
 
+    @socketio.on("disconnect")
+    def on_disconnect():
+        session_state = current_session_state()
+        if not session_state.room_code or not session_state.player_token:
+            return
 
-@socketio.on("disconnect")
-def on_disconnect():
-    room_code = session.get("room_code")
-    player_token = session.get("player_token")
-    if not room_code or not player_token:
-        return
-    room = room_store().get_room(room_code)
-    if room is None:
-        pop_realtime_control(room_code)
-        return
-    actor = room_actor(room, player_token)
-    if actor is None:
-        pop_realtime_control(room_code)
-        return
-    if isinstance(actor.get("seat_index"), int):
-        pop_realtime_control(room_code, actor["seat_index"])
+        room = room_store().get_room(session_state.room_code)
+        if room is None:
+            pop_realtime_control(session_state.room_code)
+            return
+
+        actor = player_for_token(room, session_state.player_token)
+        if actor is None:
+            pop_realtime_control(session_state.room_code)
+            return
+        if isinstance(actor.get("seat_index"), int):
+            pop_realtime_control(session_state.room_code, actor["seat_index"])
