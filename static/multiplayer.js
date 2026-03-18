@@ -9,6 +9,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const leaveRoomBtn = document.getElementById("leaveRoom");
   const startRoomBtn = document.getElementById("startRoom");
   const copyRoomCodeBtn = document.getElementById("copyRoomCode");
+  const roomHostRoleEl = document.getElementById("roomHostRole");
   const roomCodeValueEl = document.getElementById("roomCodeValue");
   const roomStatusEl = document.getElementById("roomStatus");
   const roomPlayersEl = document.getElementById("roomPlayers");
@@ -21,6 +22,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const appToastEl = document.getElementById("appToast");
   const playerCountSelect = document.getElementById("playerCount");
   const movesPerTurnInput = document.getElementById("movesPerTurn");
+  const sharedViewControlIds = ["toggleOptimal", "bestStart", "toggleLaylines", "toggleTrails", "toggleWindArrow"];
   const MIN_ROOM_PLAYERS = 2;
   const MAX_ROOM_PLAYERS = 20;
   const DEFAULT_ROOM_PANEL_NOTE = "Создание и вход в комнату находятся в главном меню. Здесь остаются только статус лобби, запуск гонки и состав экипажей.";
@@ -30,6 +32,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function setupLockedControls() {
     return Array.from(document.querySelectorAll("[data-room-lock='setup']"));
+  }
+
+  function sharedViewControls() {
+    return sharedViewControlIds
+      .map((id) => document.getElementById(id))
+      .filter(Boolean);
   }
 
   function originalDisabledFor(node) {
@@ -45,8 +53,11 @@ document.addEventListener("DOMContentLoaded", () => {
     applyingRemote: false,
     lastFingerprint: regatta.fingerprintState(),
     selfSeatIndex: null,
+    selfIsObserver: false,
     lastRealtimeIntentKey: "",
     lastRealtimeIntentSentAt: 0,
+    lastSharedViewKey: "",
+    lastSharedViewSentAt: 0,
     serverClockOffsetMs: 0,
   };
   const pendingRoomDraft = {
@@ -55,6 +66,7 @@ document.addEventListener("DOMContentLoaded", () => {
     maxPlayers: MIN_ROOM_PLAYERS,
     source: "map",
     mode: "edit",
+    hostRole: "player",
   };
   let toastTimer = 0;
   let roomStartPending = false;
@@ -64,6 +76,7 @@ document.addEventListener("DOMContentLoaded", () => {
       detail: {
         room: roomState.room,
         selfSeatIndex: roomState.selfSeatIndex,
+        selfIsObserver: roomState.selfIsObserver,
       },
     }));
   }
@@ -93,6 +106,7 @@ document.addEventListener("DOMContentLoaded", () => {
       ),
       source: draft.source === "race" ? "race" : "map",
       mode: draft.mode === "play" ? "play" : "edit",
+      hostRole: draft.host_role === "observer" ? "observer" : "player",
     };
   }
 
@@ -103,6 +117,7 @@ document.addEventListener("DOMContentLoaded", () => {
     pendingRoomDraft.maxPlayers = normalized?.maxPlayers || MIN_ROOM_PLAYERS;
     pendingRoomDraft.source = normalized?.source || "map";
     pendingRoomDraft.mode = normalized?.mode || "edit";
+    pendingRoomDraft.hostRole = normalized?.hostRole || "player";
     roomStartPending = false;
 
     if (pendingRoomDraft.active) {
@@ -111,6 +126,9 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       if (playerCountSelect) {
         playerCountSelect.value = String(pendingRoomDraft.maxPlayers);
+      }
+      if (roomHostRoleEl) {
+        roomHostRoleEl.value = pendingRoomDraft.hostRole;
       }
     }
 
@@ -124,6 +142,7 @@ document.addEventListener("DOMContentLoaded", () => {
     pendingRoomDraft.maxPlayers = MIN_ROOM_PLAYERS;
     pendingRoomDraft.source = "map";
     pendingRoomDraft.mode = "edit";
+    pendingRoomDraft.hostRole = roomHostRoleEl?.value === "observer" ? "observer" : "player";
     roomStartPending = false;
     if (!silent) {
       emitRoomDraftChanged();
@@ -142,18 +161,57 @@ document.addEventListener("DOMContentLoaded", () => {
     return displayNameInput?.value?.trim() || pendingRoomDraft.displayName || "";
   }
 
+  function pendingDraftHostRole() {
+    return roomHostRoleEl?.value === "observer" || pendingRoomDraft.hostRole === "observer"
+      ? "observer"
+      : "player";
+  }
+
+  function roomHumanCapacity(room) {
+    if (!room) return pendingDraftHostRole() === "observer" ? pendingDraftMaxPlayers() + 1 : pendingDraftMaxPlayers();
+    return Number.isInteger(room.capacity)
+      ? room.capacity
+      : room.max_players + (room.host_mode === "observe" ? 1 : 0);
+  }
+
+  function roomStartReady(room = roomState.room) {
+    return !!room?.start_ready;
+  }
+
+  function roomRacersJoined(room = roomState.room) {
+    if (!room) return 0;
+    return Number.isInteger(room.joined_racers_count)
+      ? room.joined_racers_count
+      : (room.players || []).filter((player) => !player.is_observer && Number.isInteger(player.seat_index)).length;
+  }
+
   function roomPlayer() {
-    if (!roomState.room || roomState.selfSeatIndex === null) return null;
-    return roomState.room.players?.find((player) => player.seat_index === roomState.selfSeatIndex) || null;
+    if (!roomState.room) return null;
+    return roomState.room.players?.find((player) => player.is_self) || null;
   }
 
   function isRoomHost() {
-    return !!roomPlayer()?.is_host;
+    return !!(roomPlayer()?.is_host || roomState.room?.is_host);
+  }
+
+  function isRoomObserver() {
+    return !!(roomPlayer()?.is_observer || roomState.selfIsObserver);
+  }
+
+  function isRoomRacer() {
+    const player = roomPlayer();
+    return !!(player && !player.is_observer && Number.isInteger(player.seat_index));
   }
 
   function isMyTurn() {
     const player = roomPlayer();
-    return !!(player && roomState.room && roomState.room.current_player === player.seat_index);
+    return !!(
+      player
+      && !player.is_observer
+      && roomState.room
+      && Number.isInteger(player.seat_index)
+      && roomState.room.current_player === player.seat_index
+    );
   }
 
   function roomPlayMode() {
@@ -224,22 +282,41 @@ document.addEventListener("DOMContentLoaded", () => {
     return isMyTurn();
   }
 
+  function canPushSharedViewSettings() {
+    return !!(
+      roomState.room
+      && roomState.socket
+      && roomState.socket.connected
+      && isRoomHost()
+      && !roomState.applyingRemote
+    );
+  }
+
   function canSendRealtimeControl() {
     return !!(
       roomState.room
       && roomState.socket
       && roomState.socket.connected
-      && isRealtimeRoom()
-      && roomRacePhase() !== "finished"
-      && roomPlayer()
+      && isRoomRacer()
+      && (roomState.room.status === "lobby" || (isRealtimeRoom() && roomRacePhase() !== "finished"))
       && !roomState.applyingRemote
     );
   }
 
   function canInteractWithBoard() {
     if (!roomState.room) return true;
-    if (roomState.room.status === "lobby") return isRoomHost();
-    if (isRealtimeRoom()) return !!roomPlayer();
+    if (roomState.room.status === "lobby") {
+      const racersJoined = roomRacersJoined(roomState.room);
+      const hostObserves = roomState.room.host_mode === "observe";
+      const occupancyLabel = hostObserves
+        ? `${racersJoined}/${roomState.room.max_players} экипажей · хост наблюдает`
+        : `${racersJoined}/${roomState.room.max_players} экипажей`;
+      if (!isRoomHost() && isRoomRacer() && (regatta.getMeta?.().mode || "play") !== "play") {
+        regatta.setMode?.("play");
+      }
+      return isRoomHost() || (isRoomRacer() && (regatta.getMeta?.().mode || "play") === "play");
+    }
+    if (isRealtimeRoom()) return isRoomRacer();
     return isMyTurn();
   }
 
@@ -256,7 +333,7 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    const roomReady = roomState.room.joined_count === roomState.room.max_players;
+    const roomReady = roomStartReady(roomState.room);
     const waitingStart = roomState.room.status === "lobby" || isPendingRealtimeStartRoom();
     regatta.setBoardStartActionOverride({
       label: waitingStart ? "Старт гонки" : "Начать гонку заново",
@@ -344,15 +421,22 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    const players = [...room.players].sort((left, right) => left.seat_index - right.seat_index);
+    const players = [...room.players].sort((left, right) => {
+      if (!!left.is_host !== !!right.is_host) return left.is_host ? -1 : 1;
+      if (!!left.is_observer !== !!right.is_observer) return left.is_observer ? -1 : 1;
+      const leftSeat = Number.isInteger(left.seat_index) ? left.seat_index : 10_000;
+      const rightSeat = Number.isInteger(right.seat_index) ? right.seat_index : 10_000;
+      return leftSeat - rightSeat;
+    });
     roomPlayersEl.innerHTML = players.map((player) => `
       <li class="room-player">
         <strong>
-          <span class="room-seat">${player.seat_index + 1}</span>
+          <span class="room-seat">${player.is_observer ? "S" : (player.seat_index + 1)}</span>
           <span>${player.name}</span>
         </strong>
         <span class="room-tags">
           ${player.is_host ? '<span class="room-tag room-tag-host">Host</span>' : ""}
+          ${player.is_observer ? '<span class="room-tag room-tag-observer">Наблюдает</span>' : ""}
           ${player.is_self ? '<span class="room-tag room-tag-self">Вы</span>' : ""}
         </span>
       </li>
@@ -367,15 +451,15 @@ document.addEventListener("DOMContentLoaded", () => {
       regatta.setServerClockOffset?.(roomState.serverClockOffsetMs);
     }
 
-    if (roomState.selfSeatIndex === null && Number.isInteger(room.self?.seat_index)) {
-      roomState.selfSeatIndex = room.self.seat_index;
-    }
+    roomState.selfSeatIndex = Number.isInteger(room.self?.seat_index) ? room.self.seat_index : null;
+    roomState.selfIsObserver = !!room.self?.is_observer;
 
     return {
       ...room,
       players: (room.players || []).map((player) => ({
         ...player,
-        is_self: roomState.selfSeatIndex !== null && player.seat_index === roomState.selfSeatIndex,
+        is_self: !!player.is_self,
+        is_observer: !!player.is_observer,
       })),
     };
   }
@@ -383,12 +467,23 @@ document.addEventListener("DOMContentLoaded", () => {
   function applyPermissions() {
     const pendingDraft = hasPendingRoomDraft();
     const setupDisabled = !canEditSetup();
+    const sharedViewDisabled = !!roomState.room && !isRoomHost();
     for (const control of setupLockedControls()) {
       const originalDisabled = originalDisabledFor(control);
       control.disabled = originalDisabled || setupDisabled;
     }
+    for (const control of sharedViewControls()) {
+      const originalDisabled = originalDisabledFor(control);
+      control.disabled = originalDisabled || sharedViewDisabled;
+    }
     if (movesPerTurnInput) {
       movesPerTurnInput.disabled = originalMovesPerTurnDisabled || !canEditTurnBudget();
+    }
+    if (roomHostRoleEl) {
+      roomHostRoleEl.disabled = !!roomState.room || roomStartPending;
+      roomHostRoleEl.value = roomState.room
+        ? (roomState.room.host_mode === "observe" ? "observer" : "player")
+        : pendingDraftHostRole();
     }
 
     createRoomBtn.disabled = !!roomState.room || pendingDraft;
@@ -398,7 +493,7 @@ document.addEventListener("DOMContentLoaded", () => {
     copyRoomCodeBtn.disabled = !roomState.room;
     startRoomBtn.disabled = roomStartPending || (
       roomState.room
-        ? (!isRoomHost() || roomState.room.joined_count !== roomState.room.max_players)
+        ? (!isRoomHost() || !roomStartReady(roomState.room))
         : !pendingDraft
     );
     if (startRoomBtn) {
@@ -427,6 +522,12 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     interactionLockEl.classList.remove("hidden");
+    if (roomState.room.status === "lobby") {
+      interactionLockEl.textContent = isRoomObserver()
+        ? "Ты в комнате как наблюдатель. Можно следить за полем и стартом, но лодка тебе не назначена."
+        : "Лобби открыто. Переключись в режим «В игру», чтобы пройтись по карте до старта.";
+      return;
+    }
     interactionLockEl.textContent = roomState.room.status === "lobby"
       ? "Хост настраивает дистанцию. Пока можно следить за полем и готовиться к старту."
       : isRealtimeRoom()
@@ -436,16 +537,26 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function renderRoom(room) {
     roomState.room = hydrateRoom(room);
-    regatta.setMultiplayerContext({ seatIndex: roomState.room ? roomState.selfSeatIndex : null });
+    regatta.setMultiplayerContext({
+      active: !!roomState.room,
+      seatIndex: roomState.room ? roomState.selfSeatIndex : null,
+      observer: !!roomState.selfIsObserver,
+      lobbyPreview: !!roomState.room && roomState.room.status === "lobby",
+    });
     renderRoster(roomState.room);
 
     if (!roomState.room) {
       const pendingDraft = hasPendingRoomDraft();
       roomState.serverClockOffsetMs = 0;
+      roomState.selfIsObserver = false;
       regatta.setServerClockOffset?.(0);
       roomCodeValueEl.textContent = "-";
       if (pendingDraft) {
         const pendingMaxPlayers = pendingDraftMaxPlayers();
+        const pendingRole = pendingDraftHostRole();
+        const pendingRoomStatus = pendingRole === "observer"
+          ? `Черновик комнаты · ${pendingMaxPlayers} экипажей + судья`
+          : `Черновик комнаты · ${pendingMaxPlayers} экипажей`;
         const sourceLabel = pendingRoomDraft.source === "race" ? "сохранённая гонка" : "карта";
         roomStatusEl.textContent = `Черновик комнаты · ${pendingMaxPlayers} мест`;
         roomPhaseLabelEl.textContent = "Подготовка комнаты";
@@ -466,6 +577,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
       }
       roomState.lastRealtimeIntentKey = "";
+      roomState.lastSharedViewKey = "";
       syncBoardStartAction();
       applyPermissions();
       emitRoomStateChanged();
@@ -478,6 +590,7 @@ document.addEventListener("DOMContentLoaded", () => {
       pendingRoomDraft.maxPlayers = MIN_ROOM_PLAYERS;
       pendingRoomDraft.source = "map";
       pendingRoomDraft.mode = "edit";
+      pendingRoomDraft.hostRole = roomHostRoleEl?.value === "observer" ? "observer" : "player";
       emitRoomDraftChanged();
     }
     if (roomPanelNoteEl) {
@@ -499,6 +612,18 @@ document.addEventListener("DOMContentLoaded", () => {
         isRoomHost()
           ? "Комната создана. Настраивай дистанцию и запускай матч, когда соберётся весь состав."
           : "Ты подключился к комнате. Хост готовит дистанцию и запустит матч после сбора экипажа.",
+        "success",
+      );
+      setHint(`Лобби открыто: ${occupancyLabel}. До старта можно пройтись по карте, а официальный старт вернёт всех на исходные позиции.`);
+      roomStatusEl.textContent = `Лобби · ${occupancyLabel}`;
+      setNotice(
+        isRoomHost()
+          ? (hostObserves
+            ? "Комната создана. Ты в роли наблюдателя: настрой дистанцию, дождись всех экипажей и только потом запускай старт."
+            : "Комната создана. Пока собирается состав, участники уже могут изучать карту, а ты запускаешь старт, когда все места заняты.")
+          : (isRoomObserver()
+            ? "Ты вошёл как наблюдатель. Можно смотреть поле и подготовку, но лодка тебе не назначена."
+            : "Ты вошёл в лобби. Переключись в режим «В игру» и можешь пройтись по карте до официального старта."),
         "success",
       );
     } else if (isRealtimeRoom()) {
@@ -617,6 +742,7 @@ document.addEventListener("DOMContentLoaded", () => {
           MIN_ROOM_PLAYERS,
           Math.min(MAX_ROOM_PLAYERS, parseInt(overrides.max_players, 10) || parseInt(playerCountSelect.value, 10) || MIN_ROOM_PLAYERS)
         ),
+        host_role: overrides.host_role === "observer" ? "observer" : pendingDraftHostRole(),
         game_state: overrides.game_state || regatta.exportState(),
       },
     });
@@ -627,6 +753,7 @@ document.addEventListener("DOMContentLoaded", () => {
     pendingRoomDraft.maxPlayers = MIN_ROOM_PLAYERS;
     pendingRoomDraft.source = "map";
     pendingRoomDraft.mode = "edit";
+    pendingRoomDraft.hostRole = roomHostRoleEl?.value === "observer" ? "observer" : "player";
     roomState.lastFingerprint = regatta.fingerprintState();
     renderRoom(payload.room);
     ensureSocket();
@@ -739,8 +866,10 @@ document.addEventListener("DOMContentLoaded", () => {
     disconnectSocket();
     roomState.room = null;
     roomState.selfSeatIndex = null;
+    roomState.selfIsObserver = false;
     roomState.lastFingerprint = regatta.fingerprintState();
     roomState.lastRealtimeIntentKey = "";
+    roomState.lastSharedViewKey = "";
     roomStartPending = false;
     renderRoom(null);
   }
@@ -810,6 +939,27 @@ document.addEventListener("DOMContentLoaded", () => {
     roomState.socket.emit("room:control", payload);
   }
 
+  async function trySendSharedViewSettings(force = false) {
+    if (!canPushSharedViewSettings()) return;
+
+    const settings = regatta.getSharedViewSettings?.();
+    if (!settings || typeof settings !== "object") return;
+
+    const payload = {
+      room_code: roomState.room.code,
+      settings,
+    };
+    const key = JSON.stringify(payload);
+    const now = Date.now();
+    if (!force && key === roomState.lastSharedViewKey && now - roomState.lastSharedViewSentAt < 250) {
+      return;
+    }
+
+    roomState.lastSharedViewKey = key;
+    roomState.lastSharedViewSentAt = now;
+    roomState.socket.emit("room:view_settings", payload);
+  }
+
   createRoomBtn.addEventListener("click", async () => {
     try {
       await createRoom();
@@ -844,6 +994,12 @@ document.addEventListener("DOMContentLoaded", () => {
     joinRoomCodeInput.value = joinRoomCodeInput.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6);
   });
 
+  roomHostRoleEl?.addEventListener("change", () => {
+    pendingRoomDraft.hostRole = roomHostRoleEl.value === "observer" ? "observer" : "player";
+    emitRoomDraftChanged();
+    renderRoom(roomState.room);
+  });
+
   setInterval(() => {
     void tryPushState();
   }, 350);
@@ -866,6 +1022,10 @@ document.addEventListener("DOMContentLoaded", () => {
     void trySendRealtimeControl(true);
   });
 
+  window.addEventListener("regatta:view-settings-changed", () => {
+    void trySendSharedViewSettings(true);
+  });
+
   window.RegattaMultiplayer = {
     createRoom,
     joinRoom,
@@ -885,6 +1045,7 @@ document.addEventListener("DOMContentLoaded", () => {
     getRoomState: () => ({
       room: roomState.room,
       selfSeatIndex: roomState.selfSeatIndex,
+      selfIsObserver: roomState.selfIsObserver,
       serverClockOffsetMs: roomState.serverClockOffsetMs,
     }),
   };

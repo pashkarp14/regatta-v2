@@ -72,6 +72,7 @@
   let luffingSpeedPercent = clamp(parseFloat(luffingSpeedInp?.value) || 25, 0, 80);
   let botDifficulty = normalizeBotDifficultyValue(botDifficultySelect?.value);
   let autoFullscreenMode = autoFullscreenModeSelect?.value === "race" ? "race" : "off";
+  let showWindArrow = true;
   let showLaylines = false;
   let showTrails = false;
   let boardStartActionOverride = null;

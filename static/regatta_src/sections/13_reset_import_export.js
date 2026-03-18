@@ -115,7 +115,7 @@
   }
 
   function isLocalRealtimeMode(){
-    return isRealtimePlayMode() && multiplayerSeatIndex === null;
+    return isRealtimePlayMode() && !isMultiplayerRoomActive();
   }
 
   function isRealtimeCountdown(){
@@ -197,10 +197,11 @@
   }
 
   function realtimeControlledBoatIndex(){
+    if (isMultiplayerObserver()) return null;
     if (isLocalBotsMode() && boats[LOCAL_HUMAN_SEAT]){
       return LOCAL_HUMAN_SEAT;
     }
-    if (multiplayerSeatIndex !== null) return multiplayerSeatIndex;
+    if (Number.isInteger(multiplayerSeatIndex)) return multiplayerSeatIndex;
     if (Number.isInteger(selectedBoatIndex)) return selectedBoatIndex;
     return boats.length ? 0 : null;
   }
@@ -270,7 +271,7 @@
   }
 
   function refreshRealtimeIntentFromPointer({ emit=false } = {}){
-    if (!realtimeCursorClient || mode !== "play" || !isRealtimePlayMode()) return;
+    if (!realtimeCursorClient || mode !== "play" || !isCursorSteeringMode()) return;
     const boatIdx = realtimeControlledBoatIndex();
     if (!Number.isInteger(boatIdx) || !boats[boatIdx] || boats[boatIdx].finished || phase === "finished"){
       return;
@@ -325,6 +326,7 @@
 
   function canSelectBoatForPlay(boatIdx){
     if (!Number.isInteger(boatIdx)) return false;
+    if (isMultiplayerObserver()) return false;
     if (!canBoatMoveNow(boatIdx)) return false;
     if (isLocalBotsMode()) {
       if (isRealtimePlayMode()) return boatIdx === LOCAL_HUMAN_SEAT;
@@ -498,6 +500,11 @@
         autoGustDurationSec,
         realtimePrepSeconds,
         autoFullscreenMode,
+        showWindArrow,
+        showOptimal,
+        showBestStart,
+        showLaylines,
+        showTrails,
         finishSeparate,
         prestartRoundsSetting
       },
@@ -520,7 +527,8 @@
         gustExpiresAt,
         nextAutoGustAt,
         prestartRoundsLeft,
-        phase
+        phase,
+        isLobbyPreview: false
       },
       boats: boats.map((boat) => ({
         x: boat.x,
@@ -631,6 +639,7 @@
   function importGameState(snapshot){
     if (!snapshot || typeof snapshot !== "object") return;
     clearRealtimeBotDecisionCache();
+    const previousPhase = phase;
 
     const world = snapshot.world || {};
     const settings = snapshot.settings || {};
@@ -687,6 +696,13 @@
     turnRateDegPerSec = clamp(parseFloat(settings.turnRateDegPerSec) || turnRateDegPerSec, 30, 360);
     autoFullscreenMode = settings.autoFullscreenMode === "race" ? "race" : "off";
     prestartRoundsSetting = Math.max(0, parseInt(settings.prestartRoundsSetting,10) || 0);
+    const importedViewSettings = {
+      showWindArrow: settings.showWindArrow,
+      showOptimal: settings.showOptimal,
+      showBestStart: settings.showBestStart,
+      showLaylines: settings.showLaylines,
+      showTrails: settings.showTrails,
+    };
 
     deadZoneInp.value = String(deadZoneDeg);
     snapThresholdInp.value = String(snapThreshold);
@@ -724,6 +740,8 @@
     phase = (race.phase === "prestart" || race.phase === "countdown" || race.phase === "finished")
       ? race.phase
       : "race";
+    const lobbyPreviewState = !!race.isLobbyPreview;
+    const enteringOfficialRace = (previousPhase !== "race" || multiplayerLobbyPreview) && phase === "race" && !lobbyPreviewState;
     prestartRoundsLeft = (phase === "prestart")
       ? Math.max(0, parseInt(race.prestartRoundsLeft,10) || prestartRoundsSetting)
       : 0;
@@ -747,7 +765,13 @@
     if (autoGustsEnabled && !gustRect && nextAutoGustAt === 0){
       scheduleNextAutoGust(currentRaceTimeMs());
     }
-    const resetTrails = previousTrails.length !== boats.length || phase === "countdown" || phase === "prestart";
+    const resetTrails = (
+      previousTrails.length !== boats.length
+      || phase === "countdown"
+      || phase === "prestart"
+      || lobbyPreviewState
+      || enteringOfficialRace
+    );
     boatTrails = boats.map((boat, index) => {
       const trail = resetTrails
         ? []
@@ -758,18 +782,15 @@
         trail.push({ x: boat.x, y: boat.y });
       } else {
         const last = trail[trail.length - 1];
-        if (!last || !Number.isFinite(last.x) || !Number.isFinite(last.y) || dist(last, boat) >= 0.18){
+        if (!last || !Number.isFinite(last.x) || !Number.isFinite(last.y)){
           trail.push({ x: boat.x, y: boat.y });
-        } else {
-          last.x = boat.x;
-          last.y = boat.y;
+        } else if (dist(last, boat) >= BOAT_TRAIL_MIN_POINT_DISTANCE){
+          trail.push({ x: boat.x, y: boat.y });
         }
       }
-      if (trail.length > 600){
-        trail.splice(0, trail.length - 600);
-      }
-      return trail;
+      return trimBoatTrail(trail);
     });
+    applySharedViewSettings(importedViewSettings, { renderView:false });
 
     selectedBoatIndex = (isLocalBotsMode() && boats[LOCAL_HUMAN_SEAT]) ? LOCAL_HUMAN_SEAT : null;
     placementSelectedBoat = null;
@@ -778,7 +799,7 @@
     localRealtimeLastTickAt = 0;
     clearBotTurnTimer();
     botTurnInProgress = false;
-    if (!isRealtimePlayMode()){
+    if (!isCursorSteeringMode()){
       realtimeCursorTarget = null;
       realtimeCursorDirection = null;
       realtimeCursorClient = null;

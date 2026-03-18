@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from copy import deepcopy
 
 from flask import Blueprint, current_app, jsonify, render_template, request, session
 
@@ -10,6 +11,8 @@ from .room_store import (
     RoomNotFound,
     RoomStoreError,
     RoomValidationError,
+    normalize_host_role,
+    room_start_ready,
     normalize_name,
     normalize_room_code,
     player_for_token,
@@ -115,6 +118,7 @@ def normalize_room_start_state(game_state: dict, *, arm_realtime: bool = True) -
     else:
         race.pop("realtimeCountdownEndsAt", None)
 
+    race["isLobbyPreview"] = False
     race.setdefault("gustExpiresAt", 0)
     race.setdefault("nextAutoGustAt", 0)
 
@@ -246,11 +250,17 @@ def create_room():
     payload = json_payload()
     game_state = payload.get("game_state")
     max_players = int(payload.get("max_players", 0))
+    host_role = normalize_host_role(payload.get("host_role"))
     display_name = normalize_name(payload.get("display_name") or session.get("display_name"))
 
     try:
         leave_existing_room()
-        room, player_token = room_store().create_room(display_name, max_players, game_state)
+        room, player_token = room_store().create_room(
+            display_name,
+            max_players,
+            game_state,
+            host_role=host_role,
+        )
     except RoomStoreError as exc:
         return error_response(exc)
 
@@ -303,14 +313,15 @@ def start_room(room_code: str):
         return error_response(RoomNotFound("Room not found."))
     if room["host_token"] != player_token:
         return error_response(RoomForbidden("Only the room host can start the match."))
-    if len(room["players"]) != room["max_players"]:
-        return error_response(RoomValidationError("Wait until every player has joined."))
+    if not room_start_ready(room):
+        return error_response(RoomValidationError("Wait until every racing seat is occupied."))
 
     payload = json_payload()
     arm_realtime = bool(payload.get("arm_realtime", True))
     try:
+        start_snapshot = deepcopy(room.get("start_state") or room.get("game_state"))
         room["game_state"] = normalize_room_start_state(
-            validate_game_state(room, payload.get("game_state")),
+            validate_game_state(room, start_snapshot),
             arm_realtime=arm_realtime,
         )
     except RoomStoreError as exc:

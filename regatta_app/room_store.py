@@ -74,8 +74,108 @@ def player_for_token(room: dict[str, Any], player_token: str | None) -> dict[str
     return None
 
 
+def player_is_observer(player: dict[str, Any] | None) -> bool:
+    return bool((player or {}).get("is_observer"))
+
+
+def normalize_host_role(raw_role: str | None) -> str:
+    return "observer" if raw_role == "observer" else "player"
+
+
+def room_host_player(room: dict[str, Any]) -> dict[str, Any] | None:
+    return player_for_token(room, room.get("host_token"))
+
+
+def room_racer_slot_count(room: dict[str, Any]) -> int:
+    return int(room.get("max_players") or 0)
+
+
+def room_joined_racer_count(room: dict[str, Any]) -> int:
+    return sum(
+        1
+        for player in room.get("players", [])
+        if not player_is_observer(player) and isinstance(player.get("seat_index"), int)
+    )
+
+
+def room_total_capacity(room: dict[str, Any]) -> int:
+    host_player = room_host_player(room)
+    return room_racer_slot_count(room) + (1 if player_is_observer(host_player) else 0)
+
+
+def room_start_ready(room: dict[str, Any]) -> bool:
+    return room_joined_racer_count(room) == room_racer_slot_count(room)
+
+
+def next_open_seat(room: dict[str, Any]) -> int | None:
+    used_seats = {
+        player.get("seat_index")
+        for player in room.get("players", [])
+        if isinstance(player.get("seat_index"), int)
+    }
+    for seat_index in range(room_racer_slot_count(room)):
+        if seat_index not in used_seats:
+            return seat_index
+    return None
+
+
+def normalize_lobby_preview_state(game_state: Any) -> dict[str, Any]:
+    if not isinstance(game_state, dict):
+        raise RoomValidationError("Game state must be a JSON object.")
+
+    preview_state = deepcopy(game_state)
+    settings = preview_state.setdefault("settings", {})
+    race = preview_state.setdefault("race", {})
+    boats = list(preview_state.get("boats") or [])
+    preview_state["boats"] = boats
+
+    for boat in boats:
+        if not isinstance(boat, dict):
+            continue
+        boat.setdefault("distance", 0)
+        boat.setdefault("turns", 0)
+        boat.setdefault("penalties", 0)
+        boat.setdefault("collisions", 0)
+        boat.setdefault("nextMark", 0)
+        boat.setdefault("finished", False)
+        boat.setdefault("place", None)
+        boat.setdefault("hasHeading", False)
+        boat.setdefault("heading", 0)
+        boat.setdefault("tack", 0)
+        boat.setdefault("speedCoeff", 1.0)
+        boat["currentSpeedUnitsPerSec"] = 0.0
+        boat["penaltySlowUntil"] = 0
+        boat["lastPenaltyAt"] = 0
+        boat["lastPenaltyKey"] = ""
+        boat["lastPenaltyReason"] = ""
+        boat.setdefault("roundInZone", False)
+        boat.setdefault("roundSweep", 0.0)
+        boat["startDeltaMs"] = None
+        boat["falseStartDeltaMs"] = None
+
+    race["phase"] = "race"
+    race["realtimeCountdownEndsAt"] = 0
+    race["isLobbyPreview"] = True
+    race["subMovesLeft"] = 0
+    race["prestartRoundsLeft"] = 0
+    race["raceFinishedCount"] = int(race.get("raceFinishedCount") or sum(1 for boat in boats if boat.get("finished")))
+    current_player = race.get("currentPlayer")
+    if not isinstance(current_player, int) or not (0 <= current_player < len(boats)):
+        race["currentPlayer"] = next((idx for idx, boat in enumerate(boats) if not boat.get("finished")), 0)
+
+    if settings.get("playMode") in {"hybrid"}:
+        settings["playMode"] = "turns"
+        race.pop("hybridRound", None)
+        race.pop("hybridMovesLeft", None)
+
+    race.setdefault("gustExpiresAt", 0)
+    race.setdefault("nextAutoGustAt", 0)
+    return preview_state
+
+
 def public_room_view(room: dict[str, Any], player_token: str | None) -> dict[str, Any]:
     viewer = player_for_token(room, player_token)
+    host_player = room_host_player(room)
     game_state = room.get("game_state")
     current_player = None
     play_mode = "turns"
@@ -89,9 +189,13 @@ def public_room_view(room: dict[str, Any], player_token: str | None) -> dict[str
         "server_time_ms": now_ms(),
         "max_players": room["max_players"],
         "joined_count": len(room["players"]),
+        "joined_racers_count": room_joined_racer_count(room),
+        "capacity": room_total_capacity(room),
+        "start_ready": room_start_ready(room),
         "revision": room["revision"],
         "current_player": current_player,
         "play_mode": "realtime" if play_mode in {"realtime", "hybrid"} else "turns",
+        "host_mode": "observe" if player_is_observer(host_player) else "play",
         "is_host": room.get("host_token") == player_token,
         "players": [
             {
@@ -99,6 +203,7 @@ def public_room_view(room: dict[str, Any], player_token: str | None) -> dict[str
                 "seat_index": player["seat_index"],
                 "is_host": player["token"] == room.get("host_token"),
                 "is_self": player["token"] == player_token,
+                "is_observer": player_is_observer(player),
             }
             for player in room["players"]
         ],
@@ -106,6 +211,7 @@ def public_room_view(room: dict[str, Any], player_token: str | None) -> dict[str
         "self": {
             "name": viewer["name"] if viewer else None,
             "seat_index": viewer["seat_index"] if viewer else None,
+            "is_observer": player_is_observer(viewer),
             "token_present": viewer is not None,
         },
     }
@@ -196,7 +302,14 @@ class RoomStore:
         with self._lock:
             self._memory_rooms.pop(room_code, None)
 
-    def create_room(self, host_name: str, max_players: int, game_state: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    def create_room(
+        self,
+        host_name: str,
+        max_players: int,
+        game_state: dict[str, Any],
+        *,
+        host_role: str = "player",
+    ) -> tuple[dict[str, Any], str]:
         if not isinstance(max_players, int) or not (MIN_ROOM_PLAYERS <= max_players <= MAX_ROOM_PLAYERS):
             raise RoomValidationError(
                 f"Room size must be between {MIN_ROOM_PLAYERS} and {MAX_ROOM_PLAYERS} players."
@@ -210,6 +323,7 @@ class RoomStore:
             raise RoomValidationError("Unable to generate a room code. Try again.")
 
         player_token = make_player_token()
+        host_is_observer = normalize_host_role(host_role) == "observer"
         room = {
             "code": room_code,
             "status": "lobby",
@@ -222,13 +336,16 @@ class RoomStore:
                 {
                     "token": player_token,
                     "name": normalize_name(host_name),
-                    "seat_index": 0,
+                    "seat_index": None if host_is_observer else 0,
+                    "is_observer": host_is_observer,
                     "joined_at": now_ts(),
                 }
             ],
+            "start_state": None,
             "game_state": None,
         }
-        room["game_state"] = validate_game_state(room, game_state)
+        room["start_state"] = validate_game_state(room, deepcopy(game_state))
+        room["game_state"] = normalize_lobby_preview_state(room["start_state"])
         self.save_room(room)
         return room, player_token
 
@@ -244,17 +361,19 @@ class RoomStore:
         if room["status"] != "lobby":
             raise RoomForbidden("The match is already running.")
 
-        if len(room["players"]) >= room["max_players"]:
+        if len(room["players"]) >= room_total_capacity(room):
             raise RoomFull("Room is already full.")
 
-        used_seats = {player["seat_index"] for player in room["players"]}
-        seat_index = next(seat for seat in range(room["max_players"]) if seat not in used_seats)
+        seat_index = next_open_seat(room)
+        if seat_index is None:
+            raise RoomFull("Every racing seat is already occupied.")
         new_token = make_player_token()
         room["players"].append(
             {
                 "token": new_token,
                 "name": normalize_name(player_name),
                 "seat_index": seat_index,
+                "is_observer": False,
                 "joined_at": now_ts(),
             }
         )
@@ -277,6 +396,13 @@ class RoomStore:
 
         room["players"] = remaining
         if room["host_token"] == player_token:
-            room["host_token"] = min(remaining, key=lambda item: item["seat_index"])["token"]
+            room["host_token"] = min(
+                remaining,
+                key=lambda item: (
+                    player_is_observer(item),
+                    item["seat_index"] if isinstance(item.get("seat_index"), int) else 10_000,
+                    item.get("joined_at") or 0,
+                ),
+            )["token"]
         room["revision"] += 1
         return self.save_room(room)

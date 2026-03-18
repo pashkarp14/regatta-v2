@@ -2,7 +2,7 @@
   // Клики по canvas
   // -----------------------------
   function updateRealtimeIntentFromClient(clientX, clientY){
-    if (mode !== "play" || !isRealtimePlayMode()) return;
+    if (mode !== "play" || !isCursorSteeringMode()) return;
     if (isLocalRealtimePaused()){
       resetRealtimePointer();
       render();
@@ -49,7 +49,7 @@
   }, { passive:false });
 
   canvas.addEventListener("pointerdown", (e) => {
-    if (mode !== "play" || !isRealtimePlayMode()) return;
+    if (mode !== "play" || !isCursorSteeringMode()) return;
     if (isLocalRealtimePaused()){
       e.preventDefault();
       return;
@@ -77,7 +77,7 @@
   });
 
   canvas.addEventListener("pointermove", (e) => {
-    if (mode !== "play" || !isRealtimePlayMode()) return;
+    if (mode !== "play" || !isCursorSteeringMode()) return;
     if (e.pointerType === "mouse" || activeRealtimePointerId === e.pointerId){
       updateRealtimeIntentFromClient(e.clientX, e.clientY);
       render();
@@ -85,7 +85,7 @@
   });
 
   canvas.addEventListener("pointerup", (e) => {
-    if (!isRealtimePlayMode()) return;
+    if (!isCursorSteeringMode()) return;
     if (e.pointerType !== "mouse"){
       resetRealtimePointer(e.pointerId);
       render();
@@ -93,19 +93,19 @@
   });
 
   canvas.addEventListener("pointercancel", (e) => {
-    if (!isRealtimePlayMode()) return;
+    if (!isCursorSteeringMode()) return;
     resetRealtimePointer(e.pointerId);
     render();
   });
 
   canvas.addEventListener("mouseleave", () => {
-    if (!isRealtimePlayMode()) return;
+    if (!isCursorSteeringMode()) return;
     resetRealtimePointer();
     render();
   });
 
   canvas.addEventListener("click", (e) => {
-    if (mode === "play" && isRealtimePlayMode()) return;
+    if (mode === "play" && isCursorSteeringMode()) return;
     const p = screenToWorld(e.clientX, e.clientY);
     if (!p) return;
 

@@ -324,10 +324,9 @@
     const line = { x:startB.x-startA.x, y:startB.y-startA.y };
     const len = Math.hypot(line.x,line.y) || 1;
     const ux = line.x/len, uy = line.y/len;
+    const baseBoatIndex = sharedViewTargetBoatIndex();
     const baseBoat = boats[
-      Number.isInteger(selectedBoatIndex)
-        ? selectedBoatIndex
-        : (Number.isInteger(multiplayerSeatIndex) ? multiplayerSeatIndex : 0)
+      Number.isInteger(baseBoatIndex) ? baseBoatIndex : 0
     ] || boats[0] || null;
 
     const n = clamp(Math.round(len / 1.2), 8, 16);

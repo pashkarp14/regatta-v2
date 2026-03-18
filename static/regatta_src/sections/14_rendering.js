@@ -9,6 +9,7 @@
   }
 
   function drawWindArrow(){
+    if (!showWindArrow) return;
     const base = worldToScreen({ x: worldW/2, y: worldH - 0.6 });
     const len = 55;
     const windFrom = windFromVec();
@@ -590,7 +591,7 @@
   }
 
   function drawRealtimeHudPanel(){
-    if (!isRealtimePlayMode() || mode !== "play") return;
+    if (!isCursorSteeringMode() || mode !== "play") return;
 
     const boatIdx = realtimeControlledBoatIndex();
     const boat = Number.isInteger(boatIdx) ? boats[boatIdx] : null;

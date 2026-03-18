@@ -100,6 +100,14 @@
               </div>
             </div>
 
+            <label class="control wide-control">
+              <span>Роль хоста</span>
+              <select id="roomHostRole">
+                <option value="player">Хост участвует в гонке</option>
+                <option value="observer">Хост наблюдает и следит за стартом</option>
+              </select>
+            </label>
+
             <div class="action-row">
               <button type="button" id="startRoom" class="action-primary">Запустить матч</button>
               <button type="button" id="leaveRoom" class="action-secondary">Выйти</button>
@@ -347,6 +355,7 @@
           <div class="action-row wrap-row">
             <button type="button" id="windLeft" class="action-secondary" data-room-lock="setup">Ветер −5°</button>
             <button type="button" id="windRight" class="action-secondary" data-room-lock="setup">Ветер +5°</button>
+            <button type="button" id="toggleWindArrow" class="action-secondary">Скрыть стрелку ветра</button>
             <button type="button" id="randomGust" class="action-secondary" data-room-lock="setup">Случайный порыв</button>
             <button type="button" id="clearGust" class="action-secondary" data-room-lock="setup">Убрать порыв</button>
           </div>

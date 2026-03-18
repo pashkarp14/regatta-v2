@@ -576,6 +576,11 @@ body.menu-open .app-shell{
   color:#baf0ea;
 }
 
+.room-tag-observer{
+  background:rgba(180, 205, 255, 0.16);
+  color:#d2e2ff;
+}
+
 .boat-tuning-grid{
   display:grid;
   grid-template-columns:repeat(2, minmax(0, 1fr));

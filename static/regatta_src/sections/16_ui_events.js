@@ -273,24 +273,7 @@
 
   btnOptimal.addEventListener("click", () => {
     if (mode !== "play") setMode("play");
-    const targetBoat = (isHybridRaceMode() && multiplayerSeatIndex !== null)
-      ? multiplayerSeatIndex
-      : currentPlayer;
-
-    if (showOptimal && optimalForBoat === targetBoat){
-      showOptimal = false;
-      optimalPath = [];
-      optimalStats = null;
-      optimalForBoat = null;
-      updateOptInfo();
-      render();
-      return;
-    }
-
-    computeOptimalForBoat(targetBoat);
-    showOptimal = true;
-    updateOptInfo();
-    render();
+    applySharedViewSettings({ showOptimal: !showOptimal }, { emit:true });
   });
 
   realtimePrepInp?.addEventListener("change", () => {
@@ -306,32 +289,19 @@
   });
 
   btnBestStart.addEventListener("click", () => {
-    if (showBestStart){
-      showBestStart = false;
-      bestStartSolution = null;
-      updateOptInfo();
-      render();
-      return;
-    }
-    computeBestStart();
-    showBestStart = true;
-    updateOptInfo();
-    render();
+    applySharedViewSettings({ showBestStart: !showBestStart }, { emit:true });
   });
 
   btnLaylines?.addEventListener("click", () => {
-    showLaylines = !showLaylines;
-    updateViewButtons();
-    render();
+    applySharedViewSettings({ showLaylines: !showLaylines }, { emit:true });
   });
 
   btnTrails?.addEventListener("click", () => {
-    showTrails = !showTrails;
-    if (showTrails && (!boatTrails.length || boatTrails.length !== boats.length)){
-      resetBoatTrails();
-    }
-    updateViewButtons();
-    render();
+    applySharedViewSettings({ showTrails: !showTrails }, { emit:true });
+  });
+
+  btnWindArrow?.addEventListener("click", () => {
+    applySharedViewSettings({ showWindArrow: !showWindArrow }, { emit:true });
   });
 
   btnFullscreen?.addEventListener("click", async () => {
@@ -411,7 +381,21 @@
         realtimeCountdownEndsAt,
         realtimePaused: isLocalRealtimePaused(),
       },
+      view: sharedViewSettingsSnapshot(),
       boats: boats.map((boat, index) => ({
+        trailPoints: Array.isArray(boatTrails[index]) ? boatTrails[index].length : 0,
+        trailStart: Array.isArray(boatTrails[index]) && boatTrails[index][0]
+          ? {
+              x: Number(boatTrails[index][0].x.toFixed(3)),
+              y: Number(boatTrails[index][0].y.toFixed(3)),
+            }
+          : null,
+        trailEnd: Array.isArray(boatTrails[index]) && boatTrails[index][boatTrails[index].length - 1]
+          ? {
+              x: Number(boatTrails[index][boatTrails[index].length - 1].x.toFixed(3)),
+              y: Number(boatTrails[index][boatTrails[index].length - 1].y.toFixed(3)),
+            }
+          : null,
         index,
         x: Number(boat.x.toFixed(3)),
         y: Number(boat.y.toFixed(3)),
@@ -510,13 +494,19 @@
     setServerClockOffset,
     setBoardStartActionOverride,
     triggerBoardStartAction,
-    setMultiplayerContext: ({ seatIndex=null } = {}) => {
-      multiplayerSeatIndex = Number.isInteger(seatIndex) ? seatIndex : null;
+    setMultiplayerContext: ({ active=false, seatIndex=null, observer=false, lobbyPreview=false } = {}) => {
+      multiplayerSessionActive = !!active;
+      multiplayerSeatIndex = multiplayerSessionActive && Number.isInteger(seatIndex) ? seatIndex : null;
+      multiplayerObserverMode = multiplayerSessionActive && !!observer;
+      multiplayerLobbyPreview = multiplayerSessionActive && !!lobbyPreview;
       localRealtimeLastTickAt = 0;
       if (!isLocalRealtimeMode()){
         resetLocalRealtimePauseState();
       }
       clearBotTurnTimer();
+      if (multiplayerObserverMode){
+        selectedBoatIndex = null;
+      }
       const candidateBoat = Number.isInteger(selectedBoatIndex) ? selectedBoatIndex : multiplayerSeatIndex;
       if (multiplayerSeatIndex !== null && isHybridRaceMode() && !canSelectBoatForPlay(candidateBoat)){
         selectedBoatIndex = null;
@@ -524,12 +514,13 @@
       if (multiplayerSeatIndex === null && isLocalBotsMode()){
         selectedBoatIndex = LOCAL_HUMAN_SEAT;
       }
-      if (isRealtimePlayMode() && !Number.isInteger(realtimeControlledBoatIndex())){
+      if (isCursorSteeringMode() && !Number.isInteger(realtimeControlledBoatIndex())){
         clearRealtimeIntent();
       }
       if (isLocalRealtimeMode() && phase === "race" && boats.every((boat) => !boat.hasHeading && !boat.finished)){
         setRealtimeReadyState();
       }
+      refreshSharedViewSolutions();
       updateResetButtonLabel();
       updateStatus();
       updateStats();
@@ -537,7 +528,7 @@
       scheduleLocalBotTurn();
     },
     getRealtimeIntent: () => {
-      if (!isRealtimePlayMode()) return null;
+      if (!isCursorSteeringMode()) return null;
       refreshRealtimeIntentFromPointer({ emit:false });
       const boatIdx = realtimeControlledBoatIndex();
       if (!Number.isInteger(boatIdx) || !boats[boatIdx] || boats[boatIdx].finished) return null;
@@ -564,7 +555,9 @@
       markCount,
       localPilotMode,
       botDifficulty
-    })
+    }),
+    getSharedViewSettings: sharedViewSettingsSnapshot,
+    setSharedViewSettings: (settings, options={}) => applySharedViewSettings(settings, options),
   };
 
   setInterval(() => {

@@ -54,6 +54,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const btnWindLeft  = document.getElementById("windLeft");
   const btnWindRight = document.getElementById("windRight");
+  const btnWindArrow = document.getElementById("toggleWindArrow");
   const btnGust      = document.getElementById("randomGust");
   const btnClearGust = document.getElementById("clearGust");
   const btnReset     = document.getElementById("resetGame");

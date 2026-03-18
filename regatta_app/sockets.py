@@ -10,7 +10,14 @@ from flask_socketio import emit, join_room
 
 from .extensions import socketio
 from .realtime_engine import simulate_realtime_tick, simulate_weather_tick
-from .room_store import RoomForbidden, RoomStoreError, public_room_view, validate_game_state
+from .room_store import (
+    RoomForbidden,
+    RoomStoreError,
+    normalize_lobby_preview_state,
+    player_is_observer,
+    public_room_view,
+    validate_game_state,
+)
 
 
 REALTIME_TICK_HZ = 12
@@ -80,6 +87,32 @@ def normalize_control_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
     return normalized
 
 
+def normalize_view_settings_payload(payload: dict[str, Any] | None) -> dict[str, bool]:
+    raw_settings = (payload or {}).get("settings")
+    if not isinstance(raw_settings, dict):
+        return {}
+
+    normalized: dict[str, bool] = {}
+    for key in ("showWindArrow", "showOptimal", "showBestStart", "showLaylines", "showTrails"):
+        if key in raw_settings:
+            normalized[key] = bool(raw_settings.get(key))
+    return normalized
+
+
+def apply_room_view_settings(room: dict[str, Any], view_settings: dict[str, bool]) -> bool:
+    changed = False
+    for state_key in ("start_state", "game_state"):
+        game_state = room.get(state_key)
+        if not isinstance(game_state, dict):
+            continue
+        settings = game_state.setdefault("settings", {})
+        for key, value in view_settings.items():
+            if settings.get(key) != value:
+                settings[key] = value
+                changed = True
+    return changed
+
+
 def set_realtime_control(room_code: str, seat_index: int, payload: dict[str, Any] | None) -> None:
     control = normalize_control_payload(payload)
     with _realtime_lock:
@@ -106,6 +139,10 @@ def realtime_controls_snapshot(room_code: str, now_ms: int) -> dict[int, dict[st
         return {seat_index: deepcopy(control) for seat_index, control in room_controls.items()}
 
 
+def any_active_control(controls: dict[int, dict[str, Any]]) -> bool:
+    return any(control.get("active") for control in controls.values())
+
+
 def ensure_realtime_room_loop(room_code: str) -> None:
     app = current_app._get_current_object()
     with _realtime_lock:
@@ -122,17 +159,26 @@ def run_realtime_room_loop(app, room_code: str) -> None:
             with app.app_context():
                 store = room_store()
                 room = store.get_room(room_code)
-                if room is None or not room_requires_live_loop(room):
-                    break
-                if ((room.get("game_state", {}).get("race") or {}).get("phase")) == "finished":
+                if room is None:
                     break
 
                 now_ms = int(time.time() * 1000)
-                if state_play_mode(room.get("game_state")) == "realtime":
-                    controls = realtime_controls_snapshot(room_code, now_ms)
+                controls = realtime_controls_snapshot(room_code, now_ms)
+                changed = False
+
+                if room.get("status") == "lobby":
+                    if not any_active_control(controls):
+                        break
                     changed = simulate_realtime_tick(room["game_state"], controls, tick_dt, now_ms)
                 else:
-                    changed = simulate_weather_tick(room["game_state"], now_ms)
+                    if not room_requires_live_loop(room):
+                        break
+                    if ((room.get("game_state", {}).get("race") or {}).get("phase")) == "finished":
+                        break
+                    if state_play_mode(room.get("game_state")) == "realtime":
+                        changed = simulate_realtime_tick(room["game_state"], controls, tick_dt, now_ms)
+                    else:
+                        changed = simulate_weather_tick(room["game_state"], now_ms)
                 if changed:
                     room["revision"] += 1
                     store.save_room(room)
@@ -184,7 +230,8 @@ def on_room_push_state(payload):
         if room["status"] == "lobby":
             if room["host_token"] != player_token:
                 raise RoomForbidden("Only the host can edit the course before the start.")
-            room["game_state"] = game_state
+            room["start_state"] = deepcopy(game_state)
+            room["game_state"] = normalize_lobby_preview_state(game_state)
         else:
             if actor is None:
                 raise RoomForbidden("You are not part of this room.")
@@ -223,11 +270,47 @@ def on_room_control(payload):
     if actor is None:
         emit("room:error", {"error": "You are not part of this room."})
         return
+    if player_is_observer(actor) or not isinstance(actor.get("seat_index"), int):
+        return
+    if room.get("status") == "lobby":
+        set_realtime_control(room["code"], actor["seat_index"], payload)
+        ensure_realtime_room_loop(room["code"])
+        return
     if room.get("status") != "live" or state_play_mode(room.get("game_state")) != "realtime":
         return
 
     set_realtime_control(room["code"], actor["seat_index"], payload)
     ensure_realtime_room_loop(room["code"])
+
+
+@socketio.on("room:view_settings")
+def on_room_view_settings(payload):
+    room_code = (payload or {}).get("room_code") or session.get("room_code")
+    player_token = session.get("player_token")
+    room = room_store().get_room(room_code)
+    if room is None or player_token is None:
+        emit("room:error", {"error": "Room session is not available."})
+        return
+
+    try:
+        if room.get("host_token") != player_token:
+            raise RoomForbidden("Only the host can change shared room hints.")
+        view_settings = normalize_view_settings_payload(payload)
+        if not view_settings:
+            return
+        if not apply_room_view_settings(room, view_settings):
+            return
+        room["revision"] += 1
+        room_store().save_room(room)
+    except RoomStoreError as exc:
+        emit("room:error", {"error": str(exc)})
+        return
+
+    socketio.emit(
+        "room:state_updated",
+        {"room": public_room_view(room, None)},
+        to=room["code"],
+    )
 
 
 @socketio.on("disconnect")
@@ -244,4 +327,5 @@ def on_disconnect():
     if actor is None:
         pop_realtime_control(room_code)
         return
-    pop_realtime_control(room_code, actor["seat_index"])
+    if isinstance(actor.get("seat_index"), int):
+        pop_realtime_control(room_code, actor["seat_index"])

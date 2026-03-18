@@ -421,6 +421,7 @@
 
     phase = "race";
     raceFinishedCount = 0;
+    resetBoatTrails();
 
     for (const b of boats){
       b.distance = 0;
@@ -622,6 +623,7 @@
       tickStartMs = Math.max(tickStartMs, realtimeCountdownEndsAt);
       phase = "race";
       realtimeBotDecisionCache = [];
+      resetBoatTrails();
       changed = true;
     }
 
@@ -840,7 +842,7 @@
   function runLocalRealtimeLoop(frameTime){
     let changed = false;
 
-    if (multiplayerSeatIndex === null && phase !== "finished"){
+    if (!isMultiplayerRoomActive() && phase !== "finished"){
       const weatherChanged = updateAutoGustState(currentRaceTimeMs());
       if (weatherChanged){
         changed = true;
@@ -971,6 +973,7 @@
     b.currentSpeedUnitsPerSec = 0;
 
     b.x = dest.x; b.y = dest.y;
+    appendBoatTrailPoint(boatIdx, dest, { force:true });
 
     const curPos = {x:b.x,y:b.y};
     updateBoatMarkAndFinish(b, prev, curPos, dir);

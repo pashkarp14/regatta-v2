@@ -27,6 +27,9 @@
   let hybridRound = 1;
   let hybridMovesLeft = [];
   let multiplayerSeatIndex = null;
+  let multiplayerSessionActive = false;
+  let multiplayerObserverMode = false;
+  let multiplayerLobbyPreview = false;
   let localPilotMode = "hotseat";
   const LOCAL_HUMAN_SEAT = 0;
   let botTurnTimer = 0;
@@ -52,6 +55,8 @@
     "#00897b", "#7cb342", "#fb8c00", "#8d6e63", "#5e35b1",
     "#039be5", "#c0ca33", "#f4511e", "#546e7a", "#ef5350"
   ];
+  const BOAT_TRAIL_MIN_POINT_DISTANCE = 0.04;
+  const BOAT_TRAIL_MAX_POINTS = 6000;
 
   const STEP_RADIUS_BASE = 1.0;
   const BOAT_RULE_LENGTH = 0.85;
@@ -115,39 +120,146 @@
   let showBestStart = false;
   let bestStartSolution = null; // {start:{x,y}, path:[], stats:{...}}
 
-  function invalidateSolutions(){
-    showOptimal = false;
+  function clearOptimalOverlay(){
     optimalPath = [];
     optimalStats = null;
     optimalForBoat = null;
-
-    showBestStart = false;
-    bestStartSolution = null;
-    updateOptInfo();
   }
 
-  function resetBoatTrails(){
+  function clearBestStartOverlay(){
+    bestStartSolution = null;
+  }
+
+  function sharedViewTargetBoatIndex(){
+    if (multiplayerSessionActive){
+      if (Number.isInteger(currentPlayer) && boats[currentPlayer]) return currentPlayer;
+      const unfinished = boats.findIndex((boat) => boat && !boat.finished);
+      return unfinished >= 0 ? unfinished : (boats.length ? 0 : null);
+    }
+    if (Number.isInteger(selectedBoatIndex) && boats[selectedBoatIndex]) return selectedBoatIndex;
+    if (Number.isInteger(multiplayerSeatIndex) && boats[multiplayerSeatIndex]) return multiplayerSeatIndex;
+    if (Number.isInteger(currentPlayer) && boats[currentPlayer]) return currentPlayer;
+    return boats.length ? 0 : null;
+  }
+
+  function sharedViewSettingsSnapshot(){
+    return {
+      showWindArrow,
+      showOptimal,
+      showBestStart,
+      showLaylines,
+      showTrails,
+    };
+  }
+
+  function emitSharedViewSettingsChanged(){
+    window.dispatchEvent(new CustomEvent("regatta:view-settings-changed", {
+      detail: {
+        settings: sharedViewSettingsSnapshot(),
+      },
+    }));
+  }
+
+  function trimBoatTrail(trail){
+    if (trail.length > BOAT_TRAIL_MAX_POINTS){
+      trail.splice(0, trail.length - BOAT_TRAIL_MAX_POINTS);
+    }
+    return trail;
+  }
+
+  function resetBoatTrails({ preserveCurrentPoint=true } = {}){
     boatTrails = boats.map((boat) => (
-      boat && Number.isFinite(boat.x) && Number.isFinite(boat.y)
+      preserveCurrentPoint && boat && Number.isFinite(boat.x) && Number.isFinite(boat.y)
         ? [{ x: boat.x, y: boat.y }]
         : []
     ));
   }
 
-  function appendBoatTrailPoint(index, point){
+  function appendBoatTrailPoint(index, point, { force=false } = {}){
     if (!boats[index] || !point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
     if (!boatTrails[index]) boatTrails[index] = [];
     const trail = boatTrails[index];
     const last = trail[trail.length - 1];
-    if (!last || !Number.isFinite(last.x) || !Number.isFinite(last.y) || dist(last, point) >= 0.18){
+    if (!last || !Number.isFinite(last.x) || !Number.isFinite(last.y)){
       trail.push({ x: point.x, y: point.y });
-      if (trail.length > 600){
-        trail.splice(0, trail.length - 600);
-      }
-    } else {
-      last.x = point.x;
-      last.y = point.y;
+      trimBoatTrail(trail);
+      return;
     }
+    const distanceFromLast = dist(last, point);
+    if (distanceFromLast < 1e-6){
+      return;
+    }
+    if (!force && distanceFromLast < BOAT_TRAIL_MIN_POINT_DISTANCE){
+      return;
+    }
+    trail.push({ x: point.x, y: point.y });
+    trimBoatTrail(trail);
+  }
+
+  function refreshSharedViewSolutions(){
+    clearOptimalOverlay();
+    clearBestStartOverlay();
+
+    if (showOptimal){
+      const targetBoat = sharedViewTargetBoatIndex();
+      if (Number.isInteger(targetBoat) && boats[targetBoat]){
+        computeOptimalForBoat(targetBoat);
+        showOptimal = true;
+      } else {
+        showOptimal = false;
+      }
+    }
+
+    if (showBestStart){
+      if (boats.length){
+        computeBestStart();
+        showBestStart = true;
+      } else {
+        showBestStart = false;
+      }
+    }
+
+    if (showTrails && (!boatTrails.length || boatTrails.length !== boats.length)){
+      resetBoatTrails();
+    }
+
+    updateViewButtons();
+    updateOptInfo();
+  }
+
+  function applySharedViewSettings(nextSettings = {}, { emit=false, renderView=true } = {}){
+    const targetSettings = nextSettings && typeof nextSettings === "object" ? nextSettings : {};
+    const nextShowWindArrow = targetSettings.showWindArrow === undefined ? showWindArrow : !!targetSettings.showWindArrow;
+    const nextShowOptimal = targetSettings.showOptimal === undefined ? showOptimal : !!targetSettings.showOptimal;
+    const nextShowBestStart = targetSettings.showBestStart === undefined ? showBestStart : !!targetSettings.showBestStart;
+    const nextShowLaylines = targetSettings.showLaylines === undefined ? showLaylines : !!targetSettings.showLaylines;
+    const nextShowTrails = targetSettings.showTrails === undefined ? showTrails : !!targetSettings.showTrails;
+    const changed = (
+      nextShowWindArrow !== showWindArrow
+      || nextShowOptimal !== showOptimal
+      || nextShowBestStart !== showBestStart
+      || nextShowLaylines !== showLaylines
+      || nextShowTrails !== showTrails
+    );
+
+    showWindArrow = nextShowWindArrow;
+    showOptimal = nextShowOptimal;
+    showBestStart = nextShowBestStart;
+    showLaylines = nextShowLaylines;
+    showTrails = nextShowTrails;
+
+    refreshSharedViewSolutions();
+    if (renderView){
+      render();
+    }
+    if (emit && changed){
+      emitSharedViewSettingsChanged();
+    }
+    return changed;
+  }
+
+  function invalidateSolutions(){
+    refreshSharedViewSolutions();
   }
 
   function pointInField(p){ return p.x>=0 && p.x<=worldW && p.y>=0 && p.y<=worldH; }
@@ -464,7 +576,23 @@
   }
 
   function isLocalBotsMode(){
-    return multiplayerSeatIndex === null && localPilotMode === "bots";
+    return !multiplayerSessionActive && localPilotMode === "bots";
+  }
+
+  function isMultiplayerRoomActive(){
+    return multiplayerSessionActive;
+  }
+
+  function isMultiplayerObserver(){
+    return multiplayerSessionActive && multiplayerObserverMode;
+  }
+
+  function isLobbyPreviewMode(){
+    return multiplayerSessionActive && multiplayerLobbyPreview;
+  }
+
+  function isCursorSteeringMode(){
+    return isRealtimePlayMode() || isLobbyPreviewMode();
   }
 
   function isHumanControlledBoat(boatIdx){
@@ -596,9 +724,15 @@
   }
 
   function updateViewButtons(){
+    btnOptimal?.classList.toggle("mode-btn-active", showOptimal);
+    btnBestStart?.classList.toggle("mode-btn-active", showBestStart);
+    btnWindArrow?.classList.toggle("mode-btn-active", !showWindArrow);
     btnLaylines?.classList.toggle("mode-btn-active", showLaylines);
     btnTrails?.classList.toggle("mode-btn-active", showTrails);
     btnFullscreen?.classList.toggle("mode-btn-active", isFullscreenActive());
+    if (btnWindArrow){
+      btnWindArrow.textContent = showWindArrow ? "Скрыть стрелку ветра" : "Показать стрелку ветра";
+    }
     if (btnFullscreen){
       btnFullscreen.textContent = isFullscreenActive() ? "×" : "⛶";
       btnFullscreen.title = isFullscreenActive() ? "Свернуть экран" : "На весь экран";
