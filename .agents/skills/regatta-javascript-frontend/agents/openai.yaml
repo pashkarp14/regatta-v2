@@ -1,0 +1,7 @@
+interface:
+  display_name: "Regatta JS Frontend"
+  short_description: "Safe gameplay, menu, and room JS edits"
+  default_prompt: "Use $regatta-javascript-frontend to implement or refactor Regatta frontend changes while preserving DOM, event, and bundle contracts."
+
+policy:
+  allow_implicit_invocation: true

@@ -1,0 +1,7 @@
+interface:
+  display_name: "Regatta Python Backend"
+  short_description: "Safe Flask and room-state backend changes"
+  default_prompt: "Use $regatta-python-backend to implement or refactor Regatta backend changes while preserving room, library, and socket contracts."
+
+policy:
+  allow_implicit_invocation: true

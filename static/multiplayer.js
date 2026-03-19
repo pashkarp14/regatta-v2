@@ -460,16 +460,68 @@ document.addEventListener("DOMContentLoaded", () => {
       regatta.setServerClockOffset?.(roomState.serverClockOffsetMs);
     }
 
-    roomState.selfSeatIndex = Number.isInteger(room.self?.seat_index) ? room.self.seat_index : null;
-    roomState.selfIsObserver = !!room.self?.is_observer;
+    const sameRoom = room.code && room.code === roomState.room?.code;
+    const incomingSelf = room.self || {};
+    const incomingSelfKnown = !!incomingSelf.token_present;
+    const previousSelfPlayer = sameRoom
+      ? (roomState.room?.players || []).find((player) => player.is_self) || null
+      : null;
+    const preservedSelf = sameRoom && !incomingSelfKnown
+      ? {
+          seatIndex: Number.isInteger(roomState.selfSeatIndex)
+            ? roomState.selfSeatIndex
+            : (Number.isInteger(previousSelfPlayer?.seat_index) ? previousSelfPlayer.seat_index : null),
+          isObserver: !!(roomState.selfIsObserver || previousSelfPlayer?.is_observer),
+          isHost: !!(roomState.room?.is_host || previousSelfPlayer?.is_host),
+          name: roomState.room?.self?.name || previousSelfPlayer?.name || "",
+        }
+      : null;
+
+    const players = (room.players || []).map((player) => {
+      const matchesPreservedSeat = preservedSelf
+        && Number.isInteger(preservedSelf.seatIndex)
+        && Number.isInteger(player.seat_index)
+        && player.seat_index === preservedSelf.seatIndex
+        && !player.is_observer;
+      const matchesPreservedObserver = preservedSelf
+        && preservedSelf.isObserver
+        && player.is_observer
+        && typeof preservedSelf.name === "string"
+        && preservedSelf.name.length > 0
+        && player.name === preservedSelf.name;
+      return {
+        ...player,
+        is_self: !!player.is_self || !!matchesPreservedSeat || !!matchesPreservedObserver,
+        is_observer: !!player.is_observer,
+      };
+    });
+
+    const effectiveSelfPlayer = players.find((player) => player.is_self) || null;
+    roomState.selfSeatIndex = Number.isInteger(incomingSelf.seat_index)
+      ? incomingSelf.seat_index
+      : (Number.isInteger(effectiveSelfPlayer?.seat_index) ? effectiveSelfPlayer.seat_index : null);
+    roomState.selfIsObserver = incomingSelfKnown
+      ? !!incomingSelf.is_observer
+      : !!(effectiveSelfPlayer?.is_observer || preservedSelf?.isObserver);
 
     return {
       ...room,
-      players: (room.players || []).map((player) => ({
-        ...player,
-        is_self: !!player.is_self,
-        is_observer: !!player.is_observer,
-      })),
+      is_host: incomingSelfKnown
+        ? !!room.is_host
+        : (effectiveSelfPlayer ? !!effectiveSelfPlayer.is_host : !!preservedSelf?.isHost),
+      players,
+      self: incomingSelfKnown
+        ? {
+            ...incomingSelf,
+            is_observer: !!incomingSelf.is_observer,
+            token_present: true,
+          }
+        : {
+            name: effectiveSelfPlayer?.name || preservedSelf?.name || null,
+            seat_index: roomState.selfSeatIndex,
+            is_observer: roomState.selfIsObserver,
+            token_present: !!effectiveSelfPlayer || !!preservedSelf,
+          },
     };
   }
 
@@ -1026,6 +1078,9 @@ document.addEventListener("DOMContentLoaded", () => {
   }, 200);
 
   window.addEventListener("regatta:state-changed", () => {
+    if (roomState.room?.status === "lobby") {
+      applyPermissions();
+    }
     void tryPushState(true);
   });
 
