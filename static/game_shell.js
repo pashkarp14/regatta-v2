@@ -906,7 +906,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
   menuScenarioCreateBtn?.addEventListener("click", async () => {
     menuState.scenario = "create";
-    if (menuState.transport === "network" && menuState.networkAction === "create") {
+    if (menuState.transport === "network") {
+      menuState.networkAction = "create";
       try {
         await createFreshRoom();
       } catch (error) {
