@@ -185,6 +185,15 @@ document.addEventListener("DOMContentLoaded", () => {
       : (room.players || []).filter((player) => !player.is_observer && Number.isInteger(player.seat_index)).length;
   }
 
+  function roomHostObserves(room = roomState.room) {
+    return !!room && room.host_mode === "observe";
+  }
+
+  function roomOccupancyLabel(room = roomState.room) {
+    if (!room) return "";
+    return `${roomRacersJoined(room)}/${room.max_players}`;
+  }
+
   function roomPlayer() {
     if (!roomState.room) return null;
     return roomState.room.players?.find((player) => player.is_self) || null;
@@ -606,6 +615,8 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     if (roomState.room.status === "lobby") {
+      const hostObserves = roomHostObserves(roomState.room);
+      const occupancyLabel = roomOccupancyLabel(roomState.room);
       setHint(`Ожидаем подключение всех экипажей: ${roomState.room.joined_count} из ${roomState.room.max_players}.`);
       roomStatusEl.textContent = `Лобби · ${roomState.room.joined_count}/${roomState.room.max_players}`;
       setNotice(

@@ -36,6 +36,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const menuLocalPartyBotsBtn = document.getElementById("menuLocalPartyBots");
   const menuLocalPlayModeTurnsBtn = document.getElementById("menuLocalPlayModeTurns");
   const menuLocalPlayModeRealtimeBtn = document.getElementById("menuLocalPlayModeRealtime");
+  const menuNetworkPlayModeTurnsBtn = document.getElementById("menuNetworkPlayModeTurns");
+  const menuNetworkPlayModeRealtimeBtn = document.getElementById("menuNetworkPlayModeRealtime");
   const menuLaunchLocalGameBtn = document.getElementById("menuLaunchLocalGame");
   const menuCreateRoomBtn = document.getElementById("menuCreateRoom");
   const menuJoinRoomBtn = document.getElementById("menuJoinRoom");
@@ -87,6 +89,7 @@ document.addEventListener("DOMContentLoaded", () => {
     scenario: null,
     localParty: null,
     localPlayMode: null,
+    networkPlayMode: null,
     maps: [],
     races: [],
   };
@@ -220,6 +223,9 @@ document.addEventListener("DOMContentLoaded", () => {
     });
     if (name === "local") {
       renderLocalSelection();
+    }
+    if (name === "network") {
+      renderNetworkSelection();
     }
     if (name === "maps" || name === "races") {
       renderLibraryLists();
@@ -419,6 +425,13 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  function ensureNetworkSelectionState() {
+    const meta = regatta.getMeta?.() || {};
+    if (!menuState.networkPlayMode) {
+      menuState.networkPlayMode = meta.playMode === "realtime" ? "realtime" : "turns";
+    }
+  }
+
   function localScenarioLabel() {
     if (menuState.scenario === "create") return "Откроем редактор новой карты и сохраним выбранный режим для старта.";
     if (menuState.scenario === "map") return "Запустим выбранную карту локально с этим режимом.";
@@ -476,15 +489,25 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  function renderNetworkSelection() {
+    ensureNetworkSelectionState();
+
+    const isRealtime = menuState.networkPlayMode === "realtime";
+    menuNetworkPlayModeTurnsBtn?.classList.toggle("is-active", !isRealtime);
+    menuNetworkPlayModeRealtimeBtn?.classList.toggle("is-active", isRealtime);
+  }
+
   function renderHints() {
     if (menuLocalHintEl) {
       renderLocalSelection();
     }
 
     if (menuNetworkHintEl) {
-      menuNetworkHintEl.textContent = menuState.networkAction === "create"
-        ? "Сначала выбери новую или готовую карту. Комната появится только после того, как ты подготовишь дистанцию и откроешь её из панели комнаты."
-        : "Если входишь в чужую комнату, карта, ветер и гонка придут от хоста автоматически.";
+      renderNetworkSelection();
+      const modeLabel = formatPlayModeLabel(menuState.networkPlayMode).toLowerCase();
+      menuNetworkHintEl.textContent = menuState.networkAction === "join"
+        ? "Если входишь в чужую комнату, карта, ветер и гонка придут от хоста автоматически."
+        : `Для новой комнаты сейчас выбран ${modeLabel}. Новая карта создастся с этим режимом, а готовые карты и сохранения сохранят свой текущий формат.`;
     }
 
     if (mapsScreenHintEl) {
@@ -754,6 +777,8 @@ document.addEventListener("DOMContentLoaded", () => {
     await ensureSoloContext({ clearDraft: false });
     clearPendingRoomDraft();
     syncDeckFieldsFromMenu();
+    ensureNetworkSelectionState();
+    setControlValue(playModeSelect, menuState.networkPlayMode === "realtime" ? "realtime" : "turns");
     regatta.setLocalPilotMode?.("hotseat");
     await regatta.resetRaceToReadyState?.();
     regatta.setMode("marks");
@@ -920,6 +945,16 @@ document.addEventListener("DOMContentLoaded", () => {
   menuLocalPlayModeRealtimeBtn?.addEventListener("click", () => {
     menuState.localPlayMode = "realtime";
     renderLocalSelection();
+  });
+
+  menuNetworkPlayModeTurnsBtn?.addEventListener("click", () => {
+    menuState.networkPlayMode = "turns";
+    renderHints();
+  });
+
+  menuNetworkPlayModeRealtimeBtn?.addEventListener("click", () => {
+    menuState.networkPlayMode = "realtime";
+    renderHints();
   });
 
   menuLaunchLocalGameBtn?.addEventListener("click", async () => {
