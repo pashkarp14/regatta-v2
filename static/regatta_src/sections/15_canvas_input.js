@@ -17,11 +17,13 @@
     refreshRealtimeIntentFromPointer({ emit:true });
   }
 
-  function resetRealtimePointer(pointerId=null){
+  function resetRealtimePointer(pointerId=null, { keepIntent=false } = {}){
     if (pointerId === null || activeRealtimePointerId === pointerId){
       activeRealtimePointerId = null;
       realtimeCursorClient = null;
-      clearRealtimeIntent();
+      if (!keepIntent){
+        clearRealtimeIntent();
+      }
     }
   }
 
@@ -100,7 +102,7 @@
 
   canvas.addEventListener("mouseleave", () => {
     if (!isCursorSteeringMode()) return;
-    resetRealtimePointer();
+    resetRealtimePointer(null, { keepIntent:true });
     render();
   });
 

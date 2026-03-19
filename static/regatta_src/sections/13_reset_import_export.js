@@ -640,6 +640,14 @@
     if (!snapshot || typeof snapshot !== "object") return;
     clearRealtimeBotDecisionCache();
     const previousPhase = phase;
+    const preservedRealtimeIntent = (realtimeCursorClient || realtimeCursorTarget || realtimeCursorDirection)
+      ? {
+          client: realtimeCursorClient ? { ...realtimeCursorClient } : null,
+          target: realtimeCursorTarget ? { ...realtimeCursorTarget } : null,
+          direction: realtimeCursorDirection ? { ...realtimeCursorDirection } : null,
+          pointerId: activeRealtimePointerId,
+        }
+      : null;
 
     const world = snapshot.world || {};
     const settings = snapshot.settings || {};
@@ -804,8 +812,16 @@
       realtimeCursorDirection = null;
       realtimeCursorClient = null;
       activeRealtimePointerId = null;
-    } else if (realtimeCursorClient){
-      refreshRealtimeIntentFromPointer({ emit:false });
+    } else {
+      realtimeCursorClient = preservedRealtimeIntent?.client ? { ...preservedRealtimeIntent.client } : null;
+      realtimeCursorTarget = preservedRealtimeIntent?.target ? { ...preservedRealtimeIntent.target } : null;
+      realtimeCursorDirection = preservedRealtimeIntent?.direction ? { ...preservedRealtimeIntent.direction } : null;
+      activeRealtimePointerId = Number.isInteger(preservedRealtimeIntent?.pointerId)
+        ? preservedRealtimeIntent.pointerId
+        : null;
+      if (realtimeCursorClient){
+        refreshRealtimeIntentFromPointer({ emit:false });
+      }
     }
 
     ensureScenarioLegOptions();

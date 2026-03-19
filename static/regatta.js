@@ -4506,6 +4506,14 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!snapshot || typeof snapshot !== "object") return;
     clearRealtimeBotDecisionCache();
     const previousPhase = phase;
+    const preservedRealtimeIntent = (realtimeCursorClient || realtimeCursorTarget || realtimeCursorDirection)
+      ? {
+          client: realtimeCursorClient ? { ...realtimeCursorClient } : null,
+          target: realtimeCursorTarget ? { ...realtimeCursorTarget } : null,
+          direction: realtimeCursorDirection ? { ...realtimeCursorDirection } : null,
+          pointerId: activeRealtimePointerId,
+        }
+      : null;
 
     const world = snapshot.world || {};
     const settings = snapshot.settings || {};
@@ -4670,8 +4678,16 @@ document.addEventListener("DOMContentLoaded", () => {
       realtimeCursorDirection = null;
       realtimeCursorClient = null;
       activeRealtimePointerId = null;
-    } else if (realtimeCursorClient){
-      refreshRealtimeIntentFromPointer({ emit:false });
+    } else {
+      realtimeCursorClient = preservedRealtimeIntent?.client ? { ...preservedRealtimeIntent.client } : null;
+      realtimeCursorTarget = preservedRealtimeIntent?.target ? { ...preservedRealtimeIntent.target } : null;
+      realtimeCursorDirection = preservedRealtimeIntent?.direction ? { ...preservedRealtimeIntent.direction } : null;
+      activeRealtimePointerId = Number.isInteger(preservedRealtimeIntent?.pointerId)
+        ? preservedRealtimeIntent.pointerId
+        : null;
+      if (realtimeCursorClient){
+        refreshRealtimeIntentFromPointer({ emit:false });
+      }
     }
 
     ensureScenarioLegOptions();
@@ -4744,8 +4760,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function drawWindArrow(){
     if (!showWindArrow) return;
-    const base = worldToScreen({ x: worldW/2, y: worldH - 0.6 });
-    const len = 55;
+    const tl = fieldTopLeft();
+    const base = {
+      x: tl.x + fieldPixelW() / 2,
+      y: tl.y + 46,
+    };
+    const len = 60;
     const windFrom = screenWindFromVector();
     const tip = {
       x: base.x + windFrom.x * (len / 2),
@@ -5378,12 +5398,12 @@ document.addEventListener("DOMContentLoaded", () => {
       const boat = Number.isInteger(boatIdx) ? boats[boatIdx] : null;
       if (boat){
         const start = worldToScreen({ x: boat.x, y: boat.y });
-        const visualTarget = clampAlongRayToField(
+        const overlayTarget = realtimeCursorTarget || clampAlongRayToField(
           { x: boat.x, y: boat.y },
           realtimeCursorDirection || { x: 1, y: 0 },
           Math.max(worldW, worldH) * 2
         );
-        const target = worldToScreen(visualTarget);
+        const target = worldToScreen(overlayTarget);
         ctx.save();
         ctx.strokeStyle = rgbaHex(boat.color, 0.45);
         ctx.fillStyle = rgbaHex(boat.color, 0.9);
@@ -5397,7 +5417,7 @@ document.addEventListener("DOMContentLoaded", () => {
         ctx.beginPath();
         ctx.arc(target.x, target.y, Math.max(5, PX * 0.12), 0, Math.PI * 2);
         ctx.fill();
-        if (realtimeCursorTarget){
+        if (realtimeCursorTarget && overlayTarget !== realtimeCursorTarget){
           const pointerTarget = worldToScreen(realtimeCursorTarget);
           ctx.beginPath();
           ctx.arc(pointerTarget.x, pointerTarget.y, Math.max(4, PX * 0.09), 0, Math.PI * 2);
@@ -5515,11 +5535,13 @@ document.addEventListener("DOMContentLoaded", () => {
     refreshRealtimeIntentFromPointer({ emit:true });
   }
 
-  function resetRealtimePointer(pointerId=null){
+  function resetRealtimePointer(pointerId=null, { keepIntent=false } = {}){
     if (pointerId === null || activeRealtimePointerId === pointerId){
       activeRealtimePointerId = null;
       realtimeCursorClient = null;
-      clearRealtimeIntent();
+      if (!keepIntent){
+        clearRealtimeIntent();
+      }
     }
   }
 
@@ -5598,7 +5620,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   canvas.addEventListener("mouseleave", () => {
     if (!isCursorSteeringMode()) return;
-    resetRealtimePointer();
+    resetRealtimePointer(null, { keepIntent:true });
     render();
   });
 

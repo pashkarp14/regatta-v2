@@ -30,8 +30,12 @@
 
   function drawWindArrow(){
     if (!showWindArrow) return;
-    const base = worldToScreen({ x: worldW/2, y: worldH - 0.6 });
-    const len = 55;
+    const tl = fieldTopLeft();
+    const base = {
+      x: tl.x + fieldPixelW() / 2,
+      y: tl.y + 46,
+    };
+    const len = 60;
     const windFrom = screenWindFromVector();
     const tip = {
       x: base.x + windFrom.x * (len / 2),
@@ -664,12 +668,12 @@
       const boat = Number.isInteger(boatIdx) ? boats[boatIdx] : null;
       if (boat){
         const start = worldToScreen({ x: boat.x, y: boat.y });
-        const visualTarget = clampAlongRayToField(
+        const overlayTarget = realtimeCursorTarget || clampAlongRayToField(
           { x: boat.x, y: boat.y },
           realtimeCursorDirection || { x: 1, y: 0 },
           Math.max(worldW, worldH) * 2
         );
-        const target = worldToScreen(visualTarget);
+        const target = worldToScreen(overlayTarget);
         ctx.save();
         ctx.strokeStyle = rgbaHex(boat.color, 0.45);
         ctx.fillStyle = rgbaHex(boat.color, 0.9);
@@ -683,7 +687,7 @@
         ctx.beginPath();
         ctx.arc(target.x, target.y, Math.max(5, PX * 0.12), 0, Math.PI * 2);
         ctx.fill();
-        if (realtimeCursorTarget){
+        if (realtimeCursorTarget && overlayTarget !== realtimeCursorTarget){
           const pointerTarget = worldToScreen(realtimeCursorTarget);
           ctx.beginPath();
           ctx.arc(pointerTarget.x, pointerTarget.y, Math.max(4, PX * 0.09), 0, Math.PI * 2);
