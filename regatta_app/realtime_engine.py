@@ -22,6 +22,7 @@ REALTIME_SPEED_UNITS_PER_SEC = 2.4
 REALTIME_DEADZONE_SOFTNESS_DEG = 18.0
 REALTIME_TARGET_EPS = 0.04
 DEFAULT_TURN_RATE_DEG_PER_SEC = 120.0
+DEFAULT_LUFFING_SPEED_PERCENT = 25.0
 RULES_PENALTY_COOLDOWN_MS = 2200
 RULES_PENALTY_SLOW_MS = 4000
 RULES_PENALTY_SPEED_FACTOR = 0.72
@@ -59,6 +60,29 @@ def angle_wrap(angle: float) -> float:
 def turn_rate_rad_per_second(settings: dict[str, Any]) -> float:
     raw_rate = float(settings.get("turnRateDegPerSec") or DEFAULT_TURN_RATE_DEG_PER_SEC)
     return math.radians(clamp(raw_rate, 30.0, 360.0))
+
+
+def realtime_luffing_speed_factor(settings: dict[str, Any]) -> float:
+    raw_percent = float(settings.get("luffingSpeedPercent") or DEFAULT_LUFFING_SPEED_PERCENT)
+    return clamp(raw_percent / 100.0, 0.0, 0.95)
+
+
+def realtime_speed_factor_for_angle(angle_rad: float, settings: dict[str, Any]) -> float:
+    half_dead = math.radians(float(settings.get("deadZoneDeg") or 0.0)) / 2.0
+    if half_dead <= 1e-6:
+        return 1.0
+
+    softness = math.radians(max(2.0, REALTIME_DEADZONE_SOFTNESS_DEG))
+    luff_factor = realtime_luffing_speed_factor(settings)
+    if angle_rad <= half_dead:
+        inside_ratio = clamp(angle_rad / half_dead, 0.0, 1.0)
+        return clamp(luff_factor * (0.45 + inside_ratio * 0.55), 0.0, 1.0)
+
+    return clamp(
+        luff_factor + ((angle_rad - half_dead) / softness) * (1.0 - luff_factor),
+        luff_factor,
+        1.0,
+    )
 
 
 def steer_heading_toward(boat: dict[str, Any], desired_heading: float, dt_seconds: float, settings: dict[str, Any]) -> float:
@@ -988,12 +1012,18 @@ def simulate_realtime_tick(game_state: dict[str, Any], controls: dict[int, dict[
     countdown_ends_at = int(race.get("realtimeCountdownEndsAt") or 0)
     countdown_active = phase == "countdown" and countdown_ends_at > now_ms
     if phase == "countdown" and countdown_ends_at > 0 and now_ms >= countdown_ends_at:
+        tick_start_ms = max(tick_start_ms, countdown_ends_at)
         race["phase"] = "race"
         phase = "race"
         changed = True
 
     if phase != "race" and not countdown_active:
-        return changed
+        zeroed_any_speed = False
+        for boat in boats:
+            if float(boat.get("currentSpeedUnitsPerSec") or 0.0) != 0.0:
+                boat["currentSpeedUnitsPerSec"] = 0.0
+                zeroed_any_speed = True
+        return changed or zeroed_any_speed
 
     proposals: list[dict[str, Any]] = []
     for index, boat in enumerate(boats):
@@ -1026,10 +1056,9 @@ def simulate_realtime_tick(game_state: dict[str, Any], controls: dict[int, dict[
         angle = angle_between(actual_direction, upwind)
         half_dead = math.radians(dead_zone_deg) / 2.0
         reverse_threshold = half_dead * 0.5
-        softness = math.radians(max(2.0, REALTIME_DEADZONE_SOFTNESS_DEG))
         move_factor = move_factor_for_boat(boat, actual_direction, settings, gust_rect) * realtime_penalty_factor(boat, now_ms)
-        speed_factor = 0.0 if angle <= half_dead else clamp((angle - half_dead) / softness, 0.0, 1.0)
         reverse_mode = angle <= reverse_threshold
+        speed_factor = 0.0 if reverse_mode else realtime_speed_factor_for_angle(angle, settings)
         step_length = (
             REALTIME_SPEED_UNITS_PER_SEC * dt_seconds * move_factor * 0.10
             if reverse_mode
@@ -1135,11 +1164,16 @@ def simulate_realtime_tick(game_state: dict[str, Any], controls: dict[int, dict[
             dest = proposal["dest"]
             if abs(dest["x"] - boat["x"]) > 1e-9 or abs(dest["y"] - boat["y"]) > 1e-9:
                 changed = True
-                if boat.get("hasHeading") and abs(angle_wrap(proposal["heading"] - float(boat.get("heading") or 0.0))) > math.radians(12):
+                if (
+                    race.get("phase") == "race"
+                    and boat.get("hasHeading")
+                    and abs(angle_wrap(proposal["heading"] - float(boat.get("heading") or 0.0))) > math.radians(12)
+                ):
                     boat["turns"] = int(boat.get("turns") or 0) + 1
                 boat["x"] = dest["x"]
                 boat["y"] = dest["y"]
-                boat["distance"] = float(boat.get("distance") or 0.0) + proposal["distance"]
+                if race.get("phase") == "race":
+                    boat["distance"] = float(boat.get("distance") or 0.0) + proposal["distance"]
                 boat["heading"] = proposal["heading"]
                 boat["hasHeading"] = proposal["hasHeading"]
                 boat["tack"] = tack_sign_from_heading_vec(proposal["direction"], wind_angle_deg)

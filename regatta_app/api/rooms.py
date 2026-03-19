@@ -46,8 +46,13 @@ def get_room(room_code: str):
 
 @bp.post("/api/rooms/<room_code>/start")
 def start_room(room_code: str):
-    arm_realtime = bool(json_payload().get("arm_realtime", True))
-    room, player_token = start_room_match(room_code, arm_realtime=arm_realtime)
+    payload = json_payload()
+    arm_realtime = bool(payload.get("arm_realtime", True))
+    room, player_token = start_room_match(
+        room_code,
+        arm_realtime=arm_realtime,
+        game_state=payload.get("game_state"),
+    )
     if room_requires_live_loop(room):
         ensure_realtime_room_loop(room["code"])
     broadcast_room_snapshot(room)

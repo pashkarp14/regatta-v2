@@ -4722,18 +4722,38 @@ document.addEventListener("DOMContentLoaded", () => {
     ctx.strokeRect(tl.x, tl.y, fieldPixelW(), fieldPixelH());
   }
 
+  function screenVectorFromWorldVector(vector){
+    return {
+      x: Number.isFinite(vector?.x) ? vector.x : 0,
+      y: Number.isFinite(vector?.y) ? -vector.y : 0
+    };
+  }
+
+  function screenAngleFromWorldVector(vector){
+    const screenVector = screenVectorFromWorldVector(vector);
+    return Math.atan2(screenVector.y, screenVector.x);
+  }
+
+  function screenWindFromVector(){
+    return screenVectorFromWorldVector(windFromVec());
+  }
+
+  function screenUpwindAngle(){
+    return screenAngleFromWorldVector(upwindVec());
+  }
+
   function drawWindArrow(){
     if (!showWindArrow) return;
     const base = worldToScreen({ x: worldW/2, y: worldH - 0.6 });
     const len = 55;
-    const windFrom = windFromVec();
+    const windFrom = screenWindFromVector();
     const tip = {
       x: base.x + windFrom.x * (len / 2),
-      y: base.y - windFrom.y * (len / 2)
+      y: base.y + windFrom.y * (len / 2)
     };
     const tail = {
       x: base.x - windFrom.x * (len / 2),
-      y: base.y + windFrom.y * (len / 2)
+      y: base.y - windFrom.y * (len / 2)
     };
     const screenAngle = Math.atan2(tip.y - tail.y, tip.x - tail.x);
 
@@ -5229,10 +5249,7 @@ document.addEventListener("DOMContentLoaded", () => {
     ctx.fill();
     ctx.stroke();
 
-    const uw = upwindVec();
-    const ux = uw.x;
-    const uy = -uw.y;
-    const baseAng = Math.atan2(uy, ux);
+    const baseAng = screenUpwindAngle();
     const half = (deadZoneDeg * Math.PI/180)/2;
 
     if (deadZoneDeg > 0){
@@ -6122,6 +6139,19 @@ document.addEventListener("DOMContentLoaded", () => {
       },
       view: sharedViewSettingsSnapshot(),
       boats: boats.map((boat, index) => ({
+        trailPoints: Array.isArray(boatTrails[index]) ? boatTrails[index].length : 0,
+        trailStart: Array.isArray(boatTrails[index]) && boatTrails[index][0]
+          ? {
+              x: Number(boatTrails[index][0].x.toFixed(3)),
+              y: Number(boatTrails[index][0].y.toFixed(3)),
+            }
+          : null,
+        trailEnd: Array.isArray(boatTrails[index]) && boatTrails[index][boatTrails[index].length - 1]
+          ? {
+              x: Number(boatTrails[index][boatTrails[index].length - 1].x.toFixed(3)),
+              y: Number(boatTrails[index][boatTrails[index].length - 1].y.toFixed(3)),
+            }
+          : null,
         index,
         x: Number(boat.x.toFixed(3)),
         y: Number(boat.y.toFixed(3)),

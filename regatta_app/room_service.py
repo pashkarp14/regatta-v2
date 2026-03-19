@@ -86,7 +86,12 @@ def room_view(room_code: str) -> dict[str, Any]:
     return public_room_view(room, current_session_state().player_token)
 
 
-def start_room_match(room_code: str, *, arm_realtime: bool = True) -> tuple[dict[str, Any], str | None]:
+def start_room_match(
+    room_code: str,
+    *,
+    arm_realtime: bool = True,
+    game_state: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any], str | None]:
     player_token = current_session_state().player_token
     room = room_store().get_room(room_code)
     if room is None:
@@ -96,7 +101,12 @@ def start_room_match(room_code: str, *, arm_realtime: bool = True) -> tuple[dict
     if not room_start_ready(room):
         raise RoomValidationError("Wait until every racing seat is occupied.")
 
-    start_snapshot = deepcopy(room.get("start_state") or room.get("game_state"))
+    provided_snapshot = None
+    if game_state is not None:
+        provided_snapshot = validate_game_state(room, deepcopy(game_state))
+        room["start_state"] = deepcopy(provided_snapshot)
+
+    start_snapshot = deepcopy(provided_snapshot or room.get("start_state") or room.get("game_state"))
     room["game_state"] = normalize_room_start_state(
         validate_game_state(room, start_snapshot),
         arm_realtime=arm_realtime,
