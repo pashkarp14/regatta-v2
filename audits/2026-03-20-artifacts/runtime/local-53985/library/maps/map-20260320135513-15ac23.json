@@ -1,0 +1,169 @@
+{
+  "id": "map-20260320135513-15ac23",
+  "kind": "map",
+  "scope": "custom",
+  "name": "Карта 20.03.2026, 16:55:13",
+  "author": "Шкипер",
+  "description": "",
+  "created_at": "2026-03-20T13:55:13+00:00",
+  "updated_at": "2026-03-20T13:55:13+00:00",
+  "tags": [],
+  "sort_index": 999,
+  "meta": {
+    "record_mode": "map",
+    "local_pilot_mode": "hotseat"
+  },
+  "summary": {
+    "player_count": 2,
+    "mark_count": 3,
+    "play_mode": "turns",
+    "phase": "race",
+    "world": {
+      "width": 54.0,
+      "height": 72.0
+    }
+  },
+  "snapshot": {
+    "version": 2,
+    "world": {
+      "width": 54,
+      "height": 72
+    },
+    "settings": {
+      "windAngleDeg": 0,
+      "deadZoneDeg": 40,
+      "snapThreshold": 0.8,
+      "movesPerTurn": 1,
+      "roundingSide": "port",
+      "playMode": "turns",
+      "interactionMode": "contact",
+      "tackPenaltyFactor": 0.95,
+      "turnRateDegPerSec": 120,
+      "luffingSpeedPercent": 25,
+      "botDifficulty": "normal",
+      "autoGustsEnabled": false,
+      "autoGustIntervalSec": 10,
+      "autoGustDurationSec": 6,
+      "realtimePrepSeconds": 18,
+      "autoFullscreenMode": "off",
+      "showWindArrow": true,
+      "showOptimal": false,
+      "showBestStart": false,
+      "showLaylines": false,
+      "showTrails": false,
+      "optimalBoatIndex": null,
+      "bestStartBoatIndex": null,
+      "finishSeparate": false,
+      "prestartRoundsSetting": 0
+    },
+    "course": {
+      "markCount": 3,
+      "marks": [
+        {
+          "x": 27,
+          "y": 60.480000000000004
+        },
+        {
+          "x": 8.639999999999997,
+          "y": 38.88000000000001
+        },
+        {
+          "x": 8.639999999999997,
+          "y": 2
+        },
+        {
+          "x": 15.119999999999997,
+          "y": 2
+        },
+        {
+          "x": 21.599999999999998,
+          "y": 2
+        }
+      ],
+      "startA": {
+        "x": 9.719999999999999,
+        "y": 10.080000000000002
+      },
+      "startB": {
+        "x": 44.28,
+        "y": 10.080000000000002
+      },
+      "finishA": {
+        "x": 9.719999999999999,
+        "y": 10.080000000000002
+      },
+      "finishB": {
+        "x": 44.28,
+        "y": 10.080000000000002
+      },
+      "gustRect": null
+    },
+    "race": {
+      "currentPlayer": 0,
+      "raceFinishedCount": 0,
+      "subMovesLeft": 1,
+      "hybridRound": 1,
+      "hybridMovesLeft": [
+        1,
+        1
+      ],
+      "realtimeCountdownEndsAt": 0,
+      "gustExpiresAt": 0,
+      "nextAutoGustAt": 0,
+      "prestartRoundsLeft": 0,
+      "phase": "race"
+    },
+    "boats": [
+      {
+        "x": 21.24,
+        "y": 10.080000000000002,
+        "distance": 0,
+        "turns": 0,
+        "penalties": 0,
+        "collisions": 0,
+        "nextMark": 0,
+        "finished": false,
+        "place": null,
+        "hasHeading": false,
+        "heading": 0,
+        "tack": 0,
+        "color": "#e53935",
+        "speedCoeff": 1,
+        "currentSpeedUnitsPerSec": 0,
+        "penaltySlowUntil": 0,
+        "lastPenaltyAt": 0,
+        "lastPenaltyKey": "",
+        "lastPenaltyReason": "",
+        "roundInZone": false,
+        "roundSweep": 0,
+        "startDeltaMs": null,
+        "falseStartDeltaMs": null
+      },
+      {
+        "x": 32.76,
+        "y": 10.080000000000002,
+        "distance": 0,
+        "turns": 0,
+        "penalties": 0,
+        "collisions": 0,
+        "nextMark": 0,
+        "finished": false,
+        "place": null,
+        "hasHeading": false,
+        "heading": 0,
+        "tack": 0,
+        "color": "#1e88e5",
+        "speedCoeff": 1,
+        "currentSpeedUnitsPerSec": 0,
+        "penaltySlowUntil": 0,
+        "lastPenaltyAt": 0,
+        "lastPenaltyKey": "",
+        "lastPenaltyReason": "",
+        "roundInZone": false,
+        "roundSweep": 0,
+        "startDeltaMs": null,
+        "falseStartDeltaMs": null
+      }
+    ]
+  }
+}
