@@ -535,6 +535,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const ROUND_PASS_RADIUS = BOAT_RULE_LENGTH * 3; // огибание засчитывается в радиусе трех длин корпуса
   const ROUNDING_MIN_SWEEP = Math.PI / 3;
   const ROUNDING_SWEEP_BIN_RAD = Math.PI / 12;
+  const UNSTICK_PUSH_EPS = 0.03;
+  const UNSTICK_MAX_PASSES = 4;
   const REALTIME_SPEED_UNITS_PER_SEC = 2.4;
   const REALTIME_DEADZONE_SOFTNESS_DEG = 18;
   const REALTIME_TARGET_EPS = 0.04;
@@ -1484,7 +1486,7 @@ document.addEventListener("DOMContentLoaded", () => {
     return pointToSegment(point, capsule.a, capsule.b).d - capsule.r;
   }
 
-  function segmentSegmentDistance(a0, a1, b0, b1){
+  function segmentSegmentClosestPoints(a0, a1, b0, b1){
     const EPS = 1e-9;
     const u = { x: a1.x - a0.x, y: a1.y - a0.y };
     const v = { x: b1.x - b0.x, y: b1.y - b0.y };
@@ -1497,8 +1499,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const e = dot(v, w);
     const D = a * c - b * b;
 
-    let sN, sD = D;
-    let tN, tD = D;
+    let sN = D, sD = D;
+    let tN = D, tD = D;
 
     if (D < EPS){
       sN = 0;
@@ -1545,7 +1547,51 @@ document.addEventListener("DOMContentLoaded", () => {
     const tc = Math.abs(tN) < EPS ? 0 : tN / tD;
     const dx = w.x + sc * u.x - tc * v.x;
     const dy = w.y + sc * u.y - tc * v.y;
-    return Math.hypot(dx, dy);
+    return {
+      left: { x: a0.x + u.x * sc, y: a0.y + u.y * sc },
+      right: { x: b0.x + v.x * tc, y: b0.y + v.y * tc },
+      distance: Math.hypot(dx, dy)
+    };
+  }
+
+  function segmentSegmentDistance(a0, a1, b0, b1){
+    return segmentSegmentClosestPoints(a0, a1, b0, b1).distance;
+  }
+
+  function capsuleFitsWithinField(capsule, extra=0){
+    const minX = Math.min(capsule.a.x, capsule.b.x) - capsule.r - extra;
+    const maxX = Math.max(capsule.a.x, capsule.b.x) + capsule.r + extra;
+    const minY = Math.min(capsule.a.y, capsule.b.y) - capsule.r - extra;
+    const maxY = Math.max(capsule.a.y, capsule.b.y) + capsule.r + extra;
+    return minX >= -1e-9 && maxX <= worldW + 1e-9 && minY >= -1e-9 && maxY <= worldH + 1e-9;
+  }
+
+  function clampPositionToCapsuleField(pos, heading, hasHeading, extra=0){
+    const axis = boatAxisUnit(heading, hasHeading);
+    const extentX = Math.abs(axis.x) * BOAT_CAPSULE_HALF_SEGMENT + BOAT_COLLISION_RADIUS + extra;
+    const extentY = Math.abs(axis.y) * BOAT_CAPSULE_HALF_SEGMENT + BOAT_COLLISION_RADIUS + extra;
+    const minX = Math.min(extentX, worldW * 0.5);
+    const maxX = Math.max(minX, worldW - minX);
+    const minY = Math.min(extentY, worldH * 0.5);
+    const maxY = Math.max(minY, worldH - minY);
+    return {
+      x: clamp(pos.x, minX, maxX),
+      y: clamp(pos.y, minY, maxY)
+    };
+  }
+
+  function preferredSeparationDirection(primary, fallback, heading=0, hasHeading=false){
+    const normalizedPrimary = norm(primary);
+    if (normalizedPrimary.L > 1e-6){
+      return { x: normalizedPrimary.x, y: normalizedPrimary.y };
+    }
+    const normalizedFallback = norm(fallback);
+    if (normalizedFallback.L > 1e-6){
+      return { x: normalizedFallback.x, y: normalizedFallback.y };
+    }
+    const axis = boatAxisUnit(heading, hasHeading);
+    const normalizedAxis = norm(axis);
+    return { x: normalizedAxis.x, y: normalizedAxis.y };
   }
 
   function capsulesOverlap(left, right, extra=0){
@@ -2806,6 +2852,140 @@ document.addEventListener("DOMContentLoaded", () => {
     return { x: realtimeCursorDirection.x, y: realtimeCursorDirection.y };
   }
 
+  function resolveLocalRealtimeOverlaps(){
+    let changed = false;
+    const activeMarks = marks.slice(0, Math.max(0, Math.min(markCount, marks.length)));
+
+    for (let pass = 0; pass < UNSTICK_MAX_PASSES; pass++){
+      let passChanged = false;
+
+      for (const boat of boats){
+        if (!boat) continue;
+
+        let position = { x: boat.x, y: boat.y };
+        const heading = Number.isFinite(boat.heading) ? boat.heading : 0;
+        const hasHeading = !!boat.hasHeading;
+        const clampedPosition = clampPositionToCapsuleField(position, heading, hasHeading, BOAT_CLEARANCE_MARGIN);
+        if (dist(position, clampedPosition) > 1e-6){
+          boat.x = clampedPosition.x;
+          boat.y = clampedPosition.y;
+          boat.currentSpeedUnitsPerSec = 0;
+          position = clampedPosition;
+          passChanged = true;
+        }
+
+        let capsule = boatCapsuleAt(position, heading, hasHeading);
+        for (const mark of activeMarks){
+          const info = pointToSegment(mark, capsule.a, capsule.b);
+          const requiredDistance = capsule.r + MARK_RADIUS + MARK_CLEARANCE_MARGIN;
+          if (info.d >= requiredDistance - 1e-9) continue;
+
+          const direction = preferredSeparationDirection(
+            { x: info.proj.x - mark.x, y: info.proj.y - mark.y },
+            { x: position.x - mark.x, y: position.y - mark.y },
+            heading,
+            hasHeading
+          );
+          const pushDistance = requiredDistance - info.d + UNSTICK_PUSH_EPS;
+          const nextPosition = clampPositionToCapsuleField(
+            {
+              x: position.x + direction.x * pushDistance,
+              y: position.y + direction.y * pushDistance
+            },
+            heading,
+            hasHeading,
+            BOAT_CLEARANCE_MARGIN
+          );
+          if (dist(position, nextPosition) <= 1e-6) continue;
+
+          boat.x = nextPosition.x;
+          boat.y = nextPosition.y;
+          boat.currentSpeedUnitsPerSec = 0;
+          position = nextPosition;
+          capsule = boatCapsuleAt(position, heading, hasHeading);
+          passChanged = true;
+        }
+      }
+
+      if (boatsPhysicalCollisionsEnabled()){
+        for (let leftIndex = 0; leftIndex < boats.length; leftIndex++){
+          const leftBoat = boats[leftIndex];
+          if (!leftBoat) continue;
+          let leftPosition = { x: leftBoat.x, y: leftBoat.y };
+          const leftHeading = Number.isFinite(leftBoat.heading) ? leftBoat.heading : 0;
+          const leftHasHeading = !!leftBoat.hasHeading;
+          let leftCapsule = boatCapsuleAt(leftPosition, leftHeading, leftHasHeading);
+
+          for (let rightIndex = leftIndex + 1; rightIndex < boats.length; rightIndex++){
+            const rightBoat = boats[rightIndex];
+            if (!rightBoat) continue;
+            let rightPosition = { x: rightBoat.x, y: rightBoat.y };
+            const rightHeading = Number.isFinite(rightBoat.heading) ? rightBoat.heading : 0;
+            const rightHasHeading = !!rightBoat.hasHeading;
+            let rightCapsule = boatCapsuleAt(rightPosition, rightHeading, rightHasHeading);
+            const closest = segmentSegmentClosestPoints(leftCapsule.a, leftCapsule.b, rightCapsule.a, rightCapsule.b);
+            const requiredDistance = leftCapsule.r + rightCapsule.r + BOAT_CLEARANCE_MARGIN;
+            if (closest.distance >= requiredDistance - 1e-9) continue;
+
+            const direction = preferredSeparationDirection(
+              { x: closest.left.x - closest.right.x, y: closest.left.y - closest.right.y },
+              { x: leftPosition.x - rightPosition.x, y: leftPosition.y - rightPosition.y },
+              leftHeading,
+              leftHasHeading
+            );
+            const pushDistance = (requiredDistance - closest.distance + UNSTICK_PUSH_EPS) / 2;
+            const nextLeft = clampPositionToCapsuleField(
+              {
+                x: leftPosition.x + direction.x * pushDistance,
+                y: leftPosition.y + direction.y * pushDistance
+              },
+              leftHeading,
+              leftHasHeading,
+              BOAT_CLEARANCE_MARGIN
+            );
+            const nextRight = clampPositionToCapsuleField(
+              {
+                x: rightPosition.x - direction.x * pushDistance,
+                y: rightPosition.y - direction.y * pushDistance
+              },
+              rightHeading,
+              rightHasHeading,
+              BOAT_CLEARANCE_MARGIN
+            );
+
+            let moved = false;
+            if (dist(leftPosition, nextLeft) > 1e-6){
+              leftBoat.x = nextLeft.x;
+              leftBoat.y = nextLeft.y;
+              leftBoat.currentSpeedUnitsPerSec = 0;
+              leftPosition = nextLeft;
+              leftCapsule = boatCapsuleAt(leftPosition, leftHeading, leftHasHeading);
+              moved = true;
+            }
+            if (dist(rightPosition, nextRight) > 1e-6){
+              rightBoat.x = nextRight.x;
+              rightBoat.y = nextRight.y;
+              rightBoat.currentSpeedUnitsPerSec = 0;
+              rightPosition = nextRight;
+              rightCapsule = boatCapsuleAt(rightPosition, rightHeading, rightHasHeading);
+              moved = true;
+            }
+            if (moved){
+              passChanged = true;
+            }
+          }
+        }
+      }
+
+      changed = passChanged || changed;
+      if (!passChanged){
+        break;
+      }
+    }
+
+    return changed;
+  }
+
   function simulateLocalRealtimeTick(dtSeconds){
     let changed = false;
     if (isLocalRealtimePaused()){
@@ -2846,6 +3026,8 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       return changed || zeroedAnySpeed;
     }
+
+    changed = resolveLocalRealtimeOverlaps() || changed;
 
     const proposals = boats.map((boat, index) => {
       const proposal = {
@@ -2906,7 +3088,12 @@ document.addEventListener("DOMContentLoaded", () => {
         : actualDirection;
 
       proposal.accepted = true;
-      proposal.dest = clampAlongRayToField({ x: boat.x, y: boat.y }, motionDirection, stepLength);
+      proposal.dest = clampPositionToCapsuleField(
+        clampAlongRayToField({ x: boat.x, y: boat.y }, motionDirection, stepLength),
+        heading,
+        true,
+        BOAT_CLEARANCE_MARGIN
+      );
       proposal.heading = heading;
       proposal.hasHeading = true;
       proposal.direction = actualDirection;
@@ -2926,7 +3113,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (!proposal.accepted) continue;
 
       const candidateCapsule = boatCapsuleAt(proposal.dest, proposal.heading, proposal.hasHeading);
-      if (!pointInField(proposal.dest)){
+      if (!pointInField(proposal.dest) || !capsuleFitsWithinField(candidateCapsule, BOAT_CLEARANCE_MARGIN)){
         invalid.add(i);
         continue;
       }
@@ -3030,6 +3217,8 @@ document.addEventListener("DOMContentLoaded", () => {
         anyUnfinished = true;
       }
     }
+
+    changed = resolveLocalRealtimeOverlaps() || changed;
 
     currentPlayer = Math.max(0, boats.findIndex((boat) => !boat.finished));
     subMovesLeft = 0;
@@ -5529,7 +5718,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function drawRealtimeOverlay(){
     refreshRealtimeIntentFromPointer({ emit:false });
-    if (isRealtimePlayMode() && mode === "play" && (realtimeCursorTarget || realtimeCursorDirection)){
+    if (isCursorSteeringMode() && mode === "play" && (realtimeCursorTarget || realtimeCursorDirection)){
       const boatIdx = realtimeControlledBoatIndex();
       const boat = Number.isInteger(boatIdx) ? boats[boatIdx] : null;
       if (boat){
@@ -5541,10 +5730,10 @@ document.addEventListener("DOMContentLoaded", () => {
         );
         const target = worldToScreen(overlayTarget);
         ctx.save();
-        ctx.strokeStyle = rgbaHex(boat.color, 0.45);
-        ctx.fillStyle = rgbaHex(boat.color, 0.9);
+        ctx.strokeStyle = rgbaHex(boat.color, 0.72);
+        ctx.fillStyle = rgbaHex(boat.color, 0.96);
         ctx.setLineDash([8, 8]);
-        ctx.lineWidth = 2;
+        ctx.lineWidth = 3;
         ctx.beginPath();
         ctx.moveTo(start.x, start.y);
         ctx.lineTo(target.x, target.y);

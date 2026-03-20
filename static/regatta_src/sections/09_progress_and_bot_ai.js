@@ -602,6 +602,140 @@
     return { x: realtimeCursorDirection.x, y: realtimeCursorDirection.y };
   }
 
+  function resolveLocalRealtimeOverlaps(){
+    let changed = false;
+    const activeMarks = marks.slice(0, Math.max(0, Math.min(markCount, marks.length)));
+
+    for (let pass = 0; pass < UNSTICK_MAX_PASSES; pass++){
+      let passChanged = false;
+
+      for (const boat of boats){
+        if (!boat) continue;
+
+        let position = { x: boat.x, y: boat.y };
+        const heading = Number.isFinite(boat.heading) ? boat.heading : 0;
+        const hasHeading = !!boat.hasHeading;
+        const clampedPosition = clampPositionToCapsuleField(position, heading, hasHeading, BOAT_CLEARANCE_MARGIN);
+        if (dist(position, clampedPosition) > 1e-6){
+          boat.x = clampedPosition.x;
+          boat.y = clampedPosition.y;
+          boat.currentSpeedUnitsPerSec = 0;
+          position = clampedPosition;
+          passChanged = true;
+        }
+
+        let capsule = boatCapsuleAt(position, heading, hasHeading);
+        for (const mark of activeMarks){
+          const info = pointToSegment(mark, capsule.a, capsule.b);
+          const requiredDistance = capsule.r + MARK_RADIUS + MARK_CLEARANCE_MARGIN;
+          if (info.d >= requiredDistance - 1e-9) continue;
+
+          const direction = preferredSeparationDirection(
+            { x: info.proj.x - mark.x, y: info.proj.y - mark.y },
+            { x: position.x - mark.x, y: position.y - mark.y },
+            heading,
+            hasHeading
+          );
+          const pushDistance = requiredDistance - info.d + UNSTICK_PUSH_EPS;
+          const nextPosition = clampPositionToCapsuleField(
+            {
+              x: position.x + direction.x * pushDistance,
+              y: position.y + direction.y * pushDistance
+            },
+            heading,
+            hasHeading,
+            BOAT_CLEARANCE_MARGIN
+          );
+          if (dist(position, nextPosition) <= 1e-6) continue;
+
+          boat.x = nextPosition.x;
+          boat.y = nextPosition.y;
+          boat.currentSpeedUnitsPerSec = 0;
+          position = nextPosition;
+          capsule = boatCapsuleAt(position, heading, hasHeading);
+          passChanged = true;
+        }
+      }
+
+      if (boatsPhysicalCollisionsEnabled()){
+        for (let leftIndex = 0; leftIndex < boats.length; leftIndex++){
+          const leftBoat = boats[leftIndex];
+          if (!leftBoat) continue;
+          let leftPosition = { x: leftBoat.x, y: leftBoat.y };
+          const leftHeading = Number.isFinite(leftBoat.heading) ? leftBoat.heading : 0;
+          const leftHasHeading = !!leftBoat.hasHeading;
+          let leftCapsule = boatCapsuleAt(leftPosition, leftHeading, leftHasHeading);
+
+          for (let rightIndex = leftIndex + 1; rightIndex < boats.length; rightIndex++){
+            const rightBoat = boats[rightIndex];
+            if (!rightBoat) continue;
+            let rightPosition = { x: rightBoat.x, y: rightBoat.y };
+            const rightHeading = Number.isFinite(rightBoat.heading) ? rightBoat.heading : 0;
+            const rightHasHeading = !!rightBoat.hasHeading;
+            let rightCapsule = boatCapsuleAt(rightPosition, rightHeading, rightHasHeading);
+            const closest = segmentSegmentClosestPoints(leftCapsule.a, leftCapsule.b, rightCapsule.a, rightCapsule.b);
+            const requiredDistance = leftCapsule.r + rightCapsule.r + BOAT_CLEARANCE_MARGIN;
+            if (closest.distance >= requiredDistance - 1e-9) continue;
+
+            const direction = preferredSeparationDirection(
+              { x: closest.left.x - closest.right.x, y: closest.left.y - closest.right.y },
+              { x: leftPosition.x - rightPosition.x, y: leftPosition.y - rightPosition.y },
+              leftHeading,
+              leftHasHeading
+            );
+            const pushDistance = (requiredDistance - closest.distance + UNSTICK_PUSH_EPS) / 2;
+            const nextLeft = clampPositionToCapsuleField(
+              {
+                x: leftPosition.x + direction.x * pushDistance,
+                y: leftPosition.y + direction.y * pushDistance
+              },
+              leftHeading,
+              leftHasHeading,
+              BOAT_CLEARANCE_MARGIN
+            );
+            const nextRight = clampPositionToCapsuleField(
+              {
+                x: rightPosition.x - direction.x * pushDistance,
+                y: rightPosition.y - direction.y * pushDistance
+              },
+              rightHeading,
+              rightHasHeading,
+              BOAT_CLEARANCE_MARGIN
+            );
+
+            let moved = false;
+            if (dist(leftPosition, nextLeft) > 1e-6){
+              leftBoat.x = nextLeft.x;
+              leftBoat.y = nextLeft.y;
+              leftBoat.currentSpeedUnitsPerSec = 0;
+              leftPosition = nextLeft;
+              leftCapsule = boatCapsuleAt(leftPosition, leftHeading, leftHasHeading);
+              moved = true;
+            }
+            if (dist(rightPosition, nextRight) > 1e-6){
+              rightBoat.x = nextRight.x;
+              rightBoat.y = nextRight.y;
+              rightBoat.currentSpeedUnitsPerSec = 0;
+              rightPosition = nextRight;
+              rightCapsule = boatCapsuleAt(rightPosition, rightHeading, rightHasHeading);
+              moved = true;
+            }
+            if (moved){
+              passChanged = true;
+            }
+          }
+        }
+      }
+
+      changed = passChanged || changed;
+      if (!passChanged){
+        break;
+      }
+    }
+
+    return changed;
+  }
+
   function simulateLocalRealtimeTick(dtSeconds){
     let changed = false;
     if (isLocalRealtimePaused()){
@@ -642,6 +776,8 @@
       }
       return changed || zeroedAnySpeed;
     }
+
+    changed = resolveLocalRealtimeOverlaps() || changed;
 
     const proposals = boats.map((boat, index) => {
       const proposal = {
@@ -702,7 +838,12 @@
         : actualDirection;
 
       proposal.accepted = true;
-      proposal.dest = clampAlongRayToField({ x: boat.x, y: boat.y }, motionDirection, stepLength);
+      proposal.dest = clampPositionToCapsuleField(
+        clampAlongRayToField({ x: boat.x, y: boat.y }, motionDirection, stepLength),
+        heading,
+        true,
+        BOAT_CLEARANCE_MARGIN
+      );
       proposal.heading = heading;
       proposal.hasHeading = true;
       proposal.direction = actualDirection;
@@ -722,7 +863,7 @@
       if (!proposal.accepted) continue;
 
       const candidateCapsule = boatCapsuleAt(proposal.dest, proposal.heading, proposal.hasHeading);
-      if (!pointInField(proposal.dest)){
+      if (!pointInField(proposal.dest) || !capsuleFitsWithinField(candidateCapsule, BOAT_CLEARANCE_MARGIN)){
         invalid.add(i);
         continue;
       }
@@ -826,6 +967,8 @@
         anyUnfinished = true;
       }
     }
+
+    changed = resolveLocalRealtimeOverlaps() || changed;
 
     currentPlayer = Math.max(0, boats.findIndex((boat) => !boat.finished));
     subMovesLeft = 0;

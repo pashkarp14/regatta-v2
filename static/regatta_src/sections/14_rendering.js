@@ -674,7 +674,7 @@
 
   function drawRealtimeOverlay(){
     refreshRealtimeIntentFromPointer({ emit:false });
-    if (isRealtimePlayMode() && mode === "play" && (realtimeCursorTarget || realtimeCursorDirection)){
+    if (isCursorSteeringMode() && mode === "play" && (realtimeCursorTarget || realtimeCursorDirection)){
       const boatIdx = realtimeControlledBoatIndex();
       const boat = Number.isInteger(boatIdx) ? boats[boatIdx] : null;
       if (boat){
@@ -686,10 +686,10 @@
         );
         const target = worldToScreen(overlayTarget);
         ctx.save();
-        ctx.strokeStyle = rgbaHex(boat.color, 0.45);
-        ctx.fillStyle = rgbaHex(boat.color, 0.9);
+        ctx.strokeStyle = rgbaHex(boat.color, 0.72);
+        ctx.fillStyle = rgbaHex(boat.color, 0.96);
         ctx.setLineDash([8, 8]);
-        ctx.lineWidth = 2;
+        ctx.lineWidth = 3;
         ctx.beginPath();
         ctx.moveTo(start.x, start.y);
         ctx.lineTo(target.x, target.y);

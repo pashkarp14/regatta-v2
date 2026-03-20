@@ -252,10 +252,41 @@ def boat_position(boat: dict[str, Any]) -> dict[str, float]:
     return {"x": float(boat["x"]), "y": float(boat["y"])}
 
 
+def capsule_fits_within_field(
+    capsule: dict[str, Any], world_w: float, world_h: float, extra: float = 0.0
+) -> bool:
+    min_x = min(capsule["a"]["x"], capsule["b"]["x"]) - capsule["r"] - extra
+    max_x = max(capsule["a"]["x"], capsule["b"]["x"]) + capsule["r"] + extra
+    min_y = min(capsule["a"]["y"], capsule["b"]["y"]) - capsule["r"] - extra
+    max_y = max(capsule["a"]["y"], capsule["b"]["y"]) + capsule["r"] + extra
+    return min_x >= -1e-9 and max_x <= world_w + 1e-9 and min_y >= -1e-9 and max_y <= world_h + 1e-9
+
+
 def clamp_position_to_field(position: dict[str, float], world_w: float, world_h: float) -> dict[str, float]:
     return {
         "x": clamp(position["x"], 0.0, world_w),
         "y": clamp(position["y"], 0.0, world_h),
+    }
+
+
+def clamp_position_to_capsule_field(
+    position: dict[str, float],
+    heading: float | None,
+    has_heading: bool,
+    world_w: float,
+    world_h: float,
+    extra: float = 0.0,
+) -> dict[str, float]:
+    axis = boat_axis_unit(heading, has_heading)
+    extent_x = abs(axis["x"]) * BOAT_CAPSULE_HALF_SEGMENT + BOAT_COLLISION_RADIUS + extra
+    extent_y = abs(axis["y"]) * BOAT_CAPSULE_HALF_SEGMENT + BOAT_COLLISION_RADIUS + extra
+    min_x = min(extent_x, world_w * 0.5)
+    max_x = max(min_x, world_w - min_x)
+    min_y = min(extent_y, world_h * 0.5)
+    max_y = max(min_y, world_h - min_y)
+    return {
+        "x": clamp(position["x"], min_x, max_x),
+        "y": clamp(position["y"], min_y, max_y),
     }
 
 
@@ -302,6 +333,20 @@ def resolve_realtime_overlaps(
             position = boat_position(boat)
             heading = float(boat.get("heading") or 0.0)
             has_heading = bool(boat.get("hasHeading"))
+            clamped_position = clamp_position_to_capsule_field(
+                position,
+                heading,
+                has_heading,
+                world_w,
+                world_h,
+                BOAT_CLEARANCE_MARGIN,
+            )
+            if dist(position, clamped_position) > 1e-6:
+                boat["x"] = clamped_position["x"]
+                boat["y"] = clamped_position["y"]
+                boat["currentSpeedUnitsPerSec"] = 0.0
+                position = clamped_position
+                pass_changed = True
             capsule = boat_capsule_at(position, heading, has_heading)
 
             for mark in active_marks:
@@ -324,6 +369,14 @@ def resolve_realtime_overlaps(
                     },
                     world_w,
                     world_h,
+                )
+                next_position = clamp_position_to_capsule_field(
+                    next_position,
+                    heading,
+                    has_heading,
+                    world_w,
+                    world_h,
+                    BOAT_CLEARANCE_MARGIN,
                 )
                 if dist(position, next_position) <= 1e-6:
                     continue
@@ -375,6 +428,14 @@ def resolve_realtime_overlaps(
                         world_w,
                         world_h,
                     )
+                    next_left = clamp_position_to_capsule_field(
+                        next_left,
+                        left_heading,
+                        left_has_heading,
+                        world_w,
+                        world_h,
+                        BOAT_CLEARANCE_MARGIN,
+                    )
                     next_right = clamp_position_to_field(
                         {
                             "x": right_position["x"] - direction["x"] * push_distance,
@@ -383,6 +444,14 @@ def resolve_realtime_overlaps(
                         world_w,
                         world_h,
                     )
+                    next_right = clamp_position_to_capsule_field(
+                        next_right,
+                        right_heading,
+                        right_has_heading,
+                        world_w,
+                        world_h,
+                        BOAT_CLEARANCE_MARGIN,
+                    )
 
                     moved = False
                     if dist(left_position, next_left) > 1e-6:
@@ -390,11 +459,13 @@ def resolve_realtime_overlaps(
                         left_boat["y"] = next_left["y"]
                         left_boat["currentSpeedUnitsPerSec"] = 0.0
                         left_position = next_left
+                        left_capsule = boat_capsule_at(left_position, left_heading, left_has_heading)
                         moved = True
                     if dist(right_position, next_right) > 1e-6:
                         right_boat["x"] = next_right["x"]
                         right_boat["y"] = next_right["y"]
                         right_boat["currentSpeedUnitsPerSec"] = 0.0
+                        right_position = next_right
                         moved = True
                     if moved:
                         pass_changed = True
@@ -1256,6 +1327,14 @@ def simulate_realtime_tick(game_state: dict[str, Any], controls: dict[int, dict[
             world_w,
             world_h,
         )
+        dest = clamp_position_to_capsule_field(
+            dest,
+            heading,
+            True,
+            world_w,
+            world_h,
+            BOAT_CLEARANCE_MARGIN,
+        )
         travel_distance = dist({"x": float(boat["x"]), "y": float(boat["y"])}, dest)
         proposal.update(
             {
@@ -1282,7 +1361,12 @@ def simulate_realtime_tick(game_state: dict[str, Any], controls: dict[int, dict[
         heading = proposal["heading"]
         has_heading = proposal["hasHeading"]
         candidate_capsule = boat_capsule_at(dest, heading, has_heading)
-        if not point_in_field(dest, world_w, world_h):
+        if not point_in_field(dest, world_w, world_h) or not capsule_fits_within_field(
+            candidate_capsule,
+            world_w,
+            world_h,
+            BOAT_CLEARANCE_MARGIN,
+        ):
             invalid.add(index)
             continue
         for mark_index in range(mark_count):
@@ -1360,6 +1444,19 @@ def simulate_realtime_tick(game_state: dict[str, Any], controls: dict[int, dict[
                 update_boat_mark_and_finish(boat, prev_pos, dest, proposal["direction"], game_state)
         if not boat.get("finished"):
             any_unfinished = True
+
+    changed = (
+        resolve_realtime_overlaps(
+            boats,
+            marks,
+            mark_count,
+            settings,
+            world_w=world_w,
+            world_h=world_h,
+            wind_angle_deg=wind_angle_deg,
+        )
+        or changed
+    )
 
     race["currentPlayer"] = next((idx for idx, boat in enumerate(boats) if not boat.get("finished")), 0)
     race["subMovesLeft"] = 0

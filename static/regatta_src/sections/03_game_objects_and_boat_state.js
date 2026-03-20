@@ -73,6 +73,8 @@
   const ROUND_PASS_RADIUS = BOAT_RULE_LENGTH * 3; // огибание засчитывается в радиусе трех длин корпуса
   const ROUNDING_MIN_SWEEP = Math.PI / 3;
   const ROUNDING_SWEEP_BIN_RAD = Math.PI / 12;
+  const UNSTICK_PUSH_EPS = 0.03;
+  const UNSTICK_MAX_PASSES = 4;
   const REALTIME_SPEED_UNITS_PER_SEC = 2.4;
   const REALTIME_DEADZONE_SOFTNESS_DEG = 18;
   const REALTIME_TARGET_EPS = 0.04;

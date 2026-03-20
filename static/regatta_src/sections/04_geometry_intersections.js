@@ -76,7 +76,7 @@
     return pointToSegment(point, capsule.a, capsule.b).d - capsule.r;
   }
 
-  function segmentSegmentDistance(a0, a1, b0, b1){
+  function segmentSegmentClosestPoints(a0, a1, b0, b1){
     const EPS = 1e-9;
     const u = { x: a1.x - a0.x, y: a1.y - a0.y };
     const v = { x: b1.x - b0.x, y: b1.y - b0.y };
@@ -89,8 +89,8 @@
     const e = dot(v, w);
     const D = a * c - b * b;
 
-    let sN, sD = D;
-    let tN, tD = D;
+    let sN = D, sD = D;
+    let tN = D, tD = D;
 
     if (D < EPS){
       sN = 0;
@@ -137,7 +137,51 @@
     const tc = Math.abs(tN) < EPS ? 0 : tN / tD;
     const dx = w.x + sc * u.x - tc * v.x;
     const dy = w.y + sc * u.y - tc * v.y;
-    return Math.hypot(dx, dy);
+    return {
+      left: { x: a0.x + u.x * sc, y: a0.y + u.y * sc },
+      right: { x: b0.x + v.x * tc, y: b0.y + v.y * tc },
+      distance: Math.hypot(dx, dy)
+    };
+  }
+
+  function segmentSegmentDistance(a0, a1, b0, b1){
+    return segmentSegmentClosestPoints(a0, a1, b0, b1).distance;
+  }
+
+  function capsuleFitsWithinField(capsule, extra=0){
+    const minX = Math.min(capsule.a.x, capsule.b.x) - capsule.r - extra;
+    const maxX = Math.max(capsule.a.x, capsule.b.x) + capsule.r + extra;
+    const minY = Math.min(capsule.a.y, capsule.b.y) - capsule.r - extra;
+    const maxY = Math.max(capsule.a.y, capsule.b.y) + capsule.r + extra;
+    return minX >= -1e-9 && maxX <= worldW + 1e-9 && minY >= -1e-9 && maxY <= worldH + 1e-9;
+  }
+
+  function clampPositionToCapsuleField(pos, heading, hasHeading, extra=0){
+    const axis = boatAxisUnit(heading, hasHeading);
+    const extentX = Math.abs(axis.x) * BOAT_CAPSULE_HALF_SEGMENT + BOAT_COLLISION_RADIUS + extra;
+    const extentY = Math.abs(axis.y) * BOAT_CAPSULE_HALF_SEGMENT + BOAT_COLLISION_RADIUS + extra;
+    const minX = Math.min(extentX, worldW * 0.5);
+    const maxX = Math.max(minX, worldW - minX);
+    const minY = Math.min(extentY, worldH * 0.5);
+    const maxY = Math.max(minY, worldH - minY);
+    return {
+      x: clamp(pos.x, minX, maxX),
+      y: clamp(pos.y, minY, maxY)
+    };
+  }
+
+  function preferredSeparationDirection(primary, fallback, heading=0, hasHeading=false){
+    const normalizedPrimary = norm(primary);
+    if (normalizedPrimary.L > 1e-6){
+      return { x: normalizedPrimary.x, y: normalizedPrimary.y };
+    }
+    const normalizedFallback = norm(fallback);
+    if (normalizedFallback.L > 1e-6){
+      return { x: normalizedFallback.x, y: normalizedFallback.y };
+    }
+    const axis = boatAxisUnit(heading, hasHeading);
+    const normalizedAxis = norm(axis);
+    return { x: normalizedAxis.x, y: normalizedAxis.y };
   }
 
   function capsulesOverlap(left, right, extra=0){
