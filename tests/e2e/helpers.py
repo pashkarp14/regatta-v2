@@ -122,6 +122,18 @@ def build_realtime_state(page: Page, scenario: str, *, countdown: bool = True) -
     )
 
 
+def build_wall_plus_mark_pressure_state(page: Page) -> tuple[dict[str, Any], dict[str, float]]:
+    state = build_realtime_state(page, "wall_plus_mark", countdown=False)
+    state["boats"][0]["x"] = 0.3125907724703513
+    state["boats"][0]["y"] = 11.22011130805209
+    state["course"]["marks"][0] = {
+        "x": 0.7133090949862662,
+        "y": 11.431344668183305,
+    }
+    target = {"x": -5.0, "y": state["course"]["marks"][0]["y"]}
+    return state, target
+
+
 def import_state(page: Page, state: dict[str, Any]) -> None:
     page.evaluate(
         """(state) => {

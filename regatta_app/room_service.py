@@ -86,6 +86,20 @@ def room_view(room_code: str) -> dict[str, Any]:
     return public_room_view(room, current_session_state().player_token)
 
 
+def _validated_room_snapshot(room: dict[str, Any], snapshot: dict[str, Any] | None) -> dict[str, Any]:
+    if snapshot is None:
+        raise RoomValidationError("Room state is not available.")
+    return validate_game_state(room, deepcopy(snapshot))
+
+
+def _ensure_initial_lobby_state(room: dict[str, Any]) -> None:
+    if isinstance(room.get("initial_lobby_state"), dict):
+        return
+    fallback = room.get("start_state") or room.get("game_state")
+    if isinstance(fallback, dict):
+        room["initial_lobby_state"] = _validated_room_snapshot(room, fallback)
+
+
 def start_room_match(
     room_code: str,
     *,
@@ -101,14 +115,15 @@ def start_room_match(
     if not room_start_ready(room):
         raise RoomValidationError("Wait until every racing seat is occupied.")
 
+    _ensure_initial_lobby_state(room)
     provided_snapshot = None
     if game_state is not None:
-        provided_snapshot = validate_game_state(room, deepcopy(game_state))
+        provided_snapshot = _validated_room_snapshot(room, game_state)
         room["start_state"] = deepcopy(provided_snapshot)
 
     start_snapshot = deepcopy(provided_snapshot or room.get("start_state") or room.get("game_state"))
     room["game_state"] = normalize_room_start_state(
-        validate_game_state(room, start_snapshot),
+        _validated_room_snapshot(room, start_snapshot),
         arm_realtime=arm_realtime,
     )
     room["status"] = "live"
@@ -125,14 +140,35 @@ def edit_room_match(room_code: str) -> tuple[dict[str, Any], str | None]:
     if room["host_token"] != player_token:
         raise RoomForbidden("Only the room host can reopen the lobby.")
     if room.get("status") != "live":
-        raise RoomValidationError("Only a finished live match can return to the lobby.")
+        raise RoomValidationError("Only a live match can return to the lobby.")
 
-    race = (room.get("game_state") or {}).get("race") or {}
-    if race.get("phase") != "finished":
-        raise RoomValidationError("Finish the current race before editing the course again.")
+    _ensure_initial_lobby_state(room)
+    start_snapshot = _validated_room_snapshot(room, room.get("start_state") or room.get("game_state"))
+    room["start_state"] = deepcopy(start_snapshot)
+    room["game_state"] = normalize_lobby_preview_state(start_snapshot)
+    room["status"] = "lobby"
+    room["revision"] += 1
+    room_store().save_room(room)
+    return room, player_token
 
-    start_snapshot = deepcopy(room.get("start_state") or room.get("game_state"))
-    room["game_state"] = normalize_lobby_preview_state(validate_game_state(room, start_snapshot))
+
+def reset_room_lobby(room_code: str) -> tuple[dict[str, Any], str | None]:
+    player_token = current_session_state().player_token
+    room = room_store().get_room(room_code)
+    if room is None:
+        raise RoomNotFound("Room not found.")
+    if room["host_token"] != player_token:
+        raise RoomForbidden("Only the room host can restore the original lobby.")
+    if room.get("status") not in {"lobby", "live"}:
+        raise RoomValidationError("Only an active room can restore the original lobby.")
+
+    _ensure_initial_lobby_state(room)
+    baseline_snapshot = _validated_room_snapshot(
+        room,
+        room.get("initial_lobby_state") or room.get("start_state") or room.get("game_state"),
+    )
+    room["start_state"] = deepcopy(baseline_snapshot)
+    room["game_state"] = normalize_lobby_preview_state(baseline_snapshot)
     room["status"] = "lobby"
     room["revision"] += 1
     room_store().save_room(room)

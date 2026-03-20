@@ -8,6 +8,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const joinRoomBtn = document.getElementById("joinRoom");
   const leaveRoomBtn = document.getElementById("leaveRoom");
   const startRoomBtn = document.getElementById("startRoom");
+  const resetLobbyBtn = document.getElementById("resetLobby");
   const copyRoomCodeBtn = document.getElementById("copyRoomCode");
   const roomHostRoleEl = document.getElementById("roomHostRole");
   const roomCodeValueEl = document.getElementById("roomCodeValue");
@@ -295,13 +296,16 @@ document.addEventListener("DOMContentLoaded", () => {
     return roomState.room.status === "lobby" && isRoomHost();
   }
 
-  function canEditFinishedRoom() {
+  function canEditLiveRoom() {
     return !!(
       roomState.room
       && isRoomHost()
       && roomState.room.status === "live"
-      && roomRacePhase() === "finished"
     );
+  }
+
+  function canResetLobby() {
+    return !!(roomState.room && isRoomHost());
   }
 
   function canEditTurnBudget() {
@@ -383,16 +387,16 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     const roomReady = roomStartReady(roomState.room);
-    const editingFinishedRoom = canEditFinishedRoom();
+    const editingLiveRoom = canEditLiveRoom();
     const waitingStart = roomState.room.status === "lobby" || isPendingRealtimeStartRoom();
     regatta.setBoardStartActionOverride({
-      label: editingFinishedRoom ? "Редактировать карту" : (waitingStart ? "Старт гонки" : "Начать гонку заново"),
-      title: editingFinishedRoom
-        ? "Вернуть комнату в лобби и снова открыть все настройки дистанции"
+      label: editingLiveRoom ? "В лобби" : (waitingStart ? "Старт гонки" : "Начать гонку заново"),
+      title: editingLiveRoom
+        ? "Остановить текущую гонку и снова открыть настройки дистанции"
         : (waitingStart
           ? (roomReady ? "Запустить матч" : "Дождись всех участников")
           : "Перезапустить матч с текущей дистанцией"),
-      disabled: editingFinishedRoom ? false : !roomReady,
+      disabled: editingLiveRoom ? false : !roomReady,
       onTrigger: handleRoomStartAction,
     });
   }
@@ -601,14 +605,18 @@ document.addEventListener("DOMContentLoaded", () => {
     copyRoomCodeBtn.disabled = !roomState.room;
     startRoomBtn.disabled = roomStartPending || (
       roomState.room
-        ? (!isRoomHost() || (!roomStartReady(roomState.room) && !canEditFinishedRoom()))
+        ? (
+            !isRoomHost()
+            || (roomState.room.status === "lobby" && !roomStartReady(roomState.room))
+            || !["lobby", "live"].includes(roomState.room.status)
+          )
         : !pendingDraft
     );
     if (startRoomBtn) {
       if (!roomState.room) {
         startRoomBtn.textContent = pendingDraft ? "Открыть комнату" : "Запустить матч";
-      } else if (canEditFinishedRoom()) {
-        startRoomBtn.textContent = "Редактировать карту";
+      } else if (canEditLiveRoom()) {
+        startRoomBtn.textContent = "Остановить и пересобрать карту";
       } else {
         startRoomBtn.textContent = (roomState.room.status === "lobby" || isPendingRealtimeStartRoom())
           ? "Запустить матч"
@@ -617,6 +625,11 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     if (leaveRoomBtn) {
       leaveRoomBtn.textContent = roomState.room ? "Выйти" : (pendingDraft ? "Отменить" : "Выйти");
+    }
+    if (resetLobbyBtn) {
+      const showResetLobby = canResetLobby();
+      resetLobbyBtn.classList.toggle("hidden", !showResetLobby);
+      resetLobbyBtn.disabled = !showResetLobby || roomStartPending;
     }
 
     if (!roomState.room) {
@@ -842,6 +855,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function handleIncomingRoom(room) {
     if (!room) return;
+    const previousStatus = roomState.room?.status || null;
 
     const incomingState = room.game_state;
     if (incomingState) {
@@ -850,6 +864,11 @@ document.addEventListener("DOMContentLoaded", () => {
         roomState.applyingRemote = true;
         try {
           regatta.importState(incomingState);
+          if (previousStatus === "live" && room.status === "lobby") {
+            regatta.clearRealtimeIntent?.();
+            roomState.lastRealtimeIntentKey = "";
+            roomState.lastRealtimeIntentSentAt = 0;
+          }
           roomState.lastFingerprint = regatta.fingerprintState();
         } finally {
           roomState.applyingRemote = false;
@@ -947,11 +966,35 @@ document.addEventListener("DOMContentLoaded", () => {
       roomState.applyingRemote = true;
       try {
         regatta.importState(payload.room.game_state);
+        regatta.clearRealtimeIntent?.();
         roomState.lastFingerprint = regatta.fingerprintState();
       } finally {
         roomState.applyingRemote = false;
       }
     }
+    roomState.lastRealtimeIntentKey = "";
+    roomState.lastRealtimeIntentSentAt = 0;
+    renderRoom(payload.room);
+  }
+
+  async function resetLobby() {
+    if (!roomState.room) return;
+    const payload = await apiRequest(`/api/rooms/${roomState.room.code}/reset-lobby`, {
+      method: "POST",
+    });
+
+    if (payload.room?.game_state) {
+      roomState.applyingRemote = true;
+      try {
+        regatta.importState(payload.room.game_state);
+        regatta.clearRealtimeIntent?.();
+        roomState.lastFingerprint = regatta.fingerprintState();
+      } finally {
+        roomState.applyingRemote = false;
+      }
+    }
+    roomState.lastRealtimeIntentKey = "";
+    roomState.lastRealtimeIntentSentAt = 0;
     renderRoom(payload.room);
   }
 
@@ -986,7 +1029,7 @@ document.addEventListener("DOMContentLoaded", () => {
     applyPermissions();
 
     try {
-      if (canEditFinishedRoom()) {
+      if (canEditLiveRoom()) {
         await editRoom();
         return;
       }
@@ -1146,6 +1189,14 @@ document.addEventListener("DOMContentLoaded", () => {
     await handleRoomStartAction();
   });
 
+  resetLobbyBtn?.addEventListener("click", async () => {
+    try {
+      await resetLobby();
+    } catch (error) {
+      setNotice(error.message, "danger");
+    }
+  });
+
   copyRoomCodeBtn.addEventListener("click", copyRoomCode);
 
   joinRoomCodeInput.addEventListener("input", () => {
@@ -1193,6 +1244,7 @@ document.addEventListener("DOMContentLoaded", () => {
     leaveRoom,
     startRoom,
     editRoom,
+    resetLobby,
     canToggleRoomPause,
     isRoomPaused: isRoomRealtimePaused,
     toggleRoomPause,

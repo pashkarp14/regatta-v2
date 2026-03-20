@@ -512,6 +512,7 @@
     isRealtimePaused,
     toggleLocalRealtimePause,
     resetRaceToReadyState: handleResetAction,
+    clearRealtimeIntent,
     setServerClockOffset,
     setBoardStartActionOverride,
     triggerBoardStartAction,

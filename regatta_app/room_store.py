@@ -297,9 +297,11 @@ class RoomStore:
                 }
             ],
             "start_state": None,
+            "initial_lobby_state": None,
             "game_state": None,
         }
         room["start_state"] = validate_game_state(room, deepcopy(game_state))
+        room["initial_lobby_state"] = deepcopy(room["start_state"])
         room["game_state"] = normalize_lobby_preview_state(room["start_state"])
         self.save_room(room)
         return room, player_token

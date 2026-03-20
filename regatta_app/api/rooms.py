@@ -11,6 +11,7 @@ from ..room_service import (
     edit_room_match,
     join_room_from_payload,
     leave_current_room,
+    reset_room_lobby,
     room_view,
     start_room_match,
 )
@@ -63,6 +64,14 @@ def start_room(room_code: str):
 @bp.post("/api/rooms/<room_code>/edit")
 def edit_room(room_code: str):
     room, player_token = edit_room_match(room_code)
+    pop_realtime_control(room["code"])
+    broadcast_room_snapshot(room)
+    return serialize_room(room, player_token)
+
+
+@bp.post("/api/rooms/<room_code>/reset-lobby")
+def reset_lobby(room_code: str):
+    room, player_token = reset_room_lobby(room_code)
     pop_realtime_control(room["code"])
     broadcast_room_snapshot(room)
     return serialize_room(room, player_token)

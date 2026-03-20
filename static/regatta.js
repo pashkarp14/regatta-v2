@@ -2852,6 +2852,128 @@ document.addEventListener("DOMContentLoaded", () => {
     return { x: realtimeCursorDirection.x, y: realtimeCursorDirection.y };
   }
 
+  function appendUniqueSeparationDirection(directions, seenKeys, vector){
+    const normalized = norm(vector);
+    if (normalized.L <= 1e-6) return;
+    const candidate = { x: normalized.x, y: normalized.y };
+    const key = `${candidate.x.toFixed(4)},${candidate.y.toFixed(4)}`;
+    if (seenKeys.has(key)) return;
+    seenKeys.add(key);
+    directions.push(candidate);
+  }
+
+  function separationDirectionCandidates(primary, fallback, heading=0, hasHeading=false, extraVectors=[]){
+    const directions = [];
+    const seenKeys = new Set();
+    const axis = boatAxisUnit(heading, hasHeading);
+    const perpendicular = { x: -axis.y, y: axis.x };
+    appendUniqueSeparationDirection(directions, seenKeys, primary);
+    appendUniqueSeparationDirection(directions, seenKeys, fallback);
+    appendUniqueSeparationDirection(directions, seenKeys, axis);
+    appendUniqueSeparationDirection(directions, seenKeys, { x: -axis.x, y: -axis.y });
+    appendUniqueSeparationDirection(directions, seenKeys, perpendicular);
+    appendUniqueSeparationDirection(directions, seenKeys, { x: -perpendicular.x, y: -perpendicular.y });
+    for (const vector of extraVectors){
+      appendUniqueSeparationDirection(directions, seenKeys, vector);
+    }
+    if (!directions.length){
+      appendUniqueSeparationDirection(directions, seenKeys, { x: 1, y: 0 });
+    }
+    return directions;
+  }
+
+  function bestMarkUnstickPosition(position, mark, heading, hasHeading, pushDistance, primary, fallback){
+    const directions = separationDirectionCandidates(primary, fallback, heading, hasHeading);
+    let bestPosition = null;
+    let bestClearance = -Infinity;
+    let bestMovement = 0;
+
+    for (const direction of directions){
+      const nextPosition = clampPositionToCapsuleField(
+        {
+          x: position.x + direction.x * pushDistance,
+          y: position.y + direction.y * pushDistance
+        },
+        heading,
+        hasHeading,
+        BOAT_CLEARANCE_MARGIN
+      );
+      const moved = dist(position, nextPosition);
+      if (moved <= 1e-6) continue;
+
+      const nextCapsule = boatCapsuleAt(nextPosition, heading, hasHeading);
+      const nextClearance = pointToSegment(mark, nextCapsule.a, nextCapsule.b).d;
+      if (
+        bestPosition === null
+        || nextClearance > bestClearance + 1e-6
+        || (Math.abs(nextClearance - bestClearance) <= 1e-6 && moved > bestMovement + 1e-6)
+      ){
+        bestPosition = nextPosition;
+        bestClearance = nextClearance;
+        bestMovement = moved;
+      }
+    }
+
+    return bestPosition;
+  }
+
+  function bestBoatUnstickPair(leftPosition, rightPosition, leftHeading, leftHasHeading, rightHeading, rightHasHeading, pushDistance, primary, fallback){
+    const rightAxis = boatAxisUnit(rightHeading, rightHasHeading);
+    const rightPerpendicular = { x: -rightAxis.y, y: rightAxis.x };
+    const directions = separationDirectionCandidates(primary, fallback, leftHeading, leftHasHeading, [
+      rightAxis,
+      { x: -rightAxis.x, y: -rightAxis.y },
+      rightPerpendicular,
+      { x: -rightPerpendicular.x, y: -rightPerpendicular.y }
+    ]);
+    let bestPair = null;
+    let bestClearance = -Infinity;
+    let bestMovement = 0;
+
+    for (const direction of directions){
+      const nextLeft = clampPositionToCapsuleField(
+        {
+          x: leftPosition.x + direction.x * pushDistance,
+          y: leftPosition.y + direction.y * pushDistance
+        },
+        leftHeading,
+        leftHasHeading,
+        BOAT_CLEARANCE_MARGIN
+      );
+      const nextRight = clampPositionToCapsuleField(
+        {
+          x: rightPosition.x - direction.x * pushDistance,
+          y: rightPosition.y - direction.y * pushDistance
+        },
+        rightHeading,
+        rightHasHeading,
+        BOAT_CLEARANCE_MARGIN
+      );
+      const moved = dist(leftPosition, nextLeft) + dist(rightPosition, nextRight);
+      if (moved <= 1e-6) continue;
+
+      const nextLeftCapsule = boatCapsuleAt(nextLeft, leftHeading, leftHasHeading);
+      const nextRightCapsule = boatCapsuleAt(nextRight, rightHeading, rightHasHeading);
+      const nextClearance = segmentSegmentClosestPoints(
+        nextLeftCapsule.a,
+        nextLeftCapsule.b,
+        nextRightCapsule.a,
+        nextRightCapsule.b
+      ).distance;
+      if (
+        bestPair === null
+        || nextClearance > bestClearance + 1e-6
+        || (Math.abs(nextClearance - bestClearance) <= 1e-6 && moved > bestMovement + 1e-6)
+      ){
+        bestPair = { left: nextLeft, right: nextRight };
+        bestClearance = nextClearance;
+        bestMovement = moved;
+      }
+    }
+
+    return bestPair;
+  }
+
   function resolveLocalRealtimeOverlaps(){
     let changed = false;
     const activeMarks = marks.slice(0, Math.max(0, Math.min(markCount, marks.length)));
@@ -2880,23 +3002,19 @@ document.addEventListener("DOMContentLoaded", () => {
           const requiredDistance = capsule.r + MARK_RADIUS + MARK_CLEARANCE_MARGIN;
           if (info.d >= requiredDistance - 1e-9) continue;
 
-          const direction = preferredSeparationDirection(
-            { x: info.proj.x - mark.x, y: info.proj.y - mark.y },
-            { x: position.x - mark.x, y: position.y - mark.y },
-            heading,
-            hasHeading
-          );
+          const primary = { x: info.proj.x - mark.x, y: info.proj.y - mark.y };
+          const fallback = { x: position.x - mark.x, y: position.y - mark.y };
           const pushDistance = requiredDistance - info.d + UNSTICK_PUSH_EPS;
-          const nextPosition = clampPositionToCapsuleField(
-            {
-              x: position.x + direction.x * pushDistance,
-              y: position.y + direction.y * pushDistance
-            },
+          const nextPosition = bestMarkUnstickPosition(
+            position,
+            mark,
             heading,
             hasHeading,
-            BOAT_CLEARANCE_MARGIN
+            pushDistance,
+            primary,
+            fallback
           );
-          if (dist(position, nextPosition) <= 1e-6) continue;
+          if (!nextPosition) continue;
 
           boat.x = nextPosition.x;
           boat.y = nextPosition.y;
@@ -2927,31 +3045,24 @@ document.addEventListener("DOMContentLoaded", () => {
             const requiredDistance = leftCapsule.r + rightCapsule.r + BOAT_CLEARANCE_MARGIN;
             if (closest.distance >= requiredDistance - 1e-9) continue;
 
-            const direction = preferredSeparationDirection(
-              { x: closest.left.x - closest.right.x, y: closest.left.y - closest.right.y },
-              { x: leftPosition.x - rightPosition.x, y: leftPosition.y - rightPosition.y },
-              leftHeading,
-              leftHasHeading
-            );
+            const primary = { x: closest.left.x - closest.right.x, y: closest.left.y - closest.right.y };
+            const fallback = { x: leftPosition.x - rightPosition.x, y: leftPosition.y - rightPosition.y };
             const pushDistance = (requiredDistance - closest.distance + UNSTICK_PUSH_EPS) / 2;
-            const nextLeft = clampPositionToCapsuleField(
-              {
-                x: leftPosition.x + direction.x * pushDistance,
-                y: leftPosition.y + direction.y * pushDistance
-              },
+            const nextPair = bestBoatUnstickPair(
+              leftPosition,
+              rightPosition,
               leftHeading,
               leftHasHeading,
-              BOAT_CLEARANCE_MARGIN
-            );
-            const nextRight = clampPositionToCapsuleField(
-              {
-                x: rightPosition.x - direction.x * pushDistance,
-                y: rightPosition.y - direction.y * pushDistance
-              },
               rightHeading,
               rightHasHeading,
-              BOAT_CLEARANCE_MARGIN
+              pushDistance,
+              primary,
+              fallback
             );
+            if (!nextPair) continue;
+
+            const nextLeft = nextPair.left;
+            const nextRight = nextPair.right;
 
             let moved = false;
             if (dist(leftPosition, nextLeft) > 1e-6){
@@ -6619,6 +6730,7 @@ document.addEventListener("DOMContentLoaded", () => {
     isRealtimePaused,
     toggleLocalRealtimePause,
     resetRaceToReadyState: handleResetAction,
+    clearRealtimeIntent,
     setServerClockOffset,
     setBoardStartActionOverride,
     triggerBoardStartAction,

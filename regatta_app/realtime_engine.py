@@ -303,6 +303,167 @@ def preferred_separation_direction(
     return normalize(axis)
 
 
+def separation_direction_candidates(
+    primary: dict[str, float],
+    fallback: dict[str, float],
+    *,
+    heading: float | None = None,
+    has_heading: bool = False,
+    extra_vectors: list[dict[str, float]] | None = None,
+) -> list[dict[str, float]]:
+    directions: list[dict[str, float]] = []
+    seen_keys: set[tuple[float, float]] = set()
+
+    def append(vector: dict[str, float]) -> None:
+        normalized = normalize(vector)
+        if normalized["length"] <= 1e-6:
+            return
+        key = (round(normalized["x"], 4), round(normalized["y"], 4))
+        if key in seen_keys:
+            return
+        seen_keys.add(key)
+        directions.append({"x": normalized["x"], "y": normalized["y"]})
+
+    axis = boat_axis_unit(heading, has_heading)
+    perpendicular = {"x": -axis["y"], "y": axis["x"]}
+    append(primary)
+    append(fallback)
+    append(axis)
+    append({"x": -axis["x"], "y": -axis["y"]})
+    append(perpendicular)
+    append({"x": -perpendicular["x"], "y": -perpendicular["y"]})
+    for vector in extra_vectors or []:
+        append(vector)
+    if not directions:
+        append({"x": 1.0, "y": 0.0})
+    return directions
+
+
+def best_mark_unstick_position(
+    position: dict[str, float],
+    mark: dict[str, float],
+    heading: float,
+    has_heading: bool,
+    push_distance: float,
+    primary: dict[str, float],
+    fallback: dict[str, float],
+    *,
+    world_w: float,
+    world_h: float,
+) -> dict[str, float] | None:
+    best_position: dict[str, float] | None = None
+    best_clearance = -math.inf
+    best_movement = 0.0
+
+    for direction in separation_direction_candidates(primary, fallback, heading=heading, has_heading=has_heading):
+        next_position = clamp_position_to_capsule_field(
+            {
+                "x": position["x"] + direction["x"] * push_distance,
+                "y": position["y"] + direction["y"] * push_distance,
+            },
+            heading,
+            has_heading,
+            world_w,
+            world_h,
+            BOAT_CLEARANCE_MARGIN,
+        )
+        moved = dist(position, next_position)
+        if moved <= 1e-6:
+            continue
+
+        next_capsule = boat_capsule_at(next_position, heading, has_heading)
+        next_clearance, _, _ = point_to_segment(mark, next_capsule["a"], next_capsule["b"])
+        if (
+            best_position is None
+            or next_clearance > best_clearance + 1e-6
+            or (abs(next_clearance - best_clearance) <= 1e-6 and moved > best_movement + 1e-6)
+        ):
+            best_position = next_position
+            best_clearance = next_clearance
+            best_movement = moved
+
+    return best_position
+
+
+def best_boat_unstick_pair(
+    left_position: dict[str, float],
+    right_position: dict[str, float],
+    left_heading: float,
+    left_has_heading: bool,
+    right_heading: float,
+    right_has_heading: bool,
+    push_distance: float,
+    primary: dict[str, float],
+    fallback: dict[str, float],
+    *,
+    world_w: float,
+    world_h: float,
+) -> tuple[dict[str, float], dict[str, float]] | None:
+    right_axis = boat_axis_unit(right_heading, right_has_heading)
+    right_perpendicular = {"x": -right_axis["y"], "y": right_axis["x"]}
+    directions = separation_direction_candidates(
+        primary,
+        fallback,
+        heading=left_heading,
+        has_heading=left_has_heading,
+        extra_vectors=[
+            right_axis,
+            {"x": -right_axis["x"], "y": -right_axis["y"]},
+            right_perpendicular,
+            {"x": -right_perpendicular["x"], "y": -right_perpendicular["y"]},
+        ],
+    )
+    best_pair: tuple[dict[str, float], dict[str, float]] | None = None
+    best_clearance = -math.inf
+    best_movement = 0.0
+
+    for direction in directions:
+        next_left = clamp_position_to_capsule_field(
+            {
+                "x": left_position["x"] + direction["x"] * push_distance,
+                "y": left_position["y"] + direction["y"] * push_distance,
+            },
+            left_heading,
+            left_has_heading,
+            world_w,
+            world_h,
+            BOAT_CLEARANCE_MARGIN,
+        )
+        next_right = clamp_position_to_capsule_field(
+            {
+                "x": right_position["x"] - direction["x"] * push_distance,
+                "y": right_position["y"] - direction["y"] * push_distance,
+            },
+            right_heading,
+            right_has_heading,
+            world_w,
+            world_h,
+            BOAT_CLEARANCE_MARGIN,
+        )
+        moved = dist(left_position, next_left) + dist(right_position, next_right)
+        if moved <= 1e-6:
+            continue
+
+        next_left_capsule = boat_capsule_at(next_left, left_heading, left_has_heading)
+        next_right_capsule = boat_capsule_at(next_right, right_heading, right_has_heading)
+        _, _, next_clearance = segment_segment_closest_points(
+            next_left_capsule["a"],
+            next_left_capsule["b"],
+            next_right_capsule["a"],
+            next_right_capsule["b"],
+        )
+        if (
+            best_pair is None
+            or next_clearance > best_clearance + 1e-6
+            or (abs(next_clearance - best_clearance) <= 1e-6 and moved > best_movement + 1e-6)
+        ):
+            best_pair = (next_left, next_right)
+            best_clearance = next_clearance
+            best_movement = moved
+
+    return best_pair
+
+
 def downwind_vec(wind_angle_deg: float) -> dict[str, float]:
     t = wind_angle_deg * math.pi / 180.0
     return {"x": math.sin(t), "y": -math.cos(t)}
@@ -355,30 +516,21 @@ def resolve_realtime_overlaps(
                 if distance >= required_distance - 1e-9:
                     continue
 
-                direction = preferred_separation_direction(
-                    {"x": nearest_point["x"] - mark["x"], "y": nearest_point["y"] - mark["y"]},
-                    {"x": position["x"] - mark["x"], "y": position["y"] - mark["y"]},
-                    heading=heading,
-                    has_heading=has_heading,
-                )
+                primary = {"x": nearest_point["x"] - mark["x"], "y": nearest_point["y"] - mark["y"]}
+                fallback = {"x": position["x"] - mark["x"], "y": position["y"] - mark["y"]}
                 push_distance = required_distance - distance + UNSTICK_PUSH_EPS
-                next_position = clamp_position_to_field(
-                    {
-                        "x": position["x"] + direction["x"] * push_distance,
-                        "y": position["y"] + direction["y"] * push_distance,
-                    },
-                    world_w,
-                    world_h,
-                )
-                next_position = clamp_position_to_capsule_field(
-                    next_position,
+                next_position = best_mark_unstick_position(
+                    position,
+                    mark,
                     heading,
                     has_heading,
-                    world_w,
-                    world_h,
-                    BOAT_CLEARANCE_MARGIN,
+                    push_distance,
+                    primary,
+                    fallback,
+                    world_w=world_w,
+                    world_h=world_h,
                 )
-                if dist(position, next_position) <= 1e-6:
+                if next_position is None:
                     continue
 
                 boat["x"] = next_position["x"]
@@ -413,45 +565,25 @@ def resolve_realtime_overlaps(
                     if separation >= required_distance - 1e-9:
                         continue
 
-                    direction = preferred_separation_direction(
-                        {"x": closest_left["x"] - closest_right["x"], "y": closest_left["y"] - closest_right["y"]},
-                        {"x": left_position["x"] - right_position["x"], "y": left_position["y"] - right_position["y"]},
-                        heading=left_heading,
-                        has_heading=left_has_heading,
-                    )
+                    primary = {"x": closest_left["x"] - closest_right["x"], "y": closest_left["y"] - closest_right["y"]}
+                    fallback = {"x": left_position["x"] - right_position["x"], "y": left_position["y"] - right_position["y"]}
                     push_distance = (required_distance - separation + UNSTICK_PUSH_EPS) / 2.0
-                    next_left = clamp_position_to_field(
-                        {
-                            "x": left_position["x"] + direction["x"] * push_distance,
-                            "y": left_position["y"] + direction["y"] * push_distance,
-                        },
-                        world_w,
-                        world_h,
-                    )
-                    next_left = clamp_position_to_capsule_field(
-                        next_left,
+                    next_pair = best_boat_unstick_pair(
+                        left_position,
+                        right_position,
                         left_heading,
                         left_has_heading,
-                        world_w,
-                        world_h,
-                        BOAT_CLEARANCE_MARGIN,
-                    )
-                    next_right = clamp_position_to_field(
-                        {
-                            "x": right_position["x"] - direction["x"] * push_distance,
-                            "y": right_position["y"] - direction["y"] * push_distance,
-                        },
-                        world_w,
-                        world_h,
-                    )
-                    next_right = clamp_position_to_capsule_field(
-                        next_right,
                         right_heading,
                         right_has_heading,
-                        world_w,
-                        world_h,
-                        BOAT_CLEARANCE_MARGIN,
+                        push_distance,
+                        primary,
+                        fallback,
+                        world_w=world_w,
+                        world_h=world_h,
                     )
+                    if next_pair is None:
+                        continue
+                    next_left, next_right = next_pair
 
                     moved = False
                     if dist(left_position, next_left) > 1e-6:
