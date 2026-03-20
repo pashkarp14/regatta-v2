@@ -19,6 +19,10 @@ ROUND_PASS_RADIUS = BOAT_RULE_LENGTH * 3
 ROUNDING_MIN_SWEEP = math.pi / 3
 UNSTICK_PUSH_EPS = 0.03
 UNSTICK_MAX_PASSES = 4
+PRESSURE_UNSTICK_EXTRA_CLEARANCE = 0.18
+PRESSURE_UNSTICK_MIN_PUSH = 0.08
+PRESSURE_UNSTICK_APPROACH_DOT = 0.25
+PRESSURE_UNSTICK_MAX_PASSES = 2
 
 REALTIME_SPEED_UNITS_PER_SEC = 2.4
 REALTIME_DEADZONE_SOFTNESS_DEG = 18.0
@@ -601,6 +605,168 @@ def resolve_realtime_overlaps(
                         moved = True
                     if moved:
                         pass_changed = True
+
+        changed = pass_changed or changed
+        if not pass_changed:
+            break
+
+    return changed
+
+
+def proposal_motion_unit(proposal: dict[str, Any] | None) -> dict[str, float] | None:
+    if not isinstance(proposal, dict) or not proposal.get("accepted"):
+        return None
+
+    motion = proposal.get("motionDirection") or proposal.get("direction")
+    if not isinstance(motion, dict):
+        return None
+
+    dx = motion.get("x")
+    dy = motion.get("y")
+    if not isinstance(dx, (int, float)) or not isinstance(dy, (int, float)):
+        return None
+
+    normalized = normalize({"x": float(dx), "y": float(dy)})
+    if normalized["length"] <= 1e-6:
+        return None
+    return {"x": normalized["x"], "y": normalized["y"]}
+
+
+def proposal_presses_into_boat(
+    source_boat: dict[str, Any],
+    target_boat: dict[str, Any],
+    proposal: dict[str, Any] | None,
+) -> bool:
+    if float((proposal or {}).get("distance") or 0.0) <= 1e-5:
+        return False
+
+    motion = proposal_motion_unit(proposal)
+    if motion is None:
+        return False
+
+    towards_target = normalize(
+        {
+            "x": float(target_boat["x"]) - float(source_boat["x"]),
+            "y": float(target_boat["y"]) - float(source_boat["y"]),
+        }
+    )
+    if towards_target["length"] <= 1e-6:
+        return False
+    return dot(motion, {"x": towards_target["x"], "y": towards_target["y"]}) >= PRESSURE_UNSTICK_APPROACH_DOT
+
+
+def resolve_realtime_pressure_jams(
+    boats: list[dict[str, Any]],
+    proposals: list[dict[str, Any]],
+    pressure_pairs: set[tuple[int, int]],
+    settings: dict[str, Any],
+    *,
+    world_w: float,
+    world_h: float,
+) -> bool:
+    if not boats_physical_collisions_enabled(settings) or not pressure_pairs:
+        return False
+
+    changed = False
+    sorted_pairs = sorted(pressure_pairs)
+
+    for _ in range(PRESSURE_UNSTICK_MAX_PASSES):
+        pass_changed = False
+
+        for left_index, right_index in sorted_pairs:
+            if not (0 <= left_index < len(boats) and 0 <= right_index < len(boats)):
+                continue
+
+            left_boat = boats[left_index]
+            right_boat = boats[right_index]
+            if left_boat.get("finished") or right_boat.get("finished"):
+                continue
+
+            left_proposal = proposals[left_index] if left_index < len(proposals) else None
+            right_proposal = proposals[right_index] if right_index < len(proposals) else None
+            if not (
+                proposal_presses_into_boat(left_boat, right_boat, left_proposal)
+                and proposal_presses_into_boat(right_boat, left_boat, right_proposal)
+            ):
+                continue
+
+            left_position = boat_position(left_boat)
+            right_position = boat_position(right_boat)
+            left_heading = float(left_boat.get("heading") or 0.0)
+            right_heading = float(right_boat.get("heading") or 0.0)
+            left_has_heading = bool(left_boat.get("hasHeading"))
+            right_has_heading = bool(right_boat.get("hasHeading"))
+            left_capsule = boat_capsule_at(left_position, left_heading, left_has_heading)
+            right_capsule = boat_capsule_at(right_position, right_heading, right_has_heading)
+
+            closest_left, closest_right, separation = segment_segment_closest_points(
+                left_capsule["a"],
+                left_capsule["b"],
+                right_capsule["a"],
+                right_capsule["b"],
+            )
+            required_distance = left_capsule["r"] + right_capsule["r"] + BOAT_CLEARANCE_MARGIN
+            target_distance = required_distance + PRESSURE_UNSTICK_EXTRA_CLEARANCE
+            if separation >= target_distance - 1e-9:
+                continue
+
+            left_motion = proposal_motion_unit(left_proposal)
+            right_motion = proposal_motion_unit(right_proposal)
+            fallback = {
+                "x": (left_motion["x"] if left_motion else 0.0) - (right_motion["x"] if right_motion else 0.0),
+                "y": (left_motion["y"] if left_motion else 0.0) - (right_motion["y"] if right_motion else 0.0),
+            }
+            if math.hypot(fallback["x"], fallback["y"]) <= 1e-6:
+                fallback = {
+                    "x": left_position["x"] - right_position["x"],
+                    "y": left_position["y"] - right_position["y"],
+                }
+
+            attempted_push = min(
+                PRESSURE_UNSTICK_EXTRA_CLEARANCE,
+                max(
+                    float((left_proposal or {}).get("distance") or 0.0),
+                    float((right_proposal or {}).get("distance") or 0.0),
+                ),
+            )
+            push_distance = max(
+                PRESSURE_UNSTICK_MIN_PUSH / 2.0,
+                (target_distance - separation + UNSTICK_PUSH_EPS) / 2.0,
+                attempted_push / 2.0,
+            )
+            next_pair = best_boat_unstick_pair(
+                left_position,
+                right_position,
+                left_heading,
+                left_has_heading,
+                right_heading,
+                right_has_heading,
+                push_distance,
+                {
+                    "x": closest_left["x"] - closest_right["x"],
+                    "y": closest_left["y"] - closest_right["y"],
+                },
+                fallback,
+                world_w=world_w,
+                world_h=world_h,
+            )
+            if next_pair is None:
+                continue
+
+            next_left, next_right = next_pair
+            moved = False
+            if dist(left_position, next_left) > 1e-6:
+                left_boat["x"] = next_left["x"]
+                left_boat["y"] = next_left["y"]
+                left_boat["currentSpeedUnitsPerSec"] = 0.0
+                moved = True
+            if dist(right_position, next_right) > 1e-6:
+                right_boat["x"] = next_right["x"]
+                right_boat["y"] = next_right["y"]
+                right_boat["currentSpeedUnitsPerSec"] = 0.0
+                moved = True
+            if moved:
+                pass_changed = True
 
         changed = pass_changed or changed
         if not pass_changed:
@@ -1484,6 +1650,7 @@ def simulate_realtime_tick(game_state: dict[str, Any], controls: dict[int, dict[
         proposals.append(proposal)
 
     invalid: set[int] = set()
+    pressure_pairs: set[tuple[int, int]] = set()
 
     for index, proposal in enumerate(proposals):
         if not proposal["accepted"]:
@@ -1520,9 +1687,13 @@ def simulate_realtime_tick(game_state: dict[str, Any], controls: dict[int, dict[
                     bool(other_boat.get("hasHeading")),
                 )
                 if capsules_overlap(candidate_capsule, other_capsule, BOAT_CLEARANCE_MARGIN):
+                    if proposals[other_index]["accepted"]:
+                        pressure_pairs.add((min(index, other_index), max(index, other_index)))
                     invalid.add(index)
                     break
                 if segment_segment_distance(proposal["prev"], dest, other_capsule["a"], other_capsule["b"]) < (BOAT_SWEEP_RADIUS + other_capsule["r"] + BOAT_CLEARANCE_MARGIN - 1e-9):
+                    if proposals[other_index]["accepted"]:
+                        pressure_pairs.add((min(index, other_index), max(index, other_index)))
                     invalid.add(index)
                     break
 
@@ -1538,11 +1709,13 @@ def simulate_realtime_tick(game_state: dict[str, Any], controls: dict[int, dict[
                     continue
                 right_capsule = boat_capsule_at(right_proposal["dest"], right_proposal["heading"], right_proposal["hasHeading"])
                 if capsules_overlap(left_capsule, right_capsule, BOAT_CLEARANCE_MARGIN):
+                    pressure_pairs.add((left, right))
                     invalid.add(left)
                     invalid.add(right)
                     continue
                 min_center_distance = segment_segment_distance(left_proposal["prev"], left_proposal["dest"], right_proposal["prev"], right_proposal["dest"])
                 if min_center_distance < (BOAT_SWEEP_RADIUS * 2 + BOAT_CLEARANCE_MARGIN - 1e-9):
+                    pressure_pairs.add((left, right))
                     invalid.add(left)
                     invalid.add(right)
 
@@ -1589,6 +1762,28 @@ def simulate_realtime_tick(game_state: dict[str, Any], controls: dict[int, dict[
         )
         or changed
     )
+    pressure_changed = resolve_realtime_pressure_jams(
+        boats,
+        proposals,
+        pressure_pairs,
+        settings,
+        world_w=world_w,
+        world_h=world_h,
+    )
+    changed = pressure_changed or changed
+    if pressure_changed:
+        changed = (
+            resolve_realtime_overlaps(
+                boats,
+                marks,
+                mark_count,
+                settings,
+                world_w=world_w,
+                world_h=world_h,
+                wind_angle_deg=wind_angle_deg,
+            )
+            or changed
+        )
 
     race["currentPlayer"] = next((idx for idx, boat in enumerate(boats) if not boat.get("finished")), 0)
     race["subMovesLeft"] = 0
