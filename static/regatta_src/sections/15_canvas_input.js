@@ -3,7 +3,7 @@
   // -----------------------------
   function updateRealtimeIntentFromClient(clientX, clientY){
     if (mode !== "play" || !isCursorSteeringMode()) return;
-    if (isLocalRealtimePaused()){
+    if (isRealtimePaused()){
       resetRealtimePointer();
       render();
       return;
@@ -52,7 +52,7 @@
 
   canvas.addEventListener("pointerdown", (e) => {
     if (mode !== "play" || !isCursorSteeringMode()) return;
-    if (isLocalRealtimePaused()){
+    if (isRealtimePaused()){
       e.preventDefault();
       return;
     }

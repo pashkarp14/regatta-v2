@@ -22,7 +22,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const appToastEl = document.getElementById("appToast");
   const playerCountSelect = document.getElementById("playerCount");
   const movesPerTurnInput = document.getElementById("movesPerTurn");
-  const sharedViewControlIds = ["toggleOptimal", "bestStart", "toggleLaylines", "toggleTrails", "toggleWindArrow"];
+  const sharedViewControlIds = ["toggleOptimal", "bestStart", "optimalBoatTarget", "bestStartBoatTarget", "toggleLaylines", "toggleTrails", "toggleWindArrow"];
+  const hostHintOnlyControlIds = ["toggleOptimal", "bestStart"];
   const MIN_ROOM_PLAYERS = 2;
   const MAX_ROOM_PLAYERS = 20;
   const DEFAULT_ROOM_PANEL_NOTE = "Создание и вход в комнату находятся в главном меню. Здесь остаются только статус лобби, запуск гонки и состав экипажей.";
@@ -36,6 +37,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function sharedViewControls() {
     return sharedViewControlIds
+      .map((id) => document.getElementById(id))
+      .filter(Boolean);
+  }
+
+  function hostHintOnlyControls() {
+    return hostHintOnlyControlIds
       .map((id) => document.getElementById(id))
       .filter(Boolean);
   }
@@ -232,6 +239,14 @@ document.addEventListener("DOMContentLoaded", () => {
     return roomState.room?.game_state?.race?.phase || null;
   }
 
+  function roomPauseStartedAt() {
+    return Number(roomState.room?.game_state?.race?.realtimePauseStartedAt) || 0;
+  }
+
+  function isRoomRealtimePaused() {
+    return !!roomState.room?.game_state?.race?.realtimePaused;
+  }
+
   function isRealtimeRoom() {
     return !!roomState.room && roomState.room.status === "live" && roomPlayMode() === "realtime";
   }
@@ -247,7 +262,10 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function roomNowMs() {
-    return Date.now() + roomState.serverClockOffsetMs;
+    const syncedNowMs = Date.now() + roomState.serverClockOffsetMs;
+    return isRoomRealtimePaused()
+      ? Math.min(syncedNowMs, roomPauseStartedAt() || syncedNowMs)
+      : syncedNowMs;
   }
 
   function roomCountdownState() {
@@ -275,6 +293,15 @@ document.addEventListener("DOMContentLoaded", () => {
   function canEditSetup() {
     if (!roomState.room) return true;
     return roomState.room.status === "lobby" && isRoomHost();
+  }
+
+  function canEditFinishedRoom() {
+    return !!(
+      roomState.room
+      && isRoomHost()
+      && roomState.room.status === "live"
+      && roomRacePhase() === "finished"
+    );
   }
 
   function canEditTurnBudget() {
@@ -308,6 +335,19 @@ document.addEventListener("DOMContentLoaded", () => {
       && roomState.socket.connected
       && isRoomRacer()
       && (roomState.room.status === "lobby" || (isRealtimeRoom() && roomRacePhase() !== "finished"))
+      && !isRoomRealtimePaused()
+      && !roomState.applyingRemote
+    );
+  }
+
+  function canToggleRoomPause() {
+    return !!(
+      roomState.room
+      && roomState.socket
+      && roomState.socket.connected
+      && isRoomHost()
+      && isRealtimeRoom()
+      && roomRacePhase() !== "finished"
       && !roomState.applyingRemote
     );
   }
@@ -343,13 +383,16 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     const roomReady = roomStartReady(roomState.room);
+    const editingFinishedRoom = canEditFinishedRoom();
     const waitingStart = roomState.room.status === "lobby" || isPendingRealtimeStartRoom();
     regatta.setBoardStartActionOverride({
-      label: waitingStart ? "Старт гонки" : "Начать гонку заново",
-      title: waitingStart
-        ? (roomReady ? "Запустить матч" : "Дождись всех участников")
-        : "Перезапустить матч с текущей дистанцией",
-      disabled: !roomReady,
+      label: editingFinishedRoom ? "Редактировать карту" : (waitingStart ? "Старт гонки" : "Начать гонку заново"),
+      title: editingFinishedRoom
+        ? "Вернуть комнату в лобби и снова открыть все настройки дистанции"
+        : (waitingStart
+          ? (roomReady ? "Запустить матч" : "Дождись всех участников")
+          : "Перезапустить матч с текущей дистанцией"),
+      disabled: editingFinishedRoom ? false : !roomReady,
       onTrigger: handleRoomStartAction,
     });
   }
@@ -529,6 +572,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const pendingDraft = hasPendingRoomDraft();
     const setupDisabled = !canEditSetup();
     const sharedViewDisabled = !!roomState.room && !isRoomHost();
+    const showHostHintControls = !roomState.room || isRoomHost();
     for (const control of setupLockedControls()) {
       const originalDisabled = originalDisabledFor(control);
       control.disabled = originalDisabled || setupDisabled;
@@ -536,6 +580,9 @@ document.addEventListener("DOMContentLoaded", () => {
     for (const control of sharedViewControls()) {
       const originalDisabled = originalDisabledFor(control);
       control.disabled = originalDisabled || sharedViewDisabled;
+    }
+    for (const control of hostHintOnlyControls()) {
+      control.classList.toggle("hidden", !showHostHintControls);
     }
     if (movesPerTurnInput) {
       movesPerTurnInput.disabled = originalMovesPerTurnDisabled || !canEditTurnBudget();
@@ -554,12 +601,14 @@ document.addEventListener("DOMContentLoaded", () => {
     copyRoomCodeBtn.disabled = !roomState.room;
     startRoomBtn.disabled = roomStartPending || (
       roomState.room
-        ? (!isRoomHost() || !roomStartReady(roomState.room))
+        ? (!isRoomHost() || (!roomStartReady(roomState.room) && !canEditFinishedRoom()))
         : !pendingDraft
     );
     if (startRoomBtn) {
       if (!roomState.room) {
         startRoomBtn.textContent = pendingDraft ? "Открыть комнату" : "Запустить матч";
+      } else if (canEditFinishedRoom()) {
+        startRoomBtn.textContent = "Редактировать карту";
       } else {
         startRoomBtn.textContent = (roomState.room.status === "lobby" || isPendingRealtimeStartRoom())
           ? "Запустить матч"
@@ -603,6 +652,7 @@ document.addEventListener("DOMContentLoaded", () => {
       seatIndex: roomState.room ? roomState.selfSeatIndex : null,
       observer: !!roomState.selfIsObserver,
       lobbyPreview: !!roomState.room && roomState.room.status === "lobby",
+      host: !!roomState.room && isRoomHost(),
     });
     renderRoster(roomState.room);
 
@@ -697,6 +747,20 @@ document.addEventListener("DOMContentLoaded", () => {
           "Realtime-режим ожидает общего запуска. До нажатия «Старт гонки» отсчёт не идёт и матч ещё не начался.",
           "neutral",
         );
+      } else if (isRoomRealtimePaused()) {
+        const countdown = roomCountdownState();
+        setHint(
+          roomRacePhase() === "countdown"
+            ? `Пауза: общий отсчёт остановлен на ${formatCountdownSeconds(countdown.totalMsLeft)} с.`
+            : "Пауза: хост временно остановил realtime-гонку для всей комнаты."
+        );
+        roomStatusEl.textContent = "Гонка · пауза";
+        setNotice(
+          isRoomHost()
+            ? "Пауза активна для всей комнаты. Нажми «Продолжить», когда можно возвращаться в гонку."
+            : "Хост поставил гонку на паузу. Дождись продолжения, чтобы снова управлять лодкой.",
+          "neutral",
+        );
       } else if (isRealtimeCountdownRoom()) {
         const countdown = roomCountdownState();
         setHint(`Предстарт: до сигнала ${formatCountdownSeconds(countdown.totalMsLeft)} с. Фальстарт считается только в последние 3.0 с до старта.`);
@@ -708,7 +772,7 @@ document.addEventListener("DOMContentLoaded", () => {
       } else if (roomRacePhase() === "finished") {
         setHint("Гонка завершена.");
         roomStatusEl.textContent = "Гонка · финиш";
-        setNotice("Матч завершён. Можно настроить дистанцию заново и запустить новый старт.", "neutral");
+        setNotice("Матч завершён. Нажми «Редактировать карту», чтобы вернуть комнату в лобби и снова открыть все настройки.", "neutral");
       } else {
         setHint("Матч запущен. Все лодки движутся одновременно по серверному тику.");
         roomStatusEl.textContent = "Гонка · realtime";
@@ -873,6 +937,24 @@ document.addEventListener("DOMContentLoaded", () => {
     void trySendRealtimeControl(true);
   }
 
+  async function editRoom() {
+    if (!roomState.room) return;
+    const payload = await apiRequest(`/api/rooms/${roomState.room.code}/edit`, {
+      method: "POST",
+    });
+
+    if (payload.room?.game_state) {
+      roomState.applyingRemote = true;
+      try {
+        regatta.importState(payload.room.game_state);
+        roomState.lastFingerprint = regatta.fingerprintState();
+      } finally {
+        roomState.applyingRemote = false;
+      }
+    }
+    renderRoom(payload.room);
+  }
+
   async function handleRoomStartAction() {
     if (roomStartPending) return;
 
@@ -904,6 +986,10 @@ document.addEventListener("DOMContentLoaded", () => {
     applyPermissions();
 
     try {
+      if (canEditFinishedRoom()) {
+        await editRoom();
+        return;
+      }
       regatta.setMode?.("play");
       const armRealtime = roomState.room.status === "lobby" || isPendingRealtimeStartRoom();
       if (armRealtime) {
@@ -918,6 +1004,15 @@ document.addEventListener("DOMContentLoaded", () => {
       roomStartPending = false;
       renderRoom(roomState.room);
     }
+  }
+
+  async function toggleRoomPause() {
+    if (!canToggleRoomPause()) return false;
+    roomState.socket.emit("room:pause", {
+      room_code: roomState.room.code,
+      paused: !isRoomRealtimePaused(),
+    });
+    return true;
   }
 
   async function leaveRoom() {
@@ -1097,6 +1192,10 @@ document.addEventListener("DOMContentLoaded", () => {
     joinRoom,
     leaveRoom,
     startRoom,
+    editRoom,
+    canToggleRoomPause,
+    isRoomPaused: isRoomRealtimePaused,
+    toggleRoomPause,
     setPendingRoomDraft,
     clearPendingRoomDraft,
     getPendingRoomDraft: () => (

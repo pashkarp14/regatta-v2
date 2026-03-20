@@ -8,12 +8,13 @@ from ..game_state import room_requires_live_loop
 from ..room_events import broadcast_room_snapshot, serialize_room
 from ..room_service import (
     create_room_from_payload,
+    edit_room_match,
     join_room_from_payload,
     leave_current_room,
     room_view,
     start_room_match,
 )
-from ..sockets import ensure_realtime_room_loop
+from ..sockets import ensure_realtime_room_loop, pop_realtime_control
 
 
 bp = Blueprint("rooms", __name__)
@@ -55,5 +56,13 @@ def start_room(room_code: str):
     )
     if room_requires_live_loop(room):
         ensure_realtime_room_loop(room["code"])
+    broadcast_room_snapshot(room)
+    return serialize_room(room, player_token)
+
+
+@bp.post("/api/rooms/<room_code>/edit")
+def edit_room(room_code: str):
+    room, player_token = edit_room_match(room_code)
+    pop_realtime_control(room["code"])
     broadcast_room_snapshot(room)
     return serialize_room(room, player_token)

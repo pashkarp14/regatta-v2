@@ -29,6 +29,7 @@
   let multiplayerSeatIndex = null;
   let multiplayerSessionActive = false;
   let multiplayerObserverMode = false;
+  let multiplayerHostMode = false;
   let multiplayerLobbyPreview = false;
   let localPilotMode = "hotseat";
   const LOCAL_HUMAN_SEAT = 0;
@@ -116,9 +117,12 @@
   let optimalPath = [];
   let optimalStats = null;   // {distance, turns, moves}
   let optimalForBoat = null; // index
+  let optimalBoatIndex = null;
 
   let showBestStart = false;
   let bestStartSolution = null; // {start:{x,y}, path:[], stats:{...}}
+  let bestStartForBoat = null;
+  let bestStartBoatIndex = null;
 
   function clearOptimalOverlay(){
     optimalPath = [];
@@ -128,9 +132,20 @@
 
   function clearBestStartOverlay(){
     bestStartSolution = null;
+    bestStartForBoat = null;
   }
 
-  function sharedViewTargetBoatIndex(){
+  function normalizeSharedHintBoatIndex(rawValue){
+    const parsedValue = Number.isInteger(rawValue)
+      ? rawValue
+      : parseInt(rawValue, 10);
+    if (!Number.isInteger(parsedValue) || parsedValue < 0 || parsedValue >= boats.length){
+      return null;
+    }
+    return parsedValue;
+  }
+
+  function defaultSharedViewTargetBoatIndex(){
     if (multiplayerSessionActive){
       if (Number.isInteger(currentPlayer) && boats[currentPlayer]) return currentPlayer;
       const unfinished = boats.findIndex((boat) => boat && !boat.finished);
@@ -142,6 +157,59 @@
     return boats.length ? 0 : null;
   }
 
+  function sharedViewTargetBoatIndex(){
+    return defaultSharedViewTargetBoatIndex();
+  }
+
+  function optimalHintTargetBoatIndex(){
+    if (!multiplayerSessionActive) return defaultSharedViewTargetBoatIndex();
+    return normalizeSharedHintBoatIndex(optimalBoatIndex) ?? defaultSharedViewTargetBoatIndex();
+  }
+
+  function bestStartHintTargetBoatIndex(){
+    if (!multiplayerSessionActive) return defaultSharedViewTargetBoatIndex();
+    return normalizeSharedHintBoatIndex(bestStartBoatIndex) ?? defaultSharedViewTargetBoatIndex();
+  }
+
+  function canCurrentViewerSeeSharedHint(targetBoatIndex){
+    if (!multiplayerSessionActive) return true;
+    return multiplayerHostMode || (Number.isInteger(multiplayerSeatIndex) && multiplayerSeatIndex === targetBoatIndex);
+  }
+
+  function shouldRenderOptimalHint(){
+    const targetBoatIndex = optimalHintTargetBoatIndex();
+    return !!showOptimal && Number.isInteger(targetBoatIndex) && canCurrentViewerSeeSharedHint(targetBoatIndex);
+  }
+
+  function shouldRenderBestStartHint(){
+    const targetBoatIndex = bestStartHintTargetBoatIndex();
+    return !!showBestStart && Number.isInteger(targetBoatIndex) && canCurrentViewerSeeSharedHint(targetBoatIndex);
+  }
+
+  function syncHintTargetSelect(select, preferredIndex){
+    if (!select) return;
+    const nextTargetIndex = normalizeSharedHintBoatIndex(preferredIndex) ?? (boats.length ? 0 : null);
+    select.innerHTML = "";
+    boats.forEach((_, index) => {
+      const option = document.createElement("option");
+      option.value = String(index);
+      option.textContent = `Лодка ${index + 1}`;
+      select.appendChild(option);
+    });
+    select.disabled = boats.length === 0;
+    if (nextTargetIndex !== null){
+      select.value = String(nextTargetIndex);
+    }
+  }
+
+  function updateSharedHintTargetControls(){
+    const showHostTargets = multiplayerSessionActive && multiplayerHostMode;
+    optimalBoatTargetControl?.classList.toggle("hidden", !showHostTargets);
+    bestStartBoatTargetControl?.classList.toggle("hidden", !showHostTargets);
+    syncHintTargetSelect(optimalBoatTargetSelect, optimalHintTargetBoatIndex());
+    syncHintTargetSelect(bestStartBoatTargetSelect, bestStartHintTargetBoatIndex());
+  }
+
   function sharedViewSettingsSnapshot(){
     return {
       showWindArrow,
@@ -149,6 +217,8 @@
       showBestStart,
       showLaylines,
       showTrails,
+      optimalBoatIndex: normalizeSharedHintBoatIndex(optimalBoatIndex),
+      bestStartBoatIndex: normalizeSharedHintBoatIndex(bestStartBoatIndex),
     };
   }
 
@@ -200,20 +270,19 @@
     clearOptimalOverlay();
     clearBestStartOverlay();
 
-    if (showOptimal){
-      const targetBoat = sharedViewTargetBoatIndex();
+    if (shouldRenderOptimalHint()){
+      const targetBoat = optimalHintTargetBoatIndex();
       if (Number.isInteger(targetBoat) && boats[targetBoat]){
         computeOptimalForBoat(targetBoat);
-        showOptimal = true;
       } else {
         showOptimal = false;
       }
     }
 
-    if (showBestStart){
-      if (boats.length){
+    if (shouldRenderBestStartHint()){
+      const targetBoat = bestStartHintTargetBoatIndex();
+      if (boats.length && Number.isInteger(targetBoat) && boats[targetBoat]){
         computeBestStart();
-        showBestStart = true;
       } else {
         showBestStart = false;
       }
@@ -223,6 +292,7 @@
       resetBoatTrails();
     }
 
+    updateSharedHintTargetControls();
     updateViewButtons();
     updateOptInfo();
   }
@@ -234,12 +304,22 @@
     const nextShowBestStart = targetSettings.showBestStart === undefined ? showBestStart : !!targetSettings.showBestStart;
     const nextShowLaylines = targetSettings.showLaylines === undefined ? showLaylines : !!targetSettings.showLaylines;
     const nextShowTrails = targetSettings.showTrails === undefined ? showTrails : !!targetSettings.showTrails;
+    const currentOptimalBoatIndex = normalizeSharedHintBoatIndex(optimalBoatIndex);
+    const currentBestStartBoatIndex = normalizeSharedHintBoatIndex(bestStartBoatIndex);
+    const nextOptimalBoatIndex = targetSettings.optimalBoatIndex === undefined
+      ? currentOptimalBoatIndex
+      : normalizeSharedHintBoatIndex(targetSettings.optimalBoatIndex);
+    const nextBestStartBoatIndex = targetSettings.bestStartBoatIndex === undefined
+      ? currentBestStartBoatIndex
+      : normalizeSharedHintBoatIndex(targetSettings.bestStartBoatIndex);
     const changed = (
       nextShowWindArrow !== showWindArrow
       || nextShowOptimal !== showOptimal
       || nextShowBestStart !== showBestStart
       || nextShowLaylines !== showLaylines
       || nextShowTrails !== showTrails
+      || nextOptimalBoatIndex !== currentOptimalBoatIndex
+      || nextBestStartBoatIndex !== currentBestStartBoatIndex
     );
 
     showWindArrow = nextShowWindArrow;
@@ -247,6 +327,8 @@
     showBestStart = nextShowBestStart;
     showLaylines = nextShowLaylines;
     showTrails = nextShowTrails;
+    optimalBoatIndex = nextOptimalBoatIndex;
+    bestStartBoatIndex = nextBestStartBoatIndex;
 
     refreshSharedViewSolutions();
     if (renderView){
@@ -724,6 +806,7 @@
   }
 
   function updateViewButtons(){
+    updateSharedHintTargetControls();
     btnOptimal?.classList.toggle("mode-btn-active", showOptimal);
     btnBestStart?.classList.toggle("mode-btn-active", showBestStart);
     btnWindArrow?.classList.toggle("mode-btn-active", !showWindArrow);

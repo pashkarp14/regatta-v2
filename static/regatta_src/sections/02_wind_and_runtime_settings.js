@@ -79,6 +79,7 @@
   let serverClockOffsetMs = 0;
   let localRealtimePauseStartedAtMs = 0;
   let localRealtimePausedDurationMs = 0;
+  let multiplayerRealtimePauseStartedAtMs = 0;
 
   function updateWindInfo(){
     const gustMode = autoGustsEnabled ? "авто" : (gustRect ? "порыв" : "штиль");
@@ -90,7 +91,11 @@
     const effectiveWallNowMs = localRealtimePauseStartedAtMs > 0
       ? localRealtimePauseStartedAtMs
       : wallNowMs;
-    return effectiveWallNowMs + serverClockOffsetMs - localRealtimePausedDurationMs;
+    const roomAdjustedNowMs = effectiveWallNowMs + serverClockOffsetMs - localRealtimePausedDurationMs;
+    if (isMultiplayerRealtimePaused()){
+      return Math.min(roomAdjustedNowMs, multiplayerRealtimePauseStartedAtMs);
+    }
+    return roomAdjustedNowMs;
   }
 
   function setServerClockOffset(offsetMs=0){
@@ -100,6 +105,14 @@
   function resetLocalRealtimePauseState(){
     localRealtimePauseStartedAtMs = 0;
     localRealtimePausedDurationMs = 0;
+  }
+
+  function isMultiplayerRealtimePaused(){
+    return !!(multiplayerSessionActive && isRealtimePlayMode() && multiplayerRealtimePauseStartedAtMs > 0);
+  }
+
+  function isRealtimePaused(){
+    return isLocalRealtimePaused() || isMultiplayerRealtimePaused();
   }
 
   function normalizedWindAngleDeg(rawDeg=windAngleDeg){

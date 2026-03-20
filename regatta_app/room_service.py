@@ -4,7 +4,7 @@ from copy import deepcopy
 from typing import Any
 
 from .app_state import room_store
-from .game_state import normalize_room_start_state
+from .game_state import normalize_lobby_preview_state, normalize_room_start_state
 from .room_store import (
     RoomForbidden,
     RoomNotFound,
@@ -112,6 +112,28 @@ def start_room_match(
         arm_realtime=arm_realtime,
     )
     room["status"] = "live"
+    room["revision"] += 1
+    room_store().save_room(room)
+    return room, player_token
+
+
+def edit_room_match(room_code: str) -> tuple[dict[str, Any], str | None]:
+    player_token = current_session_state().player_token
+    room = room_store().get_room(room_code)
+    if room is None:
+        raise RoomNotFound("Room not found.")
+    if room["host_token"] != player_token:
+        raise RoomForbidden("Only the room host can reopen the lobby.")
+    if room.get("status") != "live":
+        raise RoomValidationError("Only a finished live match can return to the lobby.")
+
+    race = (room.get("game_state") or {}).get("race") or {}
+    if race.get("phase") != "finished":
+        raise RoomValidationError("Finish the current race before editing the course again.")
+
+    start_snapshot = deepcopy(room.get("start_state") or room.get("game_state"))
+    room["game_state"] = normalize_lobby_preview_state(validate_game_state(room, start_snapshot))
+    room["status"] = "lobby"
     room["revision"] += 1
     room_store().save_room(room)
     return room, player_token

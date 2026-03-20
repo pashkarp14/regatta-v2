@@ -75,6 +75,7 @@
     subMovesLeft = movesPerTurn;
     resetHybridState();
     resetLocalRealtimePauseState();
+    multiplayerRealtimePauseStartedAtMs = 0;
     realtimeCountdownEndsAt = (isLocalRealtimeMode() && armRealtime)
       ? (currentRaceTimeMs() + (realtimePrepSeconds * 1000))
       : 0;
@@ -505,6 +506,8 @@
         showBestStart,
         showLaylines,
         showTrails,
+        optimalBoatIndex,
+        bestStartBoatIndex,
         finishSeparate,
         prestartRoundsSetting
       },
@@ -528,6 +531,8 @@
         nextAutoGustAt,
         prestartRoundsLeft,
         phase,
+        realtimePaused: isMultiplayerRealtimePaused(),
+        realtimePauseStartedAt: isMultiplayerRealtimePaused() ? multiplayerRealtimePauseStartedAtMs : 0,
         isLobbyPreview: false
       },
       boats: boats.map((boat) => ({
@@ -710,6 +715,8 @@
       showBestStart: settings.showBestStart,
       showLaylines: settings.showLaylines,
       showTrails: settings.showTrails,
+      optimalBoatIndex: settings.optimalBoatIndex,
+      bestStartBoatIndex: settings.bestStartBoatIndex,
     };
 
     deadZoneInp.value = String(deadZoneDeg);
@@ -767,6 +774,9 @@
       hybridMovesLeft = boats.map((boat) => boat.finished ? 0 : movesPerTurn);
     }
     resetLocalRealtimePauseState();
+    const importedPauseStartedAt = Math.max(0, parseInt(race.realtimePauseStartedAt,10) || 0);
+    const importedMultiplayerPause = !!race.realtimePaused && importedPauseStartedAt > 0;
+    multiplayerRealtimePauseStartedAtMs = importedMultiplayerPause ? importedPauseStartedAt : 0;
     realtimeCountdownEndsAt = Math.max(0, parseInt(race.realtimeCountdownEndsAt,10) || 0);
     gustExpiresAt = Math.max(0, parseInt(race.gustExpiresAt,10) || 0);
     nextAutoGustAt = Math.max(0, parseInt(race.nextAutoGustAt,10) || 0);
@@ -798,6 +808,15 @@
       }
       return trimBoatTrail(trail);
     });
+    if (importedMultiplayerPause){
+      realtimeCursorTarget = null;
+      realtimeCursorDirection = null;
+      realtimeCursorClient = null;
+      activeRealtimePointerId = null;
+      for (const boat of boats){
+        boat.currentSpeedUnitsPerSec = 0;
+      }
+    }
     applySharedViewSettings(importedViewSettings, { renderView:false });
 
     selectedBoatIndex = (isLocalBotsMode() && boats[LOCAL_HUMAN_SEAT]) ? LOCAL_HUMAN_SEAT : null;
@@ -807,7 +826,7 @@
     localRealtimeLastTickAt = 0;
     clearBotTurnTimer();
     botTurnInProgress = false;
-    if (!isCursorSteeringMode()){
+    if (!isCursorSteeringMode() || importedMultiplayerPause){
       realtimeCursorTarget = null;
       realtimeCursorDirection = null;
       realtimeCursorClient = null;

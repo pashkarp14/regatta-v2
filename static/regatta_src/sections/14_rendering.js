@@ -31,26 +31,37 @@
   function drawWindArrow(){
     if (!showWindArrow) return;
     const tl = fieldTopLeft();
-    const base = {
-      x: tl.x + fieldPixelW() / 2,
-      y: tl.y + 46,
-    };
-    const len = 60;
     const windFrom = screenWindFromVector();
-    const tip = {
-      x: base.x + windFrom.x * (len / 2),
-      y: base.y + windFrom.y * (len / 2)
+    const unit = (() => {
+      const length = Math.hypot(windFrom.x, windFrom.y) || 1;
+      return { x: windFrom.x / length, y: windFrom.y / length };
+    })();
+    const fieldCenter = {
+      x: tl.x + fieldPixelW() / 2,
+      y: tl.y + fieldPixelH() / 2,
     };
+    const innerMargin = 18;
+    const halfWidth = Math.max(24, fieldPixelW() / 2 - innerMargin);
+    const halfHeight = Math.max(24, fieldPixelH() / 2 - innerMargin);
+    const reachX = Math.abs(unit.x) > 1e-6 ? halfWidth / Math.abs(unit.x) : Number.POSITIVE_INFINITY;
+    const reachY = Math.abs(unit.y) > 1e-6 ? halfHeight / Math.abs(unit.y) : Number.POSITIVE_INFINITY;
+    const edgeReach = Math.min(reachX, reachY);
+    const shaftLength = clamp(Math.min(fieldPixelW(), fieldPixelH()) * 0.18, 52, 92);
     const tail = {
-      x: base.x - windFrom.x * (len / 2),
-      y: base.y - windFrom.y * (len / 2)
+      x: fieldCenter.x + unit.x * edgeReach,
+      y: fieldCenter.y + unit.y * edgeReach,
+    };
+    const tip = {
+      x: tail.x - unit.x * shaftLength,
+      y: tail.y - unit.y * shaftLength,
     };
     const screenAngle = Math.atan2(tip.y - tail.y, tip.x - tail.x);
 
     ctx.save();
     ctx.strokeStyle = "#d32f2f";
     ctx.fillStyle = "#d32f2f";
-    ctx.lineWidth = 3;
+    ctx.lineWidth = 4;
+    ctx.lineCap = "round";
 
     ctx.beginPath();
     ctx.moveTo(tail.x, tail.y);
@@ -566,7 +577,7 @@
   }
 
   function drawOptimalPath(){
-    if (showOptimal && optimalPath && optimalPath.length >= 2){
+    if (shouldRenderOptimalHint() && optimalPath && optimalPath.length >= 2){
       ctx.save();
       ctx.strokeStyle = "rgba(25, 118, 210, 0.85)";
       ctx.lineWidth = 3;
@@ -581,7 +592,7 @@
       ctx.restore();
     }
 
-    if (showBestStart && bestStartSolution){
+    if (shouldRenderBestStartHint() && bestStartSolution){
       const path = bestStartSolution.path;
       if (path && path.length >= 2){
         ctx.save();
@@ -700,11 +711,15 @@
 
     drawRealtimeHudPanel();
 
-    if (isLocalRealtimePaused()){
+    if (isRealtimePaused()){
       const pausePrimary = phase === "countdown" ? "Пауза перед стартом" : "Гонка на паузе";
-      const pauseSecondary = phase === "countdown"
-        ? "Отсчёт и движение лодок остановлены"
-        : "Лодки остановлены. Нажми «Продолжить»";
+      const pauseSecondary = multiplayerSessionActive
+        ? (phase === "countdown"
+          ? (multiplayerHostMode ? "Хост остановил общий отсчёт" : "Отсчёт остановлен хостом")
+          : (multiplayerHostMode ? "Комната на паузе для всех лодок" : "Хост поставил гонку на паузу"))
+        : (phase === "countdown"
+          ? "Отсчёт и движение лодок остановлены"
+          : "Лодки остановлены. Нажми «Продолжить»");
       const pauseBoxW = 360;
       const pauseBoxH = 76;
       const pauseBoxX = (canvas.width - pauseBoxW) / 2;

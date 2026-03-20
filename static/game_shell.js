@@ -346,18 +346,51 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function renderDockPauseControl() {
     if (!dockPauseRaceBtn) return;
-    const canPause = !!regatta.canToggleLocalRealtimePause?.();
-    const paused = !!regatta.isLocalRealtimePaused?.();
-    const shouldShow = canPause || paused;
+    const multiplayer = window.RegattaMultiplayer;
+    const room = roomSummary().room;
+    const roomPauseMode = !!room && typeof multiplayer?.isRoomPaused === "function";
+    const canPause = roomPauseMode
+      ? !!multiplayer?.canToggleRoomPause?.()
+      : !!regatta.canToggleLocalRealtimePause?.();
+    const paused = roomPauseMode
+      ? !!multiplayer?.isRoomPaused?.()
+      : !!regatta.isLocalRealtimePaused?.();
+    const shouldShow = roomPauseMode ? canPause : (canPause || paused);
     dockPauseRaceBtn.classList.toggle("hidden", !shouldShow);
     dockPauseRaceBtn.classList.toggle("dock-btn-accent", paused);
     dockPauseRaceBtn.disabled = !canPause;
     dockPauseRaceBtn.textContent = paused ? "Продолжить" : "Пауза";
     dockPauseRaceBtn.setAttribute("aria-hidden", String(!shouldShow));
-    dockPauseRaceBtn.title = paused
-      ? "Снять realtime-гонку с паузы"
-      : "Поставить realtime-гонку на паузу";
+    dockPauseRaceBtn.title = roomPauseMode
+      ? (paused ? "Снять сетевую гонку с паузы для всей комнаты" : "Поставить сетевую гонку на паузу")
+      : (paused ? "Снять realtime-гонку с паузы" : "Поставить realtime-гонку на паузу");
     dockPauseRaceBtn.setAttribute("aria-label", dockPauseRaceBtn.title);
+  }
+
+  async function toggleRealtimePauseFromShell() {
+    const multiplayer = window.RegattaMultiplayer;
+    const room = roomSummary().room;
+    if (room && multiplayer?.canToggleRoomPause?.()) {
+      const pausedBeforeToggle = !!multiplayer.isRoomPaused?.();
+      const changed = await multiplayer.toggleRoomPause?.();
+      if (!changed) {
+        renderDockPauseControl();
+        return false;
+      }
+      renderDockPauseControl();
+      showToast(pausedBeforeToggle ? "Сетевая гонка продолжена." : "Сетевая гонка поставлена на паузу.");
+      return true;
+    }
+
+    const pausedBeforeToggle = !!regatta.isLocalRealtimePaused?.();
+    const changed = regatta.toggleLocalRealtimePause?.();
+    if (!changed) {
+      renderDockPauseControl();
+      return false;
+    }
+    renderDockPauseControl();
+    showToast(pausedBeforeToggle ? "Realtime-гонка продолжена." : "Realtime-гонка поставлена на паузу.");
+    return true;
   }
 
   function renderDeckContext() {
@@ -863,15 +896,8 @@ document.addEventListener("DOMContentLoaded", () => {
   openMainMenuBtn?.addEventListener("click", () => openMenu("home"));
   closeMainMenuBtn?.addEventListener("click", closeMenu);
   dockMenuBtn?.addEventListener("click", () => openMenu("home"));
-  dockPauseRaceBtn?.addEventListener("click", () => {
-    const pausedBeforeToggle = !!regatta.isLocalRealtimePaused?.();
-    const changed = regatta.toggleLocalRealtimePause?.();
-    if (!changed) {
-      renderDockPauseControl();
-      return;
-    }
-    renderDockPauseControl();
-    showToast(pausedBeforeToggle ? "Realtime-гонка продолжена." : "Realtime-гонка поставлена на паузу.");
+  dockPauseRaceBtn?.addEventListener("click", async () => {
+    await toggleRealtimePauseFromShell();
   });
 
   toggleCommandDeckBtn?.addEventListener("click", () => toggleCommandDeck());
@@ -1074,6 +1100,7 @@ document.addEventListener("DOMContentLoaded", () => {
     renderSettingsSummary();
     renderDeckContext();
     renderHints();
+    renderDockPauseControl();
   });
 
   window.addEventListener("regatta:room-draft", () => {
@@ -1088,6 +1115,7 @@ document.addEventListener("DOMContentLoaded", () => {
     renderSettingsSummary();
     renderDeckContext();
     renderHints();
+    renderDockPauseControl();
   });
 
   window.addEventListener("keydown", (event) => {
@@ -1097,10 +1125,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     if (event.key.toLowerCase() === "p") {
       if (event.target && /input|textarea|select/i.test(event.target.tagName)) return;
-      const changed = regatta.toggleLocalRealtimePause?.();
-      if (changed) {
-        renderDockPauseControl();
-      }
+      void toggleRealtimePauseFromShell();
       return;
     }
     if (event.key.toLowerCase() !== "m") return;

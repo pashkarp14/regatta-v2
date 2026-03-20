@@ -273,7 +273,13 @@
 
   btnOptimal.addEventListener("click", () => {
     if (mode !== "play") setMode("play");
-    applySharedViewSettings({ showOptimal: !showOptimal }, { emit:true });
+    const nextShowOptimal = !showOptimal;
+    applySharedViewSettings({
+      showOptimal: nextShowOptimal,
+      optimalBoatIndex: multiplayerSessionActive
+        ? (nextShowOptimal ? (optimalBoatTargetSelect?.value ?? optimalHintTargetBoatIndex()) : null)
+        : optimalBoatIndex,
+    }, { emit:true });
   });
 
   realtimePrepInp?.addEventListener("change", () => {
@@ -289,7 +295,21 @@
   });
 
   btnBestStart.addEventListener("click", () => {
-    applySharedViewSettings({ showBestStart: !showBestStart }, { emit:true });
+    const nextShowBestStart = !showBestStart;
+    applySharedViewSettings({
+      showBestStart: nextShowBestStart,
+      bestStartBoatIndex: multiplayerSessionActive
+        ? (nextShowBestStart ? (bestStartBoatTargetSelect?.value ?? bestStartHintTargetBoatIndex()) : null)
+        : bestStartBoatIndex,
+    }, { emit:true });
+  });
+
+  optimalBoatTargetSelect?.addEventListener("change", () => {
+    applySharedViewSettings({ optimalBoatIndex: optimalBoatTargetSelect.value }, { emit:true, renderView:true });
+  });
+
+  bestStartBoatTargetSelect?.addEventListener("change", () => {
+    applySharedViewSettings({ bestStartBoatIndex: bestStartBoatTargetSelect.value }, { emit:true, renderView:true });
   });
 
   btnLaylines?.addEventListener("click", () => {
@@ -368,7 +388,7 @@
     const payload = {
       mode,
       phase,
-      realtimePaused: isLocalRealtimePaused(),
+      realtimePaused: isRealtimePaused(),
       playMode,
       localPilotMode,
       botDifficulty,
@@ -379,7 +399,7 @@
         raceFinishedCount,
         prestartRoundsLeft,
         realtimeCountdownEndsAt,
-        realtimePaused: isLocalRealtimePaused(),
+        realtimePaused: isRealtimePaused(),
       },
       view: sharedViewSettingsSnapshot(),
       boats: boats.map((boat, index) => ({
@@ -489,16 +509,21 @@
     armLocalRealtimeStart,
     canToggleLocalRealtimePause,
     isLocalRealtimePaused,
+    isRealtimePaused,
     toggleLocalRealtimePause,
     resetRaceToReadyState: handleResetAction,
     setServerClockOffset,
     setBoardStartActionOverride,
     triggerBoardStartAction,
-    setMultiplayerContext: ({ active=false, seatIndex=null, observer=false, lobbyPreview=false } = {}) => {
+    setMultiplayerContext: ({ active=false, seatIndex=null, observer=false, lobbyPreview=false, host=false } = {}) => {
       multiplayerSessionActive = !!active;
       multiplayerSeatIndex = multiplayerSessionActive && Number.isInteger(seatIndex) ? seatIndex : null;
       multiplayerObserverMode = multiplayerSessionActive && !!observer;
+      multiplayerHostMode = multiplayerSessionActive && !!host;
       multiplayerLobbyPreview = multiplayerSessionActive && !!lobbyPreview;
+      if (!multiplayerSessionActive){
+        multiplayerRealtimePauseStartedAtMs = 0;
+      }
       localRealtimeLastTickAt = 0;
       if (!isLocalRealtimeMode()){
         resetLocalRealtimePauseState();
@@ -550,8 +575,8 @@
       hybridMovesLeft: hybridMovesLeft.slice(),
       realtimeCountdownEndsAt,
       playerCount: boats.length,
-      phase: isLocalRealtimePaused() ? "paused" : phase,
-      realtimePaused: isLocalRealtimePaused(),
+      phase: isRealtimePaused() ? "paused" : phase,
+      realtimePaused: isRealtimePaused(),
       markCount,
       localPilotMode,
       botDifficulty

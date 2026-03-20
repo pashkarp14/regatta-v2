@@ -190,15 +190,13 @@
             </label>
           </div>
 
-          <div class="hidden" aria-hidden="true">
-            <label class="control">
-              <span>Режим игры</span>
-              <select id="playMode" data-room-lock="setup">
-                <option value="turns" selected>По очереди</option>
-                <option value="realtime">В реальном времени</option>
-              </select>
-            </label>
-          </div>
+          <label class="control">
+            <span>Режим игры</span>
+            <select id="playMode" data-room-lock="setup">
+              <option value="turns" selected>По очереди</option>
+              <option value="realtime">В реальном времени</option>
+            </select>
+          </label>
 
           <div class="action-row wrap-row">
             <button type="button" id="randomCourse" class="action-secondary" data-room-lock="setup">Случайная карта</button>
@@ -236,7 +234,7 @@
             </label>
           </div>
 
-          <p class="panel-note">Режим игры выбирается в меню запуска. Здесь остаются только относящиеся к нему стартовые настройки.</p>
+          <p class="panel-note">Режим игры можно выбрать при запуске или поменять здесь, когда хост вернул комнату в лобби на редактирование.</p>
           <p id="deckRulesModeHint" class="panel-note"></p>
           <p id="interactionModeInfo" class="panel-note"></p>
         </section>
@@ -377,6 +375,16 @@
           </div>
 
           <div class="field-grid compact-grid">
+            <label class="control hidden" id="optimalBoatTargetControl">
+              <span>Маршрут для лодки</span>
+              <select id="optimalBoatTarget"></select>
+            </label>
+
+            <label class="control hidden" id="bestStartBoatTargetControl">
+              <span>Старт для лодки</span>
+              <select id="bestStartBoatTarget"></select>
+            </label>
+
             <label class="control">
               <span>Полный экран</span>
               <select id="autoFullscreenMode">

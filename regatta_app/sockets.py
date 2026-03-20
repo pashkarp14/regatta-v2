@@ -11,6 +11,7 @@ from flask_socketio import emit, join_room
 from .app_state import room_store
 from .extensions import socketio
 from .game_state import (
+    apply_realtime_pause,
     apply_room_view_settings,
     normalize_view_settings_payload,
     room_requires_live_loop,
@@ -127,7 +128,11 @@ def run_realtime_room_loop(app, room_code: str) -> None:
                     if ((room.get("game_state", {}).get("race") or {}).get("phase")) == "finished":
                         break
                     if state_play_mode(room.get("game_state")) == "realtime":
-                        changed = simulate_realtime_tick(room["game_state"], controls, tick_dt, now_ms)
+                        race = (room.get("game_state") or {}).get("race") or {}
+                        if bool(race.get("realtimePaused")):
+                            changed = False
+                        else:
+                            changed = simulate_realtime_tick(room["game_state"], controls, tick_dt, now_ms)
                     else:
                         changed = simulate_weather_tick(room["game_state"], now_ms)
                 if changed:
@@ -251,6 +256,30 @@ def register_socket_handlers() -> None:
             emit_room_error(str(exc))
             return
 
+        broadcast_room_state(room)
+
+    @socketio.on("room:pause")
+    def on_room_pause(payload: dict[str, Any] | None):
+        room, player_token = load_socket_room(payload)
+        if room is None or player_token is None:
+            return
+
+        try:
+            if room.get("host_token") != player_token:
+                raise RoomForbidden("Only the host can pause or resume the room.")
+            if room.get("status") != "live" or state_play_mode(room.get("game_state")) != "realtime":
+                raise RoomForbidden("Pause is only available during a live realtime race.")
+
+            should_pause = bool((payload or {}).get("paused"))
+            if not apply_realtime_pause(room["game_state"], paused=should_pause, now_ms=int(time.time() * 1000)):
+                return
+            room["revision"] += 1
+            room_store().save_room(room)
+        except RoomStoreError as exc:
+            emit_room_error(str(exc))
+            return
+
+        ensure_realtime_room_loop(room["code"])
         broadcast_room_state(room)
 
     @socketio.on("disconnect")

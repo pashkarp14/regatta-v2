@@ -17,6 +17,8 @@ BOAT_CLEARANCE_MARGIN = 0.16
 MARK_CLEARANCE_MARGIN = 0.16
 ROUND_PASS_RADIUS = BOAT_RULE_LENGTH * 3
 ROUNDING_MIN_SWEEP = math.pi / 3
+UNSTICK_PUSH_EPS = 0.03
+UNSTICK_MAX_PASSES = 4
 
 REALTIME_SPEED_UNITS_PER_SEC = 2.4
 REALTIME_DEADZONE_SOFTNESS_DEG = 18.0
@@ -47,6 +49,13 @@ def dot(left: dict[str, float], right: dict[str, float]) -> float:
 def normalize(vec: dict[str, float]) -> dict[str, float]:
     length = math.hypot(vec["x"], vec["y"]) or 1.0
     return {"x": vec["x"] / length, "y": vec["y"] / length, "length": length}
+
+
+def lerp_point(start: dict[str, float], end: dict[str, float], t: float) -> dict[str, float]:
+    return {
+        "x": start["x"] + (end["x"] - start["x"]) * t,
+        "y": start["y"] + (end["y"] - start["y"]) * t,
+    }
 
 
 def angle_wrap(angle: float) -> float:
@@ -162,7 +171,9 @@ def boat_capsule_at(position: dict[str, float], heading: float | None, has_headi
     }
 
 
-def segment_segment_distance(a0: dict[str, float], a1: dict[str, float], b0: dict[str, float], b1: dict[str, float]) -> float:
+def segment_segment_closest_points(
+    a0: dict[str, float], a1: dict[str, float], b0: dict[str, float], b1: dict[str, float]
+) -> tuple[dict[str, float], dict[str, float], float]:
     eps = 1e-9
     u = {"x": a1["x"] - a0["x"], "y": a1["y"] - a0["y"]}
     v = {"x": b1["x"] - b0["x"], "y": b1["y"] - b0["y"]}
@@ -220,7 +231,13 @@ def segment_segment_distance(a0: dict[str, float], a1: dict[str, float], b0: dic
     tc = 0.0 if abs(t_n) < eps else t_n / t_d
     dx = w["x"] + sc * u["x"] - tc * v["x"]
     dy = w["y"] + sc * u["y"] - tc * v["y"]
-    return math.hypot(dx, dy)
+    point_a = lerp_point(a0, a1, sc)
+    point_b = lerp_point(b0, b1, tc)
+    return point_a, point_b, math.hypot(dx, dy)
+
+
+def segment_segment_distance(a0: dict[str, float], a1: dict[str, float], b0: dict[str, float], b1: dict[str, float]) -> float:
+    return segment_segment_closest_points(a0, a1, b0, b1)[2]
 
 
 def capsules_overlap(left: dict[str, Any], right: dict[str, Any], extra: float = 0.0) -> bool:
@@ -231,6 +248,30 @@ def capsule_intersects_mark(capsule: dict[str, Any], mark_pos: dict[str, float],
     return point_to_segment(mark_pos, capsule["a"], capsule["b"])[0] < (capsule["r"] + MARK_RADIUS + extra - 1e-9)
 
 
+def boat_position(boat: dict[str, Any]) -> dict[str, float]:
+    return {"x": float(boat["x"]), "y": float(boat["y"])}
+
+
+def clamp_position_to_field(position: dict[str, float], world_w: float, world_h: float) -> dict[str, float]:
+    return {
+        "x": clamp(position["x"], 0.0, world_w),
+        "y": clamp(position["y"], 0.0, world_h),
+    }
+
+
+def preferred_separation_direction(
+    primary: dict[str, float], fallback: dict[str, float], *, heading: float | None = None, has_heading: bool = False
+) -> dict[str, float]:
+    normalized = normalize(primary)
+    if normalized["length"] > 1e-6:
+        return {"x": normalized["x"], "y": normalized["y"]}
+    normalized = normalize(fallback)
+    if normalized["length"] > 1e-6:
+        return {"x": normalized["x"], "y": normalized["y"]}
+    axis = boat_axis_unit(heading, has_heading)
+    return normalize(axis)
+
+
 def downwind_vec(wind_angle_deg: float) -> dict[str, float]:
     t = wind_angle_deg * math.pi / 180.0
     return {"x": math.sin(t), "y": -math.cos(t)}
@@ -239,6 +280,130 @@ def downwind_vec(wind_angle_deg: float) -> dict[str, float]:
 def upwind_vec(wind_angle_deg: float) -> dict[str, float]:
     downwind = downwind_vec(wind_angle_deg)
     return {"x": -downwind["x"], "y": -downwind["y"]}
+
+
+def resolve_realtime_overlaps(
+    boats: list[dict[str, Any]],
+    marks: list[dict[str, float]],
+    mark_count: int,
+    settings: dict[str, Any],
+    *,
+    world_w: float,
+    world_h: float,
+    wind_angle_deg: float,
+) -> bool:
+    changed = False
+    active_marks = marks[: max(0, min(mark_count, len(marks)))]
+
+    for _ in range(UNSTICK_MAX_PASSES):
+        pass_changed = False
+
+        for boat in boats:
+            position = boat_position(boat)
+            heading = float(boat.get("heading") or 0.0)
+            has_heading = bool(boat.get("hasHeading"))
+            capsule = boat_capsule_at(position, heading, has_heading)
+
+            for mark in active_marks:
+                distance, nearest_point, _ = point_to_segment(mark, capsule["a"], capsule["b"])
+                required_distance = capsule["r"] + MARK_RADIUS + MARK_CLEARANCE_MARGIN
+                if distance >= required_distance - 1e-9:
+                    continue
+
+                direction = preferred_separation_direction(
+                    {"x": nearest_point["x"] - mark["x"], "y": nearest_point["y"] - mark["y"]},
+                    {"x": position["x"] - mark["x"], "y": position["y"] - mark["y"]},
+                    heading=heading,
+                    has_heading=has_heading,
+                )
+                push_distance = required_distance - distance + UNSTICK_PUSH_EPS
+                next_position = clamp_position_to_field(
+                    {
+                        "x": position["x"] + direction["x"] * push_distance,
+                        "y": position["y"] + direction["y"] * push_distance,
+                    },
+                    world_w,
+                    world_h,
+                )
+                if dist(position, next_position) <= 1e-6:
+                    continue
+
+                boat["x"] = next_position["x"]
+                boat["y"] = next_position["y"]
+                boat["currentSpeedUnitsPerSec"] = 0.0
+                position = next_position
+                capsule = boat_capsule_at(position, heading, has_heading)
+                pass_changed = True
+
+        if boats_physical_collisions_enabled(settings):
+            for left_index in range(len(boats)):
+                left_boat = boats[left_index]
+                left_position = boat_position(left_boat)
+                left_heading = float(left_boat.get("heading") or 0.0)
+                left_has_heading = bool(left_boat.get("hasHeading"))
+                left_capsule = boat_capsule_at(left_position, left_heading, left_has_heading)
+
+                for right_index in range(left_index + 1, len(boats)):
+                    right_boat = boats[right_index]
+                    right_position = boat_position(right_boat)
+                    right_heading = float(right_boat.get("heading") or 0.0)
+                    right_has_heading = bool(right_boat.get("hasHeading"))
+                    right_capsule = boat_capsule_at(right_position, right_heading, right_has_heading)
+
+                    closest_left, closest_right, separation = segment_segment_closest_points(
+                        left_capsule["a"],
+                        left_capsule["b"],
+                        right_capsule["a"],
+                        right_capsule["b"],
+                    )
+                    required_distance = left_capsule["r"] + right_capsule["r"] + BOAT_CLEARANCE_MARGIN
+                    if separation >= required_distance - 1e-9:
+                        continue
+
+                    direction = preferred_separation_direction(
+                        {"x": closest_left["x"] - closest_right["x"], "y": closest_left["y"] - closest_right["y"]},
+                        {"x": left_position["x"] - right_position["x"], "y": left_position["y"] - right_position["y"]},
+                        heading=left_heading,
+                        has_heading=left_has_heading,
+                    )
+                    push_distance = (required_distance - separation + UNSTICK_PUSH_EPS) / 2.0
+                    next_left = clamp_position_to_field(
+                        {
+                            "x": left_position["x"] + direction["x"] * push_distance,
+                            "y": left_position["y"] + direction["y"] * push_distance,
+                        },
+                        world_w,
+                        world_h,
+                    )
+                    next_right = clamp_position_to_field(
+                        {
+                            "x": right_position["x"] - direction["x"] * push_distance,
+                            "y": right_position["y"] - direction["y"] * push_distance,
+                        },
+                        world_w,
+                        world_h,
+                    )
+
+                    moved = False
+                    if dist(left_position, next_left) > 1e-6:
+                        left_boat["x"] = next_left["x"]
+                        left_boat["y"] = next_left["y"]
+                        left_boat["currentSpeedUnitsPerSec"] = 0.0
+                        left_position = next_left
+                        moved = True
+                    if dist(right_position, next_right) > 1e-6:
+                        right_boat["x"] = next_right["x"]
+                        right_boat["y"] = next_right["y"]
+                        right_boat["currentSpeedUnitsPerSec"] = 0.0
+                        moved = True
+                    if moved:
+                        pass_changed = True
+
+        changed = pass_changed or changed
+        if not pass_changed:
+            break
+
+    return changed
 
 
 def angle_between(left: dict[str, float], right: dict[str, float]) -> float:
@@ -1025,6 +1190,21 @@ def simulate_realtime_tick(game_state: dict[str, Any], controls: dict[int, dict[
                 zeroed_any_speed = True
         return changed or zeroed_any_speed
 
+    marks = list(course.get("marks") or [])
+    mark_count = int(course.get("markCount") or len(marks))
+    changed = (
+        resolve_realtime_overlaps(
+            boats,
+            marks,
+            mark_count,
+            settings,
+            world_w=world_w,
+            world_h=world_h,
+            wind_angle_deg=wind_angle_deg,
+        )
+        or changed
+    )
+
     proposals: list[dict[str, Any]] = []
     for index, boat in enumerate(boats):
         proposal = {
@@ -1093,8 +1273,6 @@ def simulate_realtime_tick(game_state: dict[str, Any], controls: dict[int, dict[
         proposals.append(proposal)
 
     invalid: set[int] = set()
-    marks = list(course.get("marks") or [])
-    mark_count = int(course.get("markCount") or len(marks))
 
     for index, proposal in enumerate(proposals):
         if not proposal["accepted"]:

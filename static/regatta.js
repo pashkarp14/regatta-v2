@@ -59,7 +59,11 @@ document.addEventListener("DOMContentLoaded", () => {
   const btnClearGust = document.getElementById("clearGust");
   const btnReset     = document.getElementById("resetGame");
   const btnOptimal   = document.getElementById("toggleOptimal");
+  const optimalBoatTargetControl = document.getElementById("optimalBoatTargetControl");
+  const optimalBoatTargetSelect = document.getElementById("optimalBoatTarget");
   const btnBestStart = document.getElementById("bestStart");
+  const bestStartBoatTargetControl = document.getElementById("bestStartBoatTargetControl");
+  const bestStartBoatTargetSelect = document.getElementById("bestStartBoatTarget");
   const btnLaylines  = document.getElementById("toggleLaylines");
   const btnTrails    = document.getElementById("toggleTrails");
   const btnFullscreen = document.getElementById("toggleFullscreen");
@@ -366,6 +370,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let serverClockOffsetMs = 0;
   let localRealtimePauseStartedAtMs = 0;
   let localRealtimePausedDurationMs = 0;
+  let multiplayerRealtimePauseStartedAtMs = 0;
 
   function updateWindInfo(){
     const gustMode = autoGustsEnabled ? "авто" : (gustRect ? "порыв" : "штиль");
@@ -377,7 +382,11 @@ document.addEventListener("DOMContentLoaded", () => {
     const effectiveWallNowMs = localRealtimePauseStartedAtMs > 0
       ? localRealtimePauseStartedAtMs
       : wallNowMs;
-    return effectiveWallNowMs + serverClockOffsetMs - localRealtimePausedDurationMs;
+    const roomAdjustedNowMs = effectiveWallNowMs + serverClockOffsetMs - localRealtimePausedDurationMs;
+    if (isMultiplayerRealtimePaused()){
+      return Math.min(roomAdjustedNowMs, multiplayerRealtimePauseStartedAtMs);
+    }
+    return roomAdjustedNowMs;
   }
 
   function setServerClockOffset(offsetMs=0){
@@ -387,6 +396,14 @@ document.addEventListener("DOMContentLoaded", () => {
   function resetLocalRealtimePauseState(){
     localRealtimePauseStartedAtMs = 0;
     localRealtimePausedDurationMs = 0;
+  }
+
+  function isMultiplayerRealtimePaused(){
+    return !!(multiplayerSessionActive && isRealtimePlayMode() && multiplayerRealtimePauseStartedAtMs > 0);
+  }
+
+  function isRealtimePaused(){
+    return isLocalRealtimePaused() || isMultiplayerRealtimePaused();
   }
 
   function normalizedWindAngleDeg(rawDeg=windAngleDeg){
@@ -474,6 +491,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let multiplayerSeatIndex = null;
   let multiplayerSessionActive = false;
   let multiplayerObserverMode = false;
+  let multiplayerHostMode = false;
   let multiplayerLobbyPreview = false;
   let localPilotMode = "hotseat";
   const LOCAL_HUMAN_SEAT = 0;
@@ -561,9 +579,12 @@ document.addEventListener("DOMContentLoaded", () => {
   let optimalPath = [];
   let optimalStats = null;   // {distance, turns, moves}
   let optimalForBoat = null; // index
+  let optimalBoatIndex = null;
 
   let showBestStart = false;
   let bestStartSolution = null; // {start:{x,y}, path:[], stats:{...}}
+  let bestStartForBoat = null;
+  let bestStartBoatIndex = null;
 
   function clearOptimalOverlay(){
     optimalPath = [];
@@ -573,9 +594,20 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function clearBestStartOverlay(){
     bestStartSolution = null;
+    bestStartForBoat = null;
   }
 
-  function sharedViewTargetBoatIndex(){
+  function normalizeSharedHintBoatIndex(rawValue){
+    const parsedValue = Number.isInteger(rawValue)
+      ? rawValue
+      : parseInt(rawValue, 10);
+    if (!Number.isInteger(parsedValue) || parsedValue < 0 || parsedValue >= boats.length){
+      return null;
+    }
+    return parsedValue;
+  }
+
+  function defaultSharedViewTargetBoatIndex(){
     if (multiplayerSessionActive){
       if (Number.isInteger(currentPlayer) && boats[currentPlayer]) return currentPlayer;
       const unfinished = boats.findIndex((boat) => boat && !boat.finished);
@@ -587,6 +619,59 @@ document.addEventListener("DOMContentLoaded", () => {
     return boats.length ? 0 : null;
   }
 
+  function sharedViewTargetBoatIndex(){
+    return defaultSharedViewTargetBoatIndex();
+  }
+
+  function optimalHintTargetBoatIndex(){
+    if (!multiplayerSessionActive) return defaultSharedViewTargetBoatIndex();
+    return normalizeSharedHintBoatIndex(optimalBoatIndex) ?? defaultSharedViewTargetBoatIndex();
+  }
+
+  function bestStartHintTargetBoatIndex(){
+    if (!multiplayerSessionActive) return defaultSharedViewTargetBoatIndex();
+    return normalizeSharedHintBoatIndex(bestStartBoatIndex) ?? defaultSharedViewTargetBoatIndex();
+  }
+
+  function canCurrentViewerSeeSharedHint(targetBoatIndex){
+    if (!multiplayerSessionActive) return true;
+    return multiplayerHostMode || (Number.isInteger(multiplayerSeatIndex) && multiplayerSeatIndex === targetBoatIndex);
+  }
+
+  function shouldRenderOptimalHint(){
+    const targetBoatIndex = optimalHintTargetBoatIndex();
+    return !!showOptimal && Number.isInteger(targetBoatIndex) && canCurrentViewerSeeSharedHint(targetBoatIndex);
+  }
+
+  function shouldRenderBestStartHint(){
+    const targetBoatIndex = bestStartHintTargetBoatIndex();
+    return !!showBestStart && Number.isInteger(targetBoatIndex) && canCurrentViewerSeeSharedHint(targetBoatIndex);
+  }
+
+  function syncHintTargetSelect(select, preferredIndex){
+    if (!select) return;
+    const nextTargetIndex = normalizeSharedHintBoatIndex(preferredIndex) ?? (boats.length ? 0 : null);
+    select.innerHTML = "";
+    boats.forEach((_, index) => {
+      const option = document.createElement("option");
+      option.value = String(index);
+      option.textContent = `Лодка ${index + 1}`;
+      select.appendChild(option);
+    });
+    select.disabled = boats.length === 0;
+    if (nextTargetIndex !== null){
+      select.value = String(nextTargetIndex);
+    }
+  }
+
+  function updateSharedHintTargetControls(){
+    const showHostTargets = multiplayerSessionActive && multiplayerHostMode;
+    optimalBoatTargetControl?.classList.toggle("hidden", !showHostTargets);
+    bestStartBoatTargetControl?.classList.toggle("hidden", !showHostTargets);
+    syncHintTargetSelect(optimalBoatTargetSelect, optimalHintTargetBoatIndex());
+    syncHintTargetSelect(bestStartBoatTargetSelect, bestStartHintTargetBoatIndex());
+  }
+
   function sharedViewSettingsSnapshot(){
     return {
       showWindArrow,
@@ -594,6 +679,8 @@ document.addEventListener("DOMContentLoaded", () => {
       showBestStart,
       showLaylines,
       showTrails,
+      optimalBoatIndex: normalizeSharedHintBoatIndex(optimalBoatIndex),
+      bestStartBoatIndex: normalizeSharedHintBoatIndex(bestStartBoatIndex),
     };
   }
 
@@ -645,20 +732,19 @@ document.addEventListener("DOMContentLoaded", () => {
     clearOptimalOverlay();
     clearBestStartOverlay();
 
-    if (showOptimal){
-      const targetBoat = sharedViewTargetBoatIndex();
+    if (shouldRenderOptimalHint()){
+      const targetBoat = optimalHintTargetBoatIndex();
       if (Number.isInteger(targetBoat) && boats[targetBoat]){
         computeOptimalForBoat(targetBoat);
-        showOptimal = true;
       } else {
         showOptimal = false;
       }
     }
 
-    if (showBestStart){
-      if (boats.length){
+    if (shouldRenderBestStartHint()){
+      const targetBoat = bestStartHintTargetBoatIndex();
+      if (boats.length && Number.isInteger(targetBoat) && boats[targetBoat]){
         computeBestStart();
-        showBestStart = true;
       } else {
         showBestStart = false;
       }
@@ -668,6 +754,7 @@ document.addEventListener("DOMContentLoaded", () => {
       resetBoatTrails();
     }
 
+    updateSharedHintTargetControls();
     updateViewButtons();
     updateOptInfo();
   }
@@ -679,12 +766,22 @@ document.addEventListener("DOMContentLoaded", () => {
     const nextShowBestStart = targetSettings.showBestStart === undefined ? showBestStart : !!targetSettings.showBestStart;
     const nextShowLaylines = targetSettings.showLaylines === undefined ? showLaylines : !!targetSettings.showLaylines;
     const nextShowTrails = targetSettings.showTrails === undefined ? showTrails : !!targetSettings.showTrails;
+    const currentOptimalBoatIndex = normalizeSharedHintBoatIndex(optimalBoatIndex);
+    const currentBestStartBoatIndex = normalizeSharedHintBoatIndex(bestStartBoatIndex);
+    const nextOptimalBoatIndex = targetSettings.optimalBoatIndex === undefined
+      ? currentOptimalBoatIndex
+      : normalizeSharedHintBoatIndex(targetSettings.optimalBoatIndex);
+    const nextBestStartBoatIndex = targetSettings.bestStartBoatIndex === undefined
+      ? currentBestStartBoatIndex
+      : normalizeSharedHintBoatIndex(targetSettings.bestStartBoatIndex);
     const changed = (
       nextShowWindArrow !== showWindArrow
       || nextShowOptimal !== showOptimal
       || nextShowBestStart !== showBestStart
       || nextShowLaylines !== showLaylines
       || nextShowTrails !== showTrails
+      || nextOptimalBoatIndex !== currentOptimalBoatIndex
+      || nextBestStartBoatIndex !== currentBestStartBoatIndex
     );
 
     showWindArrow = nextShowWindArrow;
@@ -692,6 +789,8 @@ document.addEventListener("DOMContentLoaded", () => {
     showBestStart = nextShowBestStart;
     showLaylines = nextShowLaylines;
     showTrails = nextShowTrails;
+    optimalBoatIndex = nextOptimalBoatIndex;
+    bestStartBoatIndex = nextBestStartBoatIndex;
 
     refreshSharedViewSolutions();
     if (renderView){
@@ -1169,6 +1268,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function updateViewButtons(){
+    updateSharedHintTargetControls();
     btnOptimal?.classList.toggle("mode-btn-active", showOptimal);
     btnBestStart?.classList.toggle("mode-btn-active", showBestStart);
     btnWindArrow?.classList.toggle("mode-btn-active", !showWindArrow);
@@ -3553,7 +3653,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const line = { x:startB.x-startA.x, y:startB.y-startA.y };
     const len = Math.hypot(line.x,line.y) || 1;
     const ux = line.x/len, uy = line.y/len;
-    const baseBoatIndex = sharedViewTargetBoatIndex();
+    const baseBoatIndex = bestStartHintTargetBoatIndex();
     const baseBoat = boats[
       Number.isInteger(baseBoatIndex) ? baseBoatIndex : 0
     ] || boats[0] || null;
@@ -3577,6 +3677,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     bestStartSolution = best;
+    bestStartForBoat = Number.isInteger(baseBoatIndex) ? baseBoatIndex : null;
   }
 
   // -----------------------------
@@ -3719,12 +3820,16 @@ document.addEventListener("DOMContentLoaded", () => {
       const ownLegInfo = ownBoat && !ownBoat.finished
         ? ` \u0422\u0432\u043e\u044f \u043b\u043e\u0434\u043a\u0430: ${controlledBoatIndex + 1}. \u0421\u043b\u0435\u0434\u0443\u044e\u0449\u0438\u0439 \u0437\u043d\u0430\u043a: ${Math.min(ownBoat.nextMark + 1, markCount)} \u0438\u0437 ${markCount}.`
         : "";
-      if (isLocalRealtimePaused()){
+      if (isRealtimePaused()){
         if (phase === "countdown"){
           const countdown = realtimeCountdownState();
-          statusEl.textContent = `\u041f\u0430\u0443\u0437\u0430. \u041e\u0442\u0441\u0447\u0435\u0442 \u043e\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d \u043d\u0430 ${formatCountdownSeconds(countdown.totalMsLeft)} \u0441. \u041d\u0430\u0436\u043c\u0438 \u00ab\u041f\u0440\u043e\u0434\u043e\u043b\u0436\u0438\u0442\u044c\u00bb, \u0447\u0442\u043e\u0431\u044b \u0432\u0435\u0440\u043d\u0443\u0442\u044c\u0441\u044f \u043a \u0441\u0442\u0430\u0440\u0442\u0443.${ownLegInfo}`;
+          statusEl.textContent = multiplayerSessionActive
+            ? `Пауза. ${multiplayerHostMode ? "Общий отсчет остановлен" : "Хост остановил отсчет"} на ${formatCountdownSeconds(countdown.totalMsLeft)} с.${ownLegInfo}`
+            : `Пауза. Отсчет остановлен на ${formatCountdownSeconds(countdown.totalMsLeft)} с. Нажми «Продолжить», чтобы вернуться к старту.${ownLegInfo}`;
         } else {
-          statusEl.textContent = `\u041f\u0430\u0443\u0437\u0430. Realtime-\u0433\u043e\u043d\u043a\u0430 \u043e\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u0430. \u041d\u0430\u0436\u043c\u0438 \u00ab\u041f\u0440\u043e\u0434\u043e\u043b\u0436\u0438\u0442\u044c\u00bb, \u0447\u0442\u043e\u0431\u044b \u0432\u0435\u0440\u043d\u0443\u0442\u044c \u043b\u043e\u0434\u043a\u0438 \u0432 \u0433\u043e\u043d\u043a\u0443.${ownLegInfo}`;
+          statusEl.textContent = multiplayerSessionActive
+            ? `Пауза. ${multiplayerHostMode ? "Гонка остановлена для всей комнаты" : "Хост остановил гонку"}.${ownLegInfo}`
+            : `Пауза. Realtime-гонка остановлена. Нажми «Продолжить», чтобы вернуть лодки в гонку.${ownLegInfo}`;
         }
         return;
       }
@@ -3842,17 +3947,18 @@ document.addEventListener("DOMContentLoaded", () => {
 
     let extra = "";
 
-    if (showOptimal && optimalStats && optimalForBoat !== null){
+    if (shouldRenderOptimalHint() && optimalStats && optimalForBoat !== null){
       extra += `<div style="margin-top:6px;">🧭 <b>Оптимум для лодки ${optimalForBoat+1}</b>: расстояние <b>${formatMeters(optimalStats.distance)}</b>, повороты <b>${optimalStats.turns}</b>, ходов <b>${optimalStats.moves}</b></div>`;
     }
-    if (showBestStart && bestStartSolution){
-      extra += `<div style="margin-top:6px;">🏁 <b>Лучший старт (до 1-го знака)</b>: расстояние <b>${formatMeters(bestStartSolution.stats.distance)}</b>, повороты <b>${bestStartSolution.stats.turns}</b>, ходов <b>${bestStartSolution.stats.moves}</b></div>`;
+    if (shouldRenderBestStartHint() && bestStartSolution){
+      const bestStartBoatLabel = Number.isInteger(bestStartForBoat) ? ` для лодки ${bestStartForBoat + 1}` : "";
+      extra += `<div style="margin-top:6px;">🏁 <b>Лучший старт${bestStartBoatLabel}</b>: расстояние <b>${formatMeters(bestStartSolution.stats.distance)}</b>, повороты <b>${bestStartSolution.stats.turns}</b>, ходов <b>${bestStartSolution.stats.moves}</b></div>`;
     }
-    if ((showBestStart && !bestStartSolution) || (showOptimal && !optimalStats)){
+    if ((shouldRenderBestStartHint() && !bestStartSolution) || (shouldRenderOptimalHint() && !optimalStats)){
       extra += `<div style="margin-top:6px;">⚠️ Не удалось найти маршрут (попробуй уменьшить поле / мёртвую зону / сдвинуть знаки/финиш).</div>`;
     }
 
-    const phaseLabel = isLocalRealtimePaused()
+    const phaseLabel = isRealtimePaused()
       ? "пауза"
       : phase === "prestart"
       ? "предстарт"
@@ -3941,6 +4047,7 @@ document.addEventListener("DOMContentLoaded", () => {
     subMovesLeft = movesPerTurn;
     resetHybridState();
     resetLocalRealtimePauseState();
+    multiplayerRealtimePauseStartedAtMs = 0;
     realtimeCountdownEndsAt = (isLocalRealtimeMode() && armRealtime)
       ? (currentRaceTimeMs() + (realtimePrepSeconds * 1000))
       : 0;
@@ -4371,6 +4478,8 @@ document.addEventListener("DOMContentLoaded", () => {
         showBestStart,
         showLaylines,
         showTrails,
+        optimalBoatIndex,
+        bestStartBoatIndex,
         finishSeparate,
         prestartRoundsSetting
       },
@@ -4394,6 +4503,8 @@ document.addEventListener("DOMContentLoaded", () => {
         nextAutoGustAt,
         prestartRoundsLeft,
         phase,
+        realtimePaused: isMultiplayerRealtimePaused(),
+        realtimePauseStartedAt: isMultiplayerRealtimePaused() ? multiplayerRealtimePauseStartedAtMs : 0,
         isLobbyPreview: false
       },
       boats: boats.map((boat) => ({
@@ -4576,6 +4687,8 @@ document.addEventListener("DOMContentLoaded", () => {
       showBestStart: settings.showBestStart,
       showLaylines: settings.showLaylines,
       showTrails: settings.showTrails,
+      optimalBoatIndex: settings.optimalBoatIndex,
+      bestStartBoatIndex: settings.bestStartBoatIndex,
     };
 
     deadZoneInp.value = String(deadZoneDeg);
@@ -4633,6 +4746,9 @@ document.addEventListener("DOMContentLoaded", () => {
       hybridMovesLeft = boats.map((boat) => boat.finished ? 0 : movesPerTurn);
     }
     resetLocalRealtimePauseState();
+    const importedPauseStartedAt = Math.max(0, parseInt(race.realtimePauseStartedAt,10) || 0);
+    const importedMultiplayerPause = !!race.realtimePaused && importedPauseStartedAt > 0;
+    multiplayerRealtimePauseStartedAtMs = importedMultiplayerPause ? importedPauseStartedAt : 0;
     realtimeCountdownEndsAt = Math.max(0, parseInt(race.realtimeCountdownEndsAt,10) || 0);
     gustExpiresAt = Math.max(0, parseInt(race.gustExpiresAt,10) || 0);
     nextAutoGustAt = Math.max(0, parseInt(race.nextAutoGustAt,10) || 0);
@@ -4664,6 +4780,15 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       return trimBoatTrail(trail);
     });
+    if (importedMultiplayerPause){
+      realtimeCursorTarget = null;
+      realtimeCursorDirection = null;
+      realtimeCursorClient = null;
+      activeRealtimePointerId = null;
+      for (const boat of boats){
+        boat.currentSpeedUnitsPerSec = 0;
+      }
+    }
     applySharedViewSettings(importedViewSettings, { renderView:false });
 
     selectedBoatIndex = (isLocalBotsMode() && boats[LOCAL_HUMAN_SEAT]) ? LOCAL_HUMAN_SEAT : null;
@@ -4673,7 +4798,7 @@ document.addEventListener("DOMContentLoaded", () => {
     localRealtimeLastTickAt = 0;
     clearBotTurnTimer();
     botTurnInProgress = false;
-    if (!isCursorSteeringMode()){
+    if (!isCursorSteeringMode() || importedMultiplayerPause){
       realtimeCursorTarget = null;
       realtimeCursorDirection = null;
       realtimeCursorClient = null;
@@ -4761,26 +4886,37 @@ document.addEventListener("DOMContentLoaded", () => {
   function drawWindArrow(){
     if (!showWindArrow) return;
     const tl = fieldTopLeft();
-    const base = {
-      x: tl.x + fieldPixelW() / 2,
-      y: tl.y + 46,
-    };
-    const len = 60;
     const windFrom = screenWindFromVector();
-    const tip = {
-      x: base.x + windFrom.x * (len / 2),
-      y: base.y + windFrom.y * (len / 2)
+    const unit = (() => {
+      const length = Math.hypot(windFrom.x, windFrom.y) || 1;
+      return { x: windFrom.x / length, y: windFrom.y / length };
+    })();
+    const fieldCenter = {
+      x: tl.x + fieldPixelW() / 2,
+      y: tl.y + fieldPixelH() / 2,
     };
+    const innerMargin = 18;
+    const halfWidth = Math.max(24, fieldPixelW() / 2 - innerMargin);
+    const halfHeight = Math.max(24, fieldPixelH() / 2 - innerMargin);
+    const reachX = Math.abs(unit.x) > 1e-6 ? halfWidth / Math.abs(unit.x) : Number.POSITIVE_INFINITY;
+    const reachY = Math.abs(unit.y) > 1e-6 ? halfHeight / Math.abs(unit.y) : Number.POSITIVE_INFINITY;
+    const edgeReach = Math.min(reachX, reachY);
+    const shaftLength = clamp(Math.min(fieldPixelW(), fieldPixelH()) * 0.18, 52, 92);
     const tail = {
-      x: base.x - windFrom.x * (len / 2),
-      y: base.y - windFrom.y * (len / 2)
+      x: fieldCenter.x + unit.x * edgeReach,
+      y: fieldCenter.y + unit.y * edgeReach,
+    };
+    const tip = {
+      x: tail.x - unit.x * shaftLength,
+      y: tail.y - unit.y * shaftLength,
     };
     const screenAngle = Math.atan2(tip.y - tail.y, tip.x - tail.x);
 
     ctx.save();
     ctx.strokeStyle = "#d32f2f";
     ctx.fillStyle = "#d32f2f";
-    ctx.lineWidth = 3;
+    ctx.lineWidth = 4;
+    ctx.lineCap = "round";
 
     ctx.beginPath();
     ctx.moveTo(tail.x, tail.y);
@@ -5296,7 +5432,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function drawOptimalPath(){
-    if (showOptimal && optimalPath && optimalPath.length >= 2){
+    if (shouldRenderOptimalHint() && optimalPath && optimalPath.length >= 2){
       ctx.save();
       ctx.strokeStyle = "rgba(25, 118, 210, 0.85)";
       ctx.lineWidth = 3;
@@ -5311,7 +5447,7 @@ document.addEventListener("DOMContentLoaded", () => {
       ctx.restore();
     }
 
-    if (showBestStart && bestStartSolution){
+    if (shouldRenderBestStartHint() && bestStartSolution){
       const path = bestStartSolution.path;
       if (path && path.length >= 2){
         ctx.save();
@@ -5430,11 +5566,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
     drawRealtimeHudPanel();
 
-    if (isLocalRealtimePaused()){
+    if (isRealtimePaused()){
       const pausePrimary = phase === "countdown" ? "Пауза перед стартом" : "Гонка на паузе";
-      const pauseSecondary = phase === "countdown"
-        ? "Отсчёт и движение лодок остановлены"
-        : "Лодки остановлены. Нажми «Продолжить»";
+      const pauseSecondary = multiplayerSessionActive
+        ? (phase === "countdown"
+          ? (multiplayerHostMode ? "Хост остановил общий отсчёт" : "Отсчёт остановлен хостом")
+          : (multiplayerHostMode ? "Комната на паузе для всех лодок" : "Хост поставил гонку на паузу"))
+        : (phase === "countdown"
+          ? "Отсчёт и движение лодок остановлены"
+          : "Лодки остановлены. Нажми «Продолжить»");
       const pauseBoxW = 360;
       const pauseBoxH = 76;
       const pauseBoxX = (canvas.width - pauseBoxW) / 2;
@@ -5521,7 +5661,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // -----------------------------
   function updateRealtimeIntentFromClient(clientX, clientY){
     if (mode !== "play" || !isCursorSteeringMode()) return;
-    if (isLocalRealtimePaused()){
+    if (isRealtimePaused()){
       resetRealtimePointer();
       render();
       return;
@@ -5570,7 +5710,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   canvas.addEventListener("pointerdown", (e) => {
     if (mode !== "play" || !isCursorSteeringMode()) return;
-    if (isLocalRealtimePaused()){
+    if (isRealtimePaused()){
       e.preventDefault();
       return;
     }
@@ -6051,7 +6191,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
   btnOptimal.addEventListener("click", () => {
     if (mode !== "play") setMode("play");
-    applySharedViewSettings({ showOptimal: !showOptimal }, { emit:true });
+    const nextShowOptimal = !showOptimal;
+    applySharedViewSettings({
+      showOptimal: nextShowOptimal,
+      optimalBoatIndex: multiplayerSessionActive
+        ? (nextShowOptimal ? (optimalBoatTargetSelect?.value ?? optimalHintTargetBoatIndex()) : null)
+        : optimalBoatIndex,
+    }, { emit:true });
   });
 
   realtimePrepInp?.addEventListener("change", () => {
@@ -6067,7 +6213,21 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   btnBestStart.addEventListener("click", () => {
-    applySharedViewSettings({ showBestStart: !showBestStart }, { emit:true });
+    const nextShowBestStart = !showBestStart;
+    applySharedViewSettings({
+      showBestStart: nextShowBestStart,
+      bestStartBoatIndex: multiplayerSessionActive
+        ? (nextShowBestStart ? (bestStartBoatTargetSelect?.value ?? bestStartHintTargetBoatIndex()) : null)
+        : bestStartBoatIndex,
+    }, { emit:true });
+  });
+
+  optimalBoatTargetSelect?.addEventListener("change", () => {
+    applySharedViewSettings({ optimalBoatIndex: optimalBoatTargetSelect.value }, { emit:true, renderView:true });
+  });
+
+  bestStartBoatTargetSelect?.addEventListener("change", () => {
+    applySharedViewSettings({ bestStartBoatIndex: bestStartBoatTargetSelect.value }, { emit:true, renderView:true });
   });
 
   btnLaylines?.addEventListener("click", () => {
@@ -6146,7 +6306,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const payload = {
       mode,
       phase,
-      realtimePaused: isLocalRealtimePaused(),
+      realtimePaused: isRealtimePaused(),
       playMode,
       localPilotMode,
       botDifficulty,
@@ -6157,7 +6317,7 @@ document.addEventListener("DOMContentLoaded", () => {
         raceFinishedCount,
         prestartRoundsLeft,
         realtimeCountdownEndsAt,
-        realtimePaused: isLocalRealtimePaused(),
+        realtimePaused: isRealtimePaused(),
       },
       view: sharedViewSettingsSnapshot(),
       boats: boats.map((boat, index) => ({
@@ -6267,16 +6427,21 @@ document.addEventListener("DOMContentLoaded", () => {
     armLocalRealtimeStart,
     canToggleLocalRealtimePause,
     isLocalRealtimePaused,
+    isRealtimePaused,
     toggleLocalRealtimePause,
     resetRaceToReadyState: handleResetAction,
     setServerClockOffset,
     setBoardStartActionOverride,
     triggerBoardStartAction,
-    setMultiplayerContext: ({ active=false, seatIndex=null, observer=false, lobbyPreview=false } = {}) => {
+    setMultiplayerContext: ({ active=false, seatIndex=null, observer=false, lobbyPreview=false, host=false } = {}) => {
       multiplayerSessionActive = !!active;
       multiplayerSeatIndex = multiplayerSessionActive && Number.isInteger(seatIndex) ? seatIndex : null;
       multiplayerObserverMode = multiplayerSessionActive && !!observer;
+      multiplayerHostMode = multiplayerSessionActive && !!host;
       multiplayerLobbyPreview = multiplayerSessionActive && !!lobbyPreview;
+      if (!multiplayerSessionActive){
+        multiplayerRealtimePauseStartedAtMs = 0;
+      }
       localRealtimeLastTickAt = 0;
       if (!isLocalRealtimeMode()){
         resetLocalRealtimePauseState();
@@ -6328,8 +6493,8 @@ document.addEventListener("DOMContentLoaded", () => {
       hybridMovesLeft: hybridMovesLeft.slice(),
       realtimeCountdownEndsAt,
       playerCount: boats.length,
-      phase: isLocalRealtimePaused() ? "paused" : phase,
-      realtimePaused: isLocalRealtimePaused(),
+      phase: isRealtimePaused() ? "paused" : phase,
+      realtimePaused: isRealtimePaused(),
       markCount,
       localPilotMode,
       botDifficulty

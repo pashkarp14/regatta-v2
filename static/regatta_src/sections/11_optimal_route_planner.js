@@ -324,7 +324,7 @@
     const line = { x:startB.x-startA.x, y:startB.y-startA.y };
     const len = Math.hypot(line.x,line.y) || 1;
     const ux = line.x/len, uy = line.y/len;
-    const baseBoatIndex = sharedViewTargetBoatIndex();
+    const baseBoatIndex = bestStartHintTargetBoatIndex();
     const baseBoat = boats[
       Number.isInteger(baseBoatIndex) ? baseBoatIndex : 0
     ] || boats[0] || null;
@@ -348,5 +348,6 @@
     }
 
     bestStartSolution = best;
+    bestStartForBoat = Number.isInteger(baseBoatIndex) ? baseBoatIndex : null;
   }
 
