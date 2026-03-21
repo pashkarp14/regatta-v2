@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 from flask import Flask
@@ -23,6 +24,21 @@ def build_redis_client(app: Flask) -> Redis | None:
     return Redis.from_url(redis_url, decode_responses=False)
 
 
+def build_asset_version(app: Flask) -> str:
+    base_version = str(app.config.get("APP_VERSION", "dev"))
+    static_root = Path(app.static_folder or "")
+    if not static_root.exists():
+        return base_version
+
+    latest_mtime_ns = 0
+    for path in static_root.rglob("*"):
+        if not path.is_file() or path.suffix not in {".js", ".css"}:
+            continue
+        latest_mtime_ns = max(latest_mtime_ns, path.stat().st_mtime_ns)
+
+    return f"{base_version}-{latest_mtime_ns}" if latest_mtime_ns else base_version
+
+
 def create_app(config_overrides: Mapping[str, Any] | None = None) -> Flask:
     app = Flask(__name__, static_folder="../static", template_folder="../templates")
     app.config.from_object(get_config())
@@ -30,6 +46,7 @@ def create_app(config_overrides: Mapping[str, Any] | None = None) -> Flask:
         app.config.update(config_overrides)
         if "SESSION_TYPE" not in config_overrides:
             app.config["SESSION_TYPE"] = "redis" if app.config.get("REDIS_URL") else "filesystem"
+    app.config["ASSET_VERSION"] = build_asset_version(app)
 
     redis_client = build_redis_client(app)
     if redis_client is not None:

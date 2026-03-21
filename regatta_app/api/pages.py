@@ -16,7 +16,7 @@ def index():
     return render_template(
         "index.html",
         app_name=current_app.config["APP_NAME"],
-        version=current_app.config["APP_VERSION"],
+        version=current_app.config["ASSET_VERSION"],
     )
 
 
