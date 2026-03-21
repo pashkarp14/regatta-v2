@@ -722,14 +722,17 @@
     if (autoFullscreenModeSelect) autoFullscreenModeSelect.value = autoFullscreenMode;
     prestartRoundsInp.value = "0";
 
-    const incomingBoats = Array.isArray(snapshot.boats) ? snapshot.boats.slice(0, PLAYER_COUNT_MAX) : [];
+    const hasExplicitBoatList = Array.isArray(snapshot.boats);
+    const incomingBoats = hasExplicitBoatList ? snapshot.boats.slice(0, PLAYER_COUNT_MAX) : [];
     const previousTrails = boatTrails.map((trail) => Array.isArray(trail) ? trail.map((point) => ({ ...point })) : []);
     ensurePlayerCountOptions();
-    const playerCount = clamp(
-      incomingBoats.length || parseInt(playerCountSelect.value,10) || PLAYER_COUNT_MIN,
-      PLAYER_COUNT_MIN,
-      PLAYER_COUNT_MAX
-    );
+    const playerCount = hasExplicitBoatList
+      ? clamp(incomingBoats.length, 0, PLAYER_COUNT_MAX)
+      : clamp(
+          parseInt(playerCountSelect.value,10) || PLAYER_COUNT_MIN,
+          PLAYER_COUNT_MIN,
+          PLAYER_COUNT_MAX
+        );
     playerCountSelect.value = String(playerCount);
     resetBoats();
 

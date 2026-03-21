@@ -89,6 +89,8 @@ document.addEventListener("DOMContentLoaded", () => {
   };
   let toastTimer = 0;
   let roomStartPending = false;
+  let activeRoomInviteCode = "";
+  let activeRoomInviteMessage = "";
 
   if (copyRoomCodeBtn) {
     copyRoomCodeBtn.textContent = "\u0421\u0441\u044b\u043b\u043a\u0430";
@@ -108,6 +110,24 @@ document.addEventListener("DOMContentLoaded", () => {
     inviteUrl.searchParams.set("room", roomCode);
     inviteUrl.searchParams.set("join", "1");
     return inviteUrl.toString();
+  }
+
+  async function revealRoomInvite(roomCode) {
+    const inviteLink = buildRoomInviteLink(roomCode);
+    activeRoomInviteCode = roomCode;
+    activeRoomInviteMessage = `Комната создана. Ссылка для входа: ${inviteLink}`;
+    let copied = false;
+
+    try {
+      await copyTextWithFallback(inviteLink);
+      copied = true;
+    } catch (error) {
+      copied = false;
+    }
+
+    setNotice(activeRoomInviteMessage, "success");
+    showToast(copied ? "Ссылка скопирована" : "Ссылка готова");
+    return inviteLink;
   }
 
   function announceJoinLink(roomCode) {
@@ -700,6 +720,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function renderRoom(room) {
     roomState.room = hydrateRoom(room);
+    if (!roomState.room || roomState.room.code !== activeRoomInviteCode) {
+      activeRoomInviteCode = "";
+      activeRoomInviteMessage = "";
+    }
     regatta.setMultiplayerContext({
       active: !!roomState.room,
       seatIndex: roomState.room ? roomState.selfSeatIndex : null,
@@ -785,7 +809,9 @@ document.addEventListener("DOMContentLoaded", () => {
       roomStatusEl.textContent = `Лобби · ${occupancyLabel}`;
       setNotice(
         isRoomHost()
-          ? (hostObserves
+          ? (activeRoomInviteCode === roomState.room.code && activeRoomInviteMessage
+            ? activeRoomInviteMessage
+            : hostObserves
             ? "Комната создана. Ты в роли наблюдателя: настрой дистанцию, дождись нужного состава и запускай старт в любой удобный момент."
             : "Комната создана. Пока участники заходят, они уже могут изучать карту, а старт ты запускаешь вручную, когда всё готово.")
           : (isRoomObserver()
@@ -866,7 +892,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     roomState.socket.on("room:presence", (payload) => {
       if (payload?.room) {
-        renderRoom(payload.room);
+        handleIncomingRoom(payload.room);
       }
     });
 
@@ -942,6 +968,15 @@ document.addEventListener("DOMContentLoaded", () => {
       },
     });
 
+    if (payload.room?.game_state) {
+      roomState.applyingRemote = true;
+      try {
+        regatta.importState(payload.room.game_state);
+      } finally {
+        roomState.applyingRemote = false;
+      }
+    }
+
     roomStartPending = false;
     pendingRoomDraft.active = false;
     pendingRoomDraft.displayName = "";
@@ -953,6 +988,7 @@ document.addEventListener("DOMContentLoaded", () => {
     renderRoom(payload.room);
     ensureSocket();
     emitRoomDraftChanged();
+    return payload.room;
   }
 
   async function joinRoom(overrides = {}) {
@@ -1066,19 +1102,22 @@ document.addEventListener("DOMContentLoaded", () => {
       roomStartPending = true;
       syncBoardStartAction();
       applyPermissions();
+      let createdRoom = null;
 
       try {
-        await createRoom({
+        createdRoom = await createRoom({
           display_name: pendingDraftDisplayName(),
           max_players: pendingDraftMaxPlayers(),
           game_state: regatta.exportState(),
         });
-        setNotice("Комната создана. Теперь можно копировать код и собирать экипажи.", "success");
       } catch (error) {
         setNotice(error.message, "danger");
       } finally {
         roomStartPending = false;
         renderRoom(roomState.room);
+      }
+      if (createdRoom?.code) {
+        await revealRoomInvite(createdRoom.code);
       }
       return;
     }
@@ -1164,7 +1203,7 @@ document.addEventListener("DOMContentLoaded", () => {
         joinRoomCodeInput.value = joinLinkState.roomCode;
         announceJoinLink(joinLinkState.roomCode);
 
-        const canAutoJoin = !payload.room && joinLinkState.autoJoinRequested && !!displayNameInput.value.trim();
+        const canAutoJoin = !payload.room && joinLinkState.autoJoinRequested && !!joinLinkState.roomCode;
         if (canAutoJoin && !joinLinkState.handled) {
           try {
             await joinRoom({
@@ -1256,7 +1295,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
   createRoomBtn.addEventListener("click", async () => {
     try {
-      await createRoom();
+      const room = await createRoom();
+      if (room?.code) {
+        await revealRoomInvite(room.code);
+      }
     } catch (error) {
       setNotice(error.message, "danger");
     }
