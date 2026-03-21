@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 import math
 import random
 from copy import deepcopy
 from typing import Any
+
+from flask import current_app, has_app_context
 
 
 MARK_RADIUS = 0.28
@@ -36,6 +39,35 @@ RULES_OVERLAP_EPS = 0.05
 RULES_LEEWAY_EPS = 0.05
 RULES_MARK_ROOM_EPS = 0.15
 BOAT_LENGTH_HALF = BOAT_FOOTPRINT_LENGTH / 2
+
+
+def _realtime_logger() -> logging.Logger:
+    if has_app_context():
+        return current_app.logger
+    return logging.getLogger(__name__)
+
+
+def _format_realtime_log_value(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        return f"{value:.3f}"
+    if isinstance(value, dict) and "x" in value and "y" in value:
+        return f"({float(value['x']):.3f},{float(value['y']):.3f})"
+    if value is None:
+        return "none"
+    return repr(value) if isinstance(value, str) else str(value)
+
+
+def _log_realtime_event(event: str, **fields: Any) -> None:
+    details = " ".join(
+        f"{key}={_format_realtime_log_value(value)}"
+        for key, value in fields.items()
+    )
+    message = f"{event} {details}".strip()
+    _realtime_logger().info(message)
 
 
 def clamp(value: float, min_value: float, max_value: float) -> float:
@@ -491,10 +523,10 @@ def resolve_realtime_overlaps(
     changed = False
     active_marks = marks[: max(0, min(mark_count, len(marks)))]
 
-    for _ in range(UNSTICK_MAX_PASSES):
+    for pass_index in range(UNSTICK_MAX_PASSES):
         pass_changed = False
 
-        for boat in boats:
+        for boat_index, boat in enumerate(boats):
             position = boat_position(boat)
             heading = float(boat.get("heading") or 0.0)
             has_heading = bool(boat.get("hasHeading"))
@@ -523,6 +555,16 @@ def resolve_realtime_overlaps(
                 primary = {"x": nearest_point["x"] - mark["x"], "y": nearest_point["y"] - mark["y"]}
                 fallback = {"x": position["x"] - mark["x"], "y": position["y"] - mark["y"]}
                 push_distance = required_distance - distance + UNSTICK_PUSH_EPS
+                _log_realtime_event(
+                    "realtime.unstick.mark.detected",
+                    boat_index=boat_index,
+                    pass_index=pass_index + 1,
+                    boat_pos=position,
+                    mark_pos=mark,
+                    distance=distance,
+                    required_distance=required_distance,
+                    push_distance=push_distance,
+                )
                 next_position = best_mark_unstick_position(
                     position,
                     mark,
@@ -535,7 +577,31 @@ def resolve_realtime_overlaps(
                     world_h=world_h,
                 )
                 if next_position is None:
+                    _log_realtime_event(
+                        "realtime.unstick.mark.unresolved",
+                        boat_index=boat_index,
+                        pass_index=pass_index + 1,
+                        boat_pos=position,
+                        mark_pos=mark,
+                        distance=distance,
+                        required_distance=required_distance,
+                        push_distance=push_distance,
+                        reason="no_candidate",
+                    )
                     continue
+
+                next_capsule = boat_capsule_at(next_position, heading, has_heading)
+                next_clearance, _, _ = point_to_segment(mark, next_capsule["a"], next_capsule["b"])
+                _log_realtime_event(
+                    "realtime.unstick.mark.resolved",
+                    boat_index=boat_index,
+                    pass_index=pass_index + 1,
+                    from_pos=position,
+                    to_pos=next_position,
+                    moved=dist(position, next_position),
+                    push_distance=push_distance,
+                    selected_clearance=next_clearance,
+                )
 
                 boat["x"] = next_position["x"]
                 boat["y"] = next_position["y"]
@@ -572,6 +638,17 @@ def resolve_realtime_overlaps(
                     primary = {"x": closest_left["x"] - closest_right["x"], "y": closest_left["y"] - closest_right["y"]}
                     fallback = {"x": left_position["x"] - right_position["x"], "y": left_position["y"] - right_position["y"]}
                     push_distance = (required_distance - separation + UNSTICK_PUSH_EPS) / 2.0
+                    _log_realtime_event(
+                        "realtime.unstick.boats.detected",
+                        left_index=left_index,
+                        right_index=right_index,
+                        pass_index=pass_index + 1,
+                        left_pos=left_position,
+                        right_pos=right_position,
+                        distance=separation,
+                        required_distance=required_distance,
+                        push_distance=push_distance,
+                    )
                     next_pair = best_boat_unstick_pair(
                         left_position,
                         right_position,
@@ -586,8 +663,41 @@ def resolve_realtime_overlaps(
                         world_h=world_h,
                     )
                     if next_pair is None:
+                        _log_realtime_event(
+                            "realtime.unstick.boats.unresolved",
+                            left_index=left_index,
+                            right_index=right_index,
+                            pass_index=pass_index + 1,
+                            left_pos=left_position,
+                            right_pos=right_position,
+                            distance=separation,
+                            required_distance=required_distance,
+                            push_distance=push_distance,
+                            reason="no_candidate",
+                        )
                         continue
                     next_left, next_right = next_pair
+                    next_left_capsule = boat_capsule_at(next_left, left_heading, left_has_heading)
+                    next_right_capsule = boat_capsule_at(next_right, right_heading, right_has_heading)
+                    _, _, next_clearance = segment_segment_closest_points(
+                        next_left_capsule["a"],
+                        next_left_capsule["b"],
+                        next_right_capsule["a"],
+                        next_right_capsule["b"],
+                    )
+                    _log_realtime_event(
+                        "realtime.unstick.boats.resolved",
+                        left_index=left_index,
+                        right_index=right_index,
+                        pass_index=pass_index + 1,
+                        left_from=left_position,
+                        right_from=right_position,
+                        left_to=next_left,
+                        right_to=next_right,
+                        moved=dist(left_position, next_left) + dist(right_position, next_right),
+                        push_distance=push_distance,
+                        selected_clearance=next_clearance,
+                    )
 
                     moved = False
                     if dist(left_position, next_left) > 1e-6:
@@ -670,7 +780,7 @@ def resolve_realtime_pressure_jams(
     changed = False
     sorted_pairs = sorted(pressure_pairs)
 
-    for _ in range(PRESSURE_UNSTICK_MAX_PASSES):
+    for pass_index in range(PRESSURE_UNSTICK_MAX_PASSES):
         pass_changed = False
 
         for left_index, right_index in sorted_pairs:
@@ -684,10 +794,19 @@ def resolve_realtime_pressure_jams(
 
             left_proposal = proposals[left_index] if left_index < len(proposals) else None
             right_proposal = proposals[right_index] if right_index < len(proposals) else None
-            if not (
-                proposal_presses_into_boat(left_boat, right_boat, left_proposal)
-                and proposal_presses_into_boat(right_boat, left_boat, right_proposal)
-            ):
+            left_presses = proposal_presses_into_boat(left_boat, right_boat, left_proposal)
+            right_presses = proposal_presses_into_boat(right_boat, left_boat, right_proposal)
+            if not (left_presses and right_presses):
+                _log_realtime_event(
+                    "realtime.unstick.pressure.skip",
+                    left_index=left_index,
+                    right_index=right_index,
+                    pass_index=pass_index + 1,
+                    left_presses=left_presses,
+                    right_presses=right_presses,
+                    left_distance=float((left_proposal or {}).get("distance") or 0.0),
+                    right_distance=float((right_proposal or {}).get("distance") or 0.0),
+                )
                 continue
 
             left_position = boat_position(left_boat)
@@ -734,6 +853,18 @@ def resolve_realtime_pressure_jams(
                 (target_distance - separation + UNSTICK_PUSH_EPS) / 2.0,
                 attempted_push / 2.0,
             )
+            _log_realtime_event(
+                "realtime.unstick.pressure.detected",
+                left_index=left_index,
+                right_index=right_index,
+                pass_index=pass_index + 1,
+                left_pos=left_position,
+                right_pos=right_position,
+                separation=separation,
+                target_distance=target_distance,
+                attempted_push=attempted_push,
+                push_distance=push_distance,
+            )
             next_pair = best_boat_unstick_pair(
                 left_position,
                 right_position,
@@ -751,9 +882,42 @@ def resolve_realtime_pressure_jams(
                 world_h=world_h,
             )
             if next_pair is None:
+                _log_realtime_event(
+                    "realtime.unstick.pressure.unresolved",
+                    left_index=left_index,
+                    right_index=right_index,
+                    pass_index=pass_index + 1,
+                    left_pos=left_position,
+                    right_pos=right_position,
+                    separation=separation,
+                    target_distance=target_distance,
+                    push_distance=push_distance,
+                    reason="no_candidate",
+                )
                 continue
 
             next_left, next_right = next_pair
+            next_left_capsule = boat_capsule_at(next_left, left_heading, left_has_heading)
+            next_right_capsule = boat_capsule_at(next_right, right_heading, right_has_heading)
+            _, _, next_clearance = segment_segment_closest_points(
+                next_left_capsule["a"],
+                next_left_capsule["b"],
+                next_right_capsule["a"],
+                next_right_capsule["b"],
+            )
+            _log_realtime_event(
+                "realtime.unstick.pressure.resolved",
+                left_index=left_index,
+                right_index=right_index,
+                pass_index=pass_index + 1,
+                left_from=left_position,
+                right_from=right_position,
+                left_to=next_left,
+                right_to=next_right,
+                moved=dist(left_position, next_left) + dist(right_position, next_right),
+                push_distance=push_distance,
+                selected_clearance=next_clearance,
+            )
             moved = False
             if dist(left_position, next_left) > 1e-6:
                 left_boat["x"] = next_left["x"]
