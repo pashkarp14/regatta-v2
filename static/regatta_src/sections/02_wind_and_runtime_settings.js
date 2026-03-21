@@ -6,7 +6,7 @@
   let deadZoneDeg = parseFloat(deadZoneInp.value);
 
   function normalizePlayModeValue(rawMode){
-    return (rawMode === "realtime" || rawMode === "hybrid") ? "realtime" : "turns";
+    return "realtime";
   }
 
   function normalizeInteractionMode(rawMode){

@@ -41,7 +41,8 @@
     prestartRoundsLeft = 0;
 
     currentPlayer = clamp(parseInt(nextPlayerSelect.value,10) || 0, 0, boats.length-1);
-    subMovesLeft = movesPerTurn;
+    subMovesLeft = 0;
+    selectedBoatIndex = boats[currentPlayer]?.finished ? null : currentPlayer;
     ensureNextPlayerOptions();
 
     invalidateSolutions();
@@ -74,8 +75,8 @@
   });
 
   playModeSelect.addEventListener("change", () => {
-    playMode = normalizePlayModeValue(playModeSelect.value);
-    resetHybridState();
+    playModeSelect.value = "realtime";
+    playMode = "realtime";
     resetLocalRealtimePauseState();
     selectedBoatIndex = null;
     realtimeCountdownEndsAt = 0;
@@ -116,13 +117,8 @@
   });
 
   prestartRoundsInp.addEventListener("change", () => {
-    prestartRoundsSetting = Math.max(0, parseInt(prestartRoundsInp.value,10) || 0);
-    resetBoats();
-    invalidateSolutions();
-    updateStatus();
-    updateStats();
-    updateOptInfo();
-    render();
+    prestartRoundsSetting = 0;
+    prestartRoundsInp.value = "0";
   });
 
   playerCountSelect.addEventListener("change", () => {
@@ -149,7 +145,8 @@
   });
 
   movesPerTurnInp.addEventListener("change", () => {
-    applyMovesPerTurnSetting(movesPerTurnInp.value);
+    movesPerTurn = 1;
+    movesPerTurnInp.value = "1";
     updateStatus();
     render();
   });
@@ -394,10 +391,7 @@
       botDifficulty,
       world: { width: worldW, height: worldH, origin: "bottom-left" },
       race: {
-        currentPlayer,
-        subMovesLeft,
         raceFinishedCount,
-        prestartRoundsLeft,
         realtimeCountdownEndsAt,
         realtimePaused: isRealtimePaused(),
       },
@@ -461,7 +455,7 @@
     };
   }
 
-  function debugMoveTargets(boatIdx=currentPlayer){
+  function debugMoveTargets(boatIdx=selectedBoatIndex ?? 0){
     const boat = boats[boatIdx];
     if (!boat || boat.finished) return [];
 
@@ -534,7 +528,7 @@
         selectedBoatIndex = null;
       }
       const candidateBoat = Number.isInteger(selectedBoatIndex) ? selectedBoatIndex : multiplayerSeatIndex;
-      if (multiplayerSeatIndex !== null && isHybridRaceMode() && !canSelectBoatForPlay(candidateBoat)){
+      if (multiplayerSeatIndex !== null && !canSelectBoatForPlay(candidateBoat)){
         selectedBoatIndex = null;
       }
       if (multiplayerSeatIndex === null && isLocalBotsMode()){
@@ -569,11 +563,8 @@
     },
     getMeta: () => ({
       mode,
-      currentPlayer,
       playMode,
       interactionMode,
-      hybridRound,
-      hybridMovesLeft: hybridMovesLeft.slice(),
       realtimeCountdownEndsAt,
       playerCount: boats.length,
       phase: isRealtimePaused() ? "paused" : phase,

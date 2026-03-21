@@ -62,7 +62,7 @@ def summarize_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
     return {
         "player_count": len(boats),
         "mark_count": int(course.get("markCount") or 0),
-        "play_mode": "realtime" if settings.get("playMode") in {"realtime", "hybrid"} else "turns",
+        "play_mode": "realtime",
         "phase": race.get("phase") or "race",
         "world": {
             "width": float(world.get("width") or 0),
@@ -88,11 +88,6 @@ def validate_snapshot(snapshot: Any) -> dict[str, Any]:
         raise LibraryValidationError(
             f"Snapshot must contain between {MIN_SNAPSHOT_BOATS} and {MAX_SNAPSHOT_BOATS} boats."
         )
-
-    race = snapshot.get("race") or {}
-    current_player = race.get("currentPlayer")
-    if not isinstance(current_player, int) or not (0 <= current_player < len(boats)):
-        raise LibraryValidationError("Snapshot current player is out of range.")
 
     return snapshot
 

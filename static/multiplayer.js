@@ -31,6 +31,16 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const originalDisabledState = new WeakMap();
   const originalMovesPerTurnDisabled = !!movesPerTurnInput?.disabled;
+  const joinLinkState = (() => {
+    const url = new URL(window.location.href);
+    const roomCode = url.searchParams.get("room");
+    if (!roomCode) return null;
+    return {
+      roomCode: roomCode.trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6),
+      autoJoinRequested: url.searchParams.get("join") === "1",
+      handled: false,
+    };
+  })();
 
   function setupLockedControls() {
     return Array.from(document.querySelectorAll("[data-room-lock='setup']"));
@@ -60,6 +70,7 @@ document.addEventListener("DOMContentLoaded", () => {
     socket: null,
     applyingRemote: false,
     lastFingerprint: regatta.fingerprintState(),
+    selfPlayerId: null,
     selfSeatIndex: null,
     selfIsObserver: false,
     lastRealtimeIntentKey: "",
@@ -79,10 +90,39 @@ document.addEventListener("DOMContentLoaded", () => {
   let toastTimer = 0;
   let roomStartPending = false;
 
+  if (copyRoomCodeBtn) {
+    copyRoomCodeBtn.textContent = "\u0421\u0441\u044b\u043b\u043a\u0430";
+  }
+
+  function clearJoinLinkQuery() {
+    const url = new URL(window.location.href);
+    const hadParams = url.searchParams.has("room") || url.searchParams.has("join");
+    if (!hadParams) return;
+    url.searchParams.delete("room");
+    url.searchParams.delete("join");
+    window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+  }
+
+  function buildRoomInviteLink(roomCode) {
+    const inviteUrl = new URL(window.location.origin + window.location.pathname);
+    inviteUrl.searchParams.set("room", roomCode);
+    inviteUrl.searchParams.set("join", "1");
+    return inviteUrl.toString();
+  }
+
+  function announceJoinLink(roomCode) {
+    window.dispatchEvent(new CustomEvent("regatta:join-link", {
+      detail: {
+        roomCode,
+      },
+    }));
+  }
+
   function emitRoomStateChanged() {
     window.dispatchEvent(new CustomEvent("regatta:room-state", {
       detail: {
         room: roomState.room,
+        selfPlayerId: roomState.selfPlayerId,
         selfSeatIndex: roomState.selfSeatIndex,
         selfIsObserver: roomState.selfIsObserver,
       },
@@ -183,7 +223,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function roomStartReady(room = roomState.room) {
-    return !!room?.start_ready;
+    return !!(room?.can_start ?? room?.start_ready);
   }
 
   function roomRacersJoined(room = roomState.room) {
@@ -199,11 +239,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function roomOccupancyLabel(room = roomState.room) {
     if (!room) return "";
-    return `${roomRacersJoined(room)}/${room.max_players}`;
+    return `${roomRacersJoined(room)} лодок`;
   }
 
   function roomPlayer() {
     if (!roomState.room) return null;
+    if (roomState.selfPlayerId) {
+      const playerById = roomState.room.players?.find((player) => player.player_id === roomState.selfPlayerId) || null;
+      if (playerById) return playerById;
+    }
     return roomState.room.players?.find((player) => player.is_self) || null;
   }
 
@@ -221,19 +265,12 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function isMyTurn() {
-    const player = roomPlayer();
-    return !!(
-      player
-      && !player.is_observer
-      && roomState.room
-      && Number.isInteger(player.seat_index)
-      && roomState.room.current_player === player.seat_index
-    );
+    return false;
   }
 
   function roomPlayMode() {
-    if (!roomState.room) return regatta.getMeta?.().playMode || "turns";
-    return roomState.room.play_mode || roomState.room.game_state?.settings?.playMode || "turns";
+    if (!roomState.room) return "realtime";
+    return roomState.room.play_mode || roomState.room.game_state?.settings?.playMode || "realtime";
   }
 
   function roomRacePhase() {
@@ -311,15 +348,12 @@ document.addEventListener("DOMContentLoaded", () => {
   function canEditTurnBudget() {
     if (!roomState.room) return true;
     if (roomState.room.status === "lobby") return isRoomHost();
-    if (isRealtimeRoom()) return isRoomHost();
-    return isMyTurn();
+    return isRoomHost();
   }
 
   function canPushState() {
     if (!roomState.room) return false;
-    if (roomState.room.status === "lobby") return isRoomHost();
-    if (isRealtimeRoom()) return false;
-    return isMyTurn();
+    return roomState.room.status === "lobby" && isRoomHost();
   }
 
   function canPushSharedViewSettings() {
@@ -359,18 +393,13 @@ document.addEventListener("DOMContentLoaded", () => {
   function canInteractWithBoard() {
     if (!roomState.room) return true;
     if (roomState.room.status === "lobby") {
-      const racersJoined = roomRacersJoined(roomState.room);
-      const hostObserves = roomState.room.host_mode === "observe";
-      const occupancyLabel = hostObserves
-        ? `${racersJoined}/${roomState.room.max_players} экипажей · хост наблюдает`
-        : `${racersJoined}/${roomState.room.max_players} экипажей`;
       if (!isRoomHost() && isRoomRacer() && (regatta.getMeta?.().mode || "play") !== "play") {
         regatta.setMode?.("play");
       }
       return isRoomHost() || (isRoomRacer() && (regatta.getMeta?.().mode || "play") === "play");
     }
     if (isRealtimeRoom()) return isRoomRacer();
-    return isMyTurn();
+    return false;
   }
 
   function syncBoardStartAction() {
@@ -495,6 +524,9 @@ document.addEventListener("DOMContentLoaded", () => {
           ${player.is_observer ? '<span class="room-tag room-tag-observer">Наблюдает</span>' : ""}
           ${player.is_self ? '<span class="room-tag room-tag-self">Вы</span>' : ""}
         </span>
+        ${isRoomHost() && !player.is_host
+          ? `<button type="button" class="ghost-btn room-kick-btn" data-player-kick="${player.player_id}">\u041a\u0438\u043a</button>`
+          : ""}
       </li>
     `).join("");
   }
@@ -515,6 +547,7 @@ document.addEventListener("DOMContentLoaded", () => {
       : null;
     const preservedSelf = sameRoom && !incomingSelfKnown
       ? {
+          playerId: roomState.selfPlayerId || previousSelfPlayer?.player_id || null,
           seatIndex: Number.isInteger(roomState.selfSeatIndex)
             ? roomState.selfSeatIndex
             : (Number.isInteger(previousSelfPlayer?.seat_index) ? previousSelfPlayer.seat_index : null),
@@ -525,6 +558,10 @@ document.addEventListener("DOMContentLoaded", () => {
       : null;
 
     const players = (room.players || []).map((player) => {
+      const matchesPreservedPlayerId = preservedSelf
+        && typeof preservedSelf.playerId === "string"
+        && preservedSelf.playerId.length > 0
+        && player.player_id === preservedSelf.playerId;
       const matchesPreservedSeat = preservedSelf
         && Number.isInteger(preservedSelf.seatIndex)
         && Number.isInteger(player.seat_index)
@@ -538,12 +575,15 @@ document.addEventListener("DOMContentLoaded", () => {
         && player.name === preservedSelf.name;
       return {
         ...player,
-        is_self: !!player.is_self || !!matchesPreservedSeat || !!matchesPreservedObserver,
+        is_self: !!player.is_self || !!matchesPreservedPlayerId || !!matchesPreservedSeat || !!matchesPreservedObserver,
         is_observer: !!player.is_observer,
       };
     });
 
     const effectiveSelfPlayer = players.find((player) => player.is_self) || null;
+    roomState.selfPlayerId = typeof incomingSelf.player_id === "string" && incomingSelf.player_id
+      ? incomingSelf.player_id
+      : (effectiveSelfPlayer?.player_id || preservedSelf?.playerId || null);
     roomState.selfSeatIndex = Number.isInteger(incomingSelf.seat_index)
       ? incomingSelf.seat_index
       : (Number.isInteger(effectiveSelfPlayer?.seat_index) ? effectiveSelfPlayer.seat_index : null);
@@ -560,10 +600,12 @@ document.addEventListener("DOMContentLoaded", () => {
       self: incomingSelfKnown
         ? {
             ...incomingSelf,
+            player_id: roomState.selfPlayerId,
             is_observer: !!incomingSelf.is_observer,
             token_present: true,
           }
         : {
+            player_id: roomState.selfPlayerId,
             name: effectiveSelfPlayer?.name || preservedSelf?.name || null,
             seat_index: roomState.selfSeatIndex,
             is_observer: roomState.selfIsObserver,
@@ -653,9 +695,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     interactionLockEl.textContent = roomState.room.status === "lobby"
       ? "Хост настраивает дистанцию. Пока можно следить за полем и готовиться к старту."
-      : isRealtimeRoom()
-        ? "В этой комнате активен realtime-режим, но этот браузер сейчас не привязан к лодке."
-        : `Сейчас ход лодки ${roomState.room.current_player + 1}. Твоя лодка активируется, когда очередь дойдёт до тебя.`;
+      : "В этой комнате активен realtime-режим, но этот браузер сейчас не привязан к лодке.";
   }
 
   function renderRoom(room) {
@@ -672,6 +712,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!roomState.room) {
       const pendingDraft = hasPendingRoomDraft();
       roomState.serverClockOffsetMs = 0;
+      roomState.selfPlayerId = null;
       roomState.selfIsObserver = false;
       regatta.setServerClockOffset?.(0);
       roomCodeValueEl.textContent = "-";
@@ -693,7 +734,7 @@ document.addEventListener("DOMContentLoaded", () => {
       } else {
         roomStatusEl.textContent = "Готов к локальной игре";
         roomPhaseLabelEl.textContent = "Соло";
-        setHint("Размер комнаты берётся из настройки «Лодок». Хост настраивает дистанцию, остальные игроки подключаются по коду и ждут старта.");
+        setHint("Размер комнаты берётся из настройки «Лодок». Хост настраивает дистанцию, остальные игроки подключаются по ссылке или коду и ждут старта.");
         setNotice("Сетевой слой не активен, пока ты не создашь комнату.", "neutral");
         setSyncLabel("Локальный режим", false);
         if (roomPanelNoteEl) {
@@ -732,12 +773,12 @@ document.addEventListener("DOMContentLoaded", () => {
     if (roomState.room.status === "lobby") {
       const hostObserves = roomHostObserves(roomState.room);
       const occupancyLabel = roomOccupancyLabel(roomState.room);
-      setHint(`Ожидаем подключение всех экипажей: ${roomState.room.joined_count} из ${roomState.room.max_players}.`);
-      roomStatusEl.textContent = `Лобби · ${roomState.room.joined_count}/${roomState.room.max_players}`;
+      setHint(`В лобби сейчас ${occupancyLabel}. Хост может стартовать, как только готов состав.`);
+      roomStatusEl.textContent = `Лобби · ${occupancyLabel}`;
       setNotice(
         isRoomHost()
-          ? "Комната создана. Настраивай дистанцию и запускай матч, когда соберётся весь состав."
-          : "Ты подключился к комнате. Хост готовит дистанцию и запустит матч после сбора экипажа.",
+          ? "Комната создана. Настраивай дистанцию, делись ссылкой и запускай матч, когда готов."
+          : "Ты подключился к комнате. Хост готовит дистанцию и сам решает, когда запускать старт.",
         "success",
       );
       setHint(`Лобби открыто: ${occupancyLabel}. До старта можно пройтись по карте, а официальный старт вернёт всех на исходные позиции.`);
@@ -745,8 +786,8 @@ document.addEventListener("DOMContentLoaded", () => {
       setNotice(
         isRoomHost()
           ? (hostObserves
-            ? "Комната создана. Ты в роли наблюдателя: настрой дистанцию, дождись всех экипажей и только потом запускай старт."
-            : "Комната создана. Пока собирается состав, участники уже могут изучать карту, а ты запускаешь старт, когда все места заняты.")
+            ? "Комната создана. Ты в роли наблюдателя: настрой дистанцию, дождись нужного состава и запускай старт в любой удобный момент."
+            : "Комната создана. Пока участники заходят, они уже могут изучать карту, а старт ты запускаешь вручную, когда всё готово.")
           : (isRoomObserver()
             ? "Ты вошёл как наблюдатель. Можно смотреть поле и подготовку, но лодка тебе не назначена."
             : "Ты вошёл в лобби. Переключись в режим «В игру» и можешь пройтись по карте до официального старта."),
@@ -794,15 +835,6 @@ document.addEventListener("DOMContentLoaded", () => {
           "neutral",
         );
       }
-    } else {
-      setHint(`Матч запущен. Активная лодка: ${roomState.room.current_player + 1}.`);
-      roomStatusEl.textContent = `Гонка · ход лодки ${roomState.room.current_player + 1}`;
-      setNotice(
-        isMyTurn()
-          ? "Твой ход. Маршрут и движение будут синхронизированы для всей комнаты."
-          : `Матч в эфире. Сейчас играет лодка ${roomState.room.current_player + 1}.`,
-        "neutral",
-      );
     }
 
     syncBoardStartAction();
@@ -844,6 +876,23 @@ document.addEventListener("DOMContentLoaded", () => {
 
     roomState.socket.on("room:state_updated", (payload) => {
       handleIncomingRoom(payload?.room);
+    });
+
+    roomState.socket.on("room:kicked", (payload) => {
+      if (typeof payload?.room_code === "string") {
+        joinRoomCodeInput.value = payload.room_code;
+      }
+      disconnectSocket();
+      roomState.room = null;
+      roomState.selfPlayerId = null;
+      roomState.selfSeatIndex = null;
+      roomState.selfIsObserver = false;
+      roomState.lastRealtimeIntentKey = "";
+      roomState.lastSharedViewKey = "";
+      regatta.clearRealtimeIntent?.();
+      renderRoom(null);
+      setNotice("\u0425\u043e\u0441\u0442 \u0443\u0431\u0440\u0430\u043b \u0432\u0430\u0441 \u0438\u0437 \u043a\u043e\u043c\u043d\u0430\u0442\u044b.", "warning");
+      announceJoinLink(joinRoomCodeInput.value.trim());
     });
   }
 
@@ -906,13 +955,19 @@ document.addEventListener("DOMContentLoaded", () => {
     emitRoomDraftChanged();
   }
 
-  async function joinRoom() {
+  async function joinRoom(overrides = {}) {
     clearPendingRoomDraft({ silent: true });
+    const nextDisplayName = typeof overrides.display_name === "string"
+      ? overrides.display_name.trim()
+      : displayNameInput.value.trim();
+    const nextRoomCode = typeof overrides.room_code === "string"
+      ? overrides.room_code.trim()
+      : joinRoomCodeInput.value.trim();
     const payload = await apiRequest("/api/rooms/join", {
       method: "POST",
       body: {
-        display_name: displayNameInput.value.trim(),
-        room_code: joinRoomCodeInput.value.trim(),
+        display_name: nextDisplayName,
+        room_code: nextRoomCode,
       },
     });
 
@@ -929,6 +984,10 @@ document.addEventListener("DOMContentLoaded", () => {
     roomStartPending = false;
     renderRoom(payload.room);
     ensureSocket();
+    if (joinLinkState?.roomCode === nextRoomCode.toUpperCase()) {
+      joinLinkState.handled = true;
+      clearJoinLinkQuery();
+    }
   }
 
   async function startRoom({ armRealtime = true } = {}) {
@@ -1066,6 +1125,7 @@ document.addEventListener("DOMContentLoaded", () => {
     await apiRequest("/api/rooms/leave", { method: "POST" });
     disconnectSocket();
     roomState.room = null;
+    roomState.selfPlayerId = null;
     roomState.selfSeatIndex = null;
     roomState.selfIsObserver = false;
     roomState.lastFingerprint = regatta.fingerprintState();
@@ -1073,6 +1133,17 @@ document.addEventListener("DOMContentLoaded", () => {
     roomState.lastSharedViewKey = "";
     roomStartPending = false;
     renderRoom(null);
+  }
+
+  async function kickPlayer(playerId) {
+    if (!roomState.room || !isRoomHost() || !playerId) return;
+    const payload = await apiRequest(`/api/rooms/${roomState.room.code}/kick`, {
+      method: "POST",
+      body: {
+        player_id: playerId,
+      },
+    });
+    renderRoom(payload.room);
   }
 
   async function bootstrapRoom() {
@@ -1088,6 +1159,28 @@ document.addEventListener("DOMContentLoaded", () => {
       } else {
         renderRoom(null);
       }
+
+      if (joinLinkState?.roomCode) {
+        joinRoomCodeInput.value = joinLinkState.roomCode;
+        announceJoinLink(joinLinkState.roomCode);
+
+        const canAutoJoin = !payload.room && joinLinkState.autoJoinRequested && !!displayNameInput.value.trim();
+        if (canAutoJoin && !joinLinkState.handled) {
+          try {
+            await joinRoom({
+              display_name: displayNameInput.value.trim(),
+              room_code: joinLinkState.roomCode,
+            });
+          } catch (error) {
+            setNotice(error.message, "danger");
+          } finally {
+            joinLinkState.handled = true;
+            clearJoinLinkQuery();
+          }
+        } else if (!joinLinkState.handled) {
+          clearJoinLinkQuery();
+        }
+      }
     } catch (error) {
       setNotice(error.message, "danger");
       renderRoom(null);
@@ -1097,12 +1190,12 @@ document.addEventListener("DOMContentLoaded", () => {
   async function copyRoomCode() {
     if (!roomState.room) return;
     try {
-      await copyTextWithFallback(roomState.room.code);
-      setNotice(`Код ${roomState.room.code} скопирован.`, "success");
-      showToast("Скопировано успешно");
+      await copyTextWithFallback(buildRoomInviteLink(roomState.room.code));
+      setNotice(`Ссылка на комнату ${roomState.room.code} скопирована.`, "success");
+      showToast("Скопировано");
     } catch (error) {
-      setNotice("Не удалось скопировать код комнаты.", "warning");
-      showToast("Не удалось скопировать");
+      setNotice("Не удалось скопировать ссылку.", "warning");
+      showToast("Не удалось");
     }
   }
 
@@ -1199,6 +1292,16 @@ document.addEventListener("DOMContentLoaded", () => {
 
   copyRoomCodeBtn.addEventListener("click", copyRoomCode);
 
+  roomPlayersEl?.addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-player-kick]");
+    if (!button) return;
+    try {
+      await kickPlayer(button.dataset.playerKick);
+    } catch (error) {
+      setNotice(error.message, "danger");
+    }
+  });
+
   joinRoomCodeInput.addEventListener("input", () => {
     joinRoomCodeInput.value = joinRoomCodeInput.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6);
   });
@@ -1261,6 +1364,7 @@ document.addEventListener("DOMContentLoaded", () => {
     ),
     getRoomState: () => ({
       room: roomState.room,
+      selfPlayerId: roomState.selfPlayerId,
       selfSeatIndex: roomState.selfSeatIndex,
       selfIsObserver: roomState.selfIsObserver,
       serverClockOffsetMs: roomState.serverClockOffsetMs,

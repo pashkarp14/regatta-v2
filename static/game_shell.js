@@ -74,6 +74,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const deckRoomSectionEl = document.getElementById("deckRoomSection");
   const modeFinishBtn = document.getElementById("modeFinish");
   const prestartRoundsControlEl = document.getElementById("prestartRoundsControl");
+  const movesPerTurnControlEl = document.getElementById("movesPerTurn")?.closest(".control");
   const realtimePrepControlEl = document.getElementById("realtimePrepControl");
   const deckRulesModeHintEl = document.getElementById("deckRulesModeHint");
   const deckModeHintEl = document.getElementById("deckModeHint");
@@ -108,6 +109,17 @@ document.addEventListener("DOMContentLoaded", () => {
 
   if (overlayTitleEl) {
     overlayTitleEl.textContent = "Главное меню";
+  }
+
+  function enforceRealtimeUi() {
+    if (playModeSelect) {
+      playModeSelect.innerHTML = '<option value="realtime">Realtime</option>';
+      playModeSelect.value = "realtime";
+    }
+    prestartRoundsControlEl?.classList.add("hidden");
+    movesPerTurnControlEl?.classList.add("hidden");
+    menuLocalPlayModeTurnsBtn?.classList.add("hidden");
+    menuNetworkPlayModeTurnsBtn?.classList.add("hidden");
   }
 
   function showToast(message) {
@@ -146,7 +158,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function formatPlayModeLabel(mode) {
-    return mode === "realtime" ? "В реальном времени" : "Пошаговая";
+    return "Realtime";
   }
 
   function formatPhaseLabel(phase, { paused = false } = {}) {
@@ -397,20 +409,17 @@ document.addEventListener("DOMContentLoaded", () => {
     const meta = regatta.getMeta?.() || {};
     const room = roomSummary().room;
     const draft = pendingRoomDraft();
-    const playMode = meta.playMode === "realtime" ? "realtime" : "turns";
     const editorMode = meta.mode || "play";
     const finishSeparate = finishSeparateSelect?.value === "yes";
     const showRoomSection = (!!room && room.status === "lobby") || (!!draft && !room);
 
     deckRoomSectionEl?.classList.toggle("hidden", !showRoomSection);
-    prestartRoundsControlEl?.classList.toggle("hidden", playMode === "realtime");
-    realtimePrepControlEl?.classList.toggle("hidden", playMode !== "realtime");
+    prestartRoundsControlEl?.classList.add("hidden");
+    realtimePrepControlEl?.classList.remove("hidden");
     modeFinishBtn?.classList.toggle("hidden", !finishSeparate);
 
     if (deckRulesModeHintEl) {
-      deckRulesModeHintEl.textContent = playMode === "realtime"
-        ? "Сейчас выбрана игра в реальном времени. Перед стартом задаётся время на манёвры."
-        : "Сейчас выбрана пошаговая игра. Перед стартом задаётся число предстартовых кругов.";
+      deckRulesModeHintEl.textContent = "Regatta работает только в realtime: перед стартом задаётся время на манёвры перед общим сигналом.";
     }
 
     const isMarksMode = editorMode === "marks";
@@ -449,20 +458,14 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function ensureLocalSelectionState() {
-    const meta = regatta.getMeta?.() || {};
     if (!menuState.localParty) {
       menuState.localParty = regatta.getLocalPilotMode?.() === "bots" ? "bots" : "hotseat";
     }
-    if (!menuState.localPlayMode) {
-      menuState.localPlayMode = meta.playMode === "realtime" ? "realtime" : "turns";
-    }
+    menuState.localPlayMode = "realtime";
   }
 
   function ensureNetworkSelectionState() {
-    const meta = regatta.getMeta?.() || {};
-    if (!menuState.networkPlayMode) {
-      menuState.networkPlayMode = meta.playMode === "realtime" ? "realtime" : "turns";
-    }
+    menuState.networkPlayMode = "realtime";
   }
 
   function localScenarioLabel() {
@@ -476,43 +479,35 @@ document.addEventListener("DOMContentLoaded", () => {
     ensureLocalSelectionState();
 
     const isBots = menuState.localParty === "bots";
-    const isRealtime = menuState.localPlayMode === "realtime";
 
     menuLocalPartyHotseatBtn?.classList.toggle("is-selected", !isBots);
     menuLocalPartyHotseatBtn?.classList.toggle("menu-action-card--accent", !isBots);
     menuLocalPartyBotsBtn?.classList.toggle("is-selected", isBots);
     menuLocalPartyBotsBtn?.classList.toggle("menu-action-card--accent", isBots);
 
-    if (menuLocalPlayModeTurnsBtn) {
-      menuLocalPlayModeTurnsBtn.classList.toggle("is-active", !isRealtime);
-    }
+    menuLocalPlayModeTurnsBtn?.classList.toggle("hidden", true);
     if (menuLocalPlayModeRealtimeBtn) {
-      menuLocalPlayModeRealtimeBtn.classList.toggle("is-active", isRealtime);
+      menuLocalPlayModeRealtimeBtn.classList.toggle("is-active", true);
       menuLocalPlayModeRealtimeBtn.disabled = false;
       menuLocalPlayModeRealtimeBtn.setAttribute("aria-disabled", "false");
     }
 
     if (menuLocalSelectionSummaryEl) {
       const partyLabel = isBots ? "Против ботов" : "Несколько игроков на одном устройстве";
-      const modeLabel = isRealtime ? "В реальном времени" : "Пошаговая";
       const controlLabel = isBots
-        ? (isRealtime
-          ? "Лодка 1 остаётся у человека, остальные экипажи ведёт ИИ одновременно с игроком."
-          : "Лодка 1 остаётся у человека, остальные ходы делает ИИ.")
-        : (isRealtime
-          ? "Все управляют на одном устройстве, гонка идёт без очереди."
-          : "Игроки по очереди передают ход на одном устройстве.");
+        ? "Лодка 1 остаётся у человека, остальные экипажи ведёт ИИ одновременно с игроком."
+        : "Игроки делят один экран и в любой момент выбирают свою лодку на поле.";
       menuLocalSelectionSummaryEl.innerHTML = `
         <div><strong>Состав:</strong> ${partyLabel}</div>
-        <div><strong>Режим игры:</strong> ${modeLabel}</div>
+        <div><strong>Режим игры:</strong> Realtime</div>
         <div><strong>Управление:</strong> ${controlLabel}</div>
       `;
     }
 
     if (menuLocalHintEl) {
-      menuLocalHintEl.textContent = isBots && isRealtime
+      menuLocalHintEl.textContent = isBots
         ? `${localScenarioLabel()} Боты будут рулить одновременно с человеком в realtime.`
-        : localScenarioLabel();
+        : `${localScenarioLabel()} Локальный запуск всегда идёт в realtime.`;
     }
 
     if (menuLaunchLocalGameBtn) {
@@ -524,10 +519,66 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function renderNetworkSelection() {
     ensureNetworkSelectionState();
+    menuNetworkPlayModeTurnsBtn?.classList.toggle("hidden", true);
+    menuNetworkPlayModeRealtimeBtn?.classList.toggle("is-active", true);
+  }
 
-    const isRealtime = menuState.networkPlayMode === "realtime";
-    menuNetworkPlayModeTurnsBtn?.classList.toggle("is-active", !isRealtime);
-    menuNetworkPlayModeRealtimeBtn?.classList.toggle("is-active", isRealtime);
+  function formatPlayModeLabel(mode) {
+    return "Realtime";
+  }
+
+  function ensureLocalSelectionState() {
+    if (!menuState.localParty) {
+      menuState.localParty = regatta.getLocalPilotMode?.() === "bots" ? "bots" : "hotseat";
+    }
+    menuState.localPlayMode = "realtime";
+  }
+
+  function ensureNetworkSelectionState() {
+    menuState.networkPlayMode = "realtime";
+  }
+
+  function renderLocalSelection() {
+    ensureLocalSelectionState();
+
+    const isBots = menuState.localParty === "bots";
+
+    menuLocalPartyHotseatBtn?.classList.toggle("is-selected", !isBots);
+    menuLocalPartyHotseatBtn?.classList.toggle("menu-action-card--accent", !isBots);
+    menuLocalPartyBotsBtn?.classList.toggle("is-selected", isBots);
+    menuLocalPartyBotsBtn?.classList.toggle("menu-action-card--accent", isBots);
+
+    menuLocalPlayModeTurnsBtn?.classList.toggle("hidden", true);
+    menuLocalPlayModeRealtimeBtn?.classList.toggle("is-active", true);
+    menuLocalPlayModeRealtimeBtn?.setAttribute("aria-disabled", "false");
+
+    if (menuLocalSelectionSummaryEl) {
+      const partyLabel = isBots ? "Боты" : "Один экран";
+      const controlLabel = isBots
+        ? "Лодка 1 остаётся у человека, остальной флот ведут боты в realtime."
+        : "Выбери лодку на поле и веди её в realtime с этого же экрана.";
+      menuLocalSelectionSummaryEl.innerHTML = `
+        <div><strong>Состав:</strong> ${partyLabel}</div>
+        <div><strong>Режим:</strong> Realtime</div>
+        <div><strong>Управление:</strong> ${controlLabel}</div>
+      `;
+    }
+
+    if (menuLocalHintEl) {
+      menuLocalHintEl.textContent = `${localScenarioLabel()} Локальный запуск теперь всегда идёт в realtime.`;
+    }
+
+    if (menuLaunchLocalGameBtn) {
+      menuLaunchLocalGameBtn.textContent = menuState.scenario === "create"
+        ? "Открыть редактор"
+        : (menuState.scenario === "race" ? "Продолжить локально" : "Старт локально");
+    }
+  }
+
+  function renderNetworkSelection() {
+    ensureNetworkSelectionState();
+    menuNetworkPlayModeTurnsBtn?.classList.toggle("hidden", true);
+    menuNetworkPlayModeRealtimeBtn?.classList.toggle("is-active", true);
   }
 
   function renderHints() {
@@ -798,9 +849,8 @@ document.addEventListener("DOMContentLoaded", () => {
   async function launchLocalSelection() {
     ensureLocalSelectionState();
     const localMode = menuState.localParty === "bots" ? "bots" : "hotseat";
-    const playMode = menuState.localPlayMode === "realtime" ? "realtime" : "turns";
     await startFreshLocal({
-      playMode,
+      playMode: "realtime",
       localMode,
       openEditor: menuState.scenario === "create",
     });
@@ -811,7 +861,7 @@ document.addEventListener("DOMContentLoaded", () => {
     clearPendingRoomDraft();
     syncDeckFieldsFromMenu();
     ensureNetworkSelectionState();
-    setControlValue(playModeSelect, menuState.networkPlayMode === "realtime" ? "realtime" : "turns");
+    setControlValue(playModeSelect, "realtime");
     regatta.setLocalPilotMode?.("hotseat");
     await regatta.resetRaceToReadyState?.();
     regatta.setMode("marks");
@@ -965,7 +1015,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   menuLocalPlayModeTurnsBtn?.addEventListener("click", () => {
-    menuState.localPlayMode = "turns";
+    menuState.localPlayMode = "realtime";
     renderLocalSelection();
   });
 
@@ -975,7 +1025,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   menuNetworkPlayModeTurnsBtn?.addEventListener("click", () => {
-    menuState.networkPlayMode = "turns";
+    menuState.networkPlayMode = "realtime";
     renderHints();
   });
 
@@ -1118,6 +1168,21 @@ document.addEventListener("DOMContentLoaded", () => {
     renderDockPauseControl();
   });
 
+  window.addEventListener("regatta:join-link", (event) => {
+    const roomCode = event.detail?.roomCode || "";
+    if (menuJoinCodeInput && roomCode) {
+      menuJoinCodeInput.value = roomCode;
+    }
+    syncDeckFieldsFromMenu();
+    menuState.transport = "network";
+    menuState.networkAction = "join";
+    if (!roomSummary().room) {
+      openMenu("network");
+    } else {
+      renderHints();
+    }
+  });
+
   window.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && body.classList.contains("deck-open")) {
       toggleCommandDeck(false);
@@ -1137,6 +1202,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
+  enforceRealtimeUi();
   syncMenuFieldsFromDeck();
   renderLocalSelection();
   renderHints();

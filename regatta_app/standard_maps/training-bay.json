@@ -19,18 +19,16 @@
       "windAngleDeg": 0,
       "deadZoneDeg": 40,
       "snapThreshold": 0.8,
-      "movesPerTurn": 1,
       "roundingSide": "port",
-      "playMode": "turns",
+      "playMode": "realtime",
       "interactionMode": "contact",
       "tackPenaltyFactor": 0.95,
       "autoGustsEnabled": false,
       "autoGustIntervalSec": 10,
       "autoGustDurationSec": 6,
-    "realtimePrepSeconds": 18,
+      "realtimePrepSeconds": 18,
       "autoFullscreenMode": "off",
-      "finishSeparate": false,
-      "prestartRoundsSetting": 0
+      "finishSeparate": false
     },
     "course": {
       "markCount": 3,
@@ -46,16 +44,11 @@
       "gustRect": null
     },
     "race": {
-      "currentPlayer": 0,
       "raceFinishedCount": 0,
-      "subMovesLeft": 1,
-      "hybridRound": 1,
-      "hybridMovesLeft": [1, 1, 1, 1],
       "realtimeCountdownEndsAt": 0,
       "gustExpiresAt": 0,
       "nextAutoGustAt": 0,
-      "prestartRoundsLeft": 0,
-      "phase": "race"
+      "phase": "countdown"
     },
     "boats": [
       { "x": 16.8, "y": 10, "distance": 0, "turns": 0, "penalties": 0, "collisions": 0, "nextMark": 0, "finished": false, "place": null, "hasHeading": false, "heading": 0, "tack": 0, "color": "#ff595e", "speedCoeff": 1, "currentSpeedUnitsPerSec": 0, "penaltySlowUntil": 0, "lastPenaltyAt": 0, "lastPenaltyKey": "", "lastPenaltyReason": "", "roundInZone": false, "roundSweep": 0, "startDeltaMs": null, "falseStartDeltaMs": null },

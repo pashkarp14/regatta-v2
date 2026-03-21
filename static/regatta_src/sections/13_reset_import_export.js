@@ -15,11 +15,9 @@
     clearRealtimeBotDecisionCache();
     raceFinishedCount = 0;
 
-    prestartRoundsSetting = parseInt(prestartRoundsInp.value,10) || 0;
-    prestartRoundsLeft = isRealtimePlayMode() ? 0 : prestartRoundsSetting;
-    phase = (!isRealtimePlayMode() && prestartRoundsSetting > 0)
-      ? "prestart"
-      : (isLocalRealtimeMode() ? "countdown" : "race");
+    prestartRoundsSetting = 0;
+    prestartRoundsLeft = 0;
+    phase = isLocalRealtimeMode() ? "countdown" : "race";
 
     for (let i=0;i<n;i++){
       boats.push({
@@ -72,8 +70,9 @@
     currentPlayer = 0;
     selectedBoatIndex = isLocalRealtimeMode() && n > 0 ? 0 : null;
     placementSelectedBoat = null;
-    subMovesLeft = movesPerTurn;
-    resetHybridState();
+    subMovesLeft = 0;
+    hybridRound = 1;
+    hybridMovesLeft = [];
     resetLocalRealtimePauseState();
     multiplayerRealtimePauseStartedAtMs = 0;
     realtimeCountdownEndsAt = (isLocalRealtimeMode() && armRealtime)
@@ -291,7 +290,7 @@
   }
 
   function isHybridPlayMode(){
-    return playMode === "hybrid";
+    return false;
   }
 
   function isHybridRaceMode(){
@@ -300,34 +299,35 @@
 
   function resetHybridState(){
     hybridRound = 1;
-    hybridMovesLeft = boats.map((boat) => boat.finished ? 0 : movesPerTurn);
+    hybridMovesLeft = [];
   }
 
   function allHybridMovesSpent(){
-    return boats.every((boat, idx) => boat.finished || (hybridMovesLeft[idx] || 0) <= 0);
+    return true;
   }
 
   function advanceHybridRound(){
-    hybridRound += 1;
-    hybridMovesLeft = boats.map((boat) => boat.finished ? 0 : movesPerTurn);
+    hybridRound = 1;
+    hybridMovesLeft = [];
   }
 
   function stepsLeftForBoat(boatIdx){
-    if (boatIdx < 0 || boatIdx >= boats.length) return 0;
-    if (isHybridRaceMode()) return hybridMovesLeft[boatIdx] || 0;
-    return (boatIdx === currentPlayer) ? subMovesLeft : 0;
+    return 0;
   }
 
   function canBoatMoveNow(boatIdx){
-    if (boatIdx < 0 || boatIdx >= boats.length) return false;
-    if (boats[boatIdx].finished) return false;
-    if (isHybridRaceMode()) return stepsLeftForBoat(boatIdx) > 0;
-    return boatIdx === currentPlayer && subMovesLeft > 0;
+    return false;
   }
 
   function canSelectBoatForPlay(boatIdx){
     if (!Number.isInteger(boatIdx)) return false;
     if (isMultiplayerObserver()) return false;
+    if (isRealtimePlayMode()) {
+      if (!boats[boatIdx] || boats[boatIdx].finished) return false;
+      if (multiplayerSeatIndex !== null) return boatIdx === multiplayerSeatIndex;
+      if (isLocalBotsMode()) return boatIdx === LOCAL_HUMAN_SEAT;
+      return true;
+    }
     if (!canBoatMoveNow(boatIdx)) return false;
     if (isLocalBotsMode()) {
       if (isRealtimePlayMode()) return boatIdx === LOCAL_HUMAN_SEAT;
@@ -488,7 +488,6 @@
         windAngleDeg: normalizedWindAngleDeg(),
         deadZoneDeg,
         snapThreshold,
-        movesPerTurn,
         roundingSide,
         playMode,
         interactionMode,
@@ -509,7 +508,6 @@
         optimalBoatIndex,
         bestStartBoatIndex,
         finishSeparate,
-        prestartRoundsSetting
       },
       course: {
         markCount,
@@ -521,15 +519,10 @@
         gustRect: gustRect ? { ...gustRect } : null
       },
       race: {
-        currentPlayer,
         raceFinishedCount,
-        subMovesLeft,
-        hybridRound,
-        hybridMovesLeft: hybridMovesLeft.slice(),
         realtimeCountdownEndsAt,
         gustExpiresAt,
         nextAutoGustAt,
-        prestartRoundsLeft,
         phase,
         realtimePaused: isMultiplayerRealtimePaused(),
         realtimePauseStartedAt: isMultiplayerRealtimePaused() ? multiplayerRealtimePauseStartedAtMs : 0,
@@ -602,12 +595,10 @@
       width: clamp(parseFloat(world.width) || worldW, 8, WORLD_MAX),
       height: clamp(parseFloat(world.height) || worldH, 8, WORLD_MAX)
     };
-    const moveBudget = clamp(parseInt(settings.movesPerTurn,10) || movesPerTurn, 1, 10);
-    const prestartBudget = Math.max(0, parseInt(settings.prestartRoundsSetting,10) || 0);
-    const normalizedPlayMode = normalizePlayModeValue(settings.playMode);
-    const scenarioPhase = normalizedPlayMode === "realtime"
-      ? "countdown"
-      : (prestartBudget > 0 ? "prestart" : "race");
+    const moveBudget = 1;
+    const prestartBudget = 0;
+    const normalizedPlayMode = "realtime";
+    const scenarioPhase = "countdown";
     const incomingBoats = Array.isArray(exportedState.boats) && exportedState.boats.length
       ? exportedState.boats.slice(0, PLAYER_COUNT_MAX)
       : exportGameState().boats;
@@ -622,15 +613,10 @@
       prestartRoundsSetting: prestartBudget
     };
     exportedState.race = {
-      currentPlayer: 0,
       raceFinishedCount: 0,
-      subMovesLeft: normalizedPlayMode === "realtime" ? 0 : moveBudget,
-      hybridRound: 1,
-      hybridMovesLeft: normalizedBoats.map(() => moveBudget),
       realtimeCountdownEndsAt: 0,
       gustExpiresAt: 0,
       nextAutoGustAt: 0,
-      prestartRoundsLeft: scenarioPhase === "prestart" ? prestartBudget : 0,
       phase: scenarioPhase
     };
     exportedState.boats = normalizedBoats;
@@ -690,9 +676,9 @@
     setWindAngle(Number.isFinite(settings.windAngleDeg) ? settings.windAngleDeg : windAngleDeg);
     deadZoneDeg = clamp(parseFloat(settings.deadZoneDeg) || deadZoneDeg, 0, 180);
     snapThreshold = clamp(parseFloat(settings.snapThreshold) || snapThreshold, 0, 1);
-    movesPerTurn = clamp(parseInt(settings.movesPerTurn,10) || movesPerTurn, 1, 10);
+    movesPerTurn = 1;
     roundingSide = (settings.roundingSide === "starboard") ? "starboard" : "port";
-    playMode = normalizePlayModeValue(settings.playMode);
+    playMode = "realtime";
     interactionMode = normalizeInteractionMode(settings.interactionMode);
     tackPenaltyFactor = clamp(parseFloat(settings.tackPenaltyFactor) || tackPenaltyFactor, 0.5, 1.0);
     const incomingLuffingSpeed = parseFloat(settings.luffingSpeedPercent);
@@ -708,7 +694,7 @@
     realtimePrepSeconds = clamp(parseFloat(settings.realtimePrepSeconds) || realtimePrepSeconds, 0, 120);
     turnRateDegPerSec = clamp(parseFloat(settings.turnRateDegPerSec) || turnRateDegPerSec, 30, 360);
     autoFullscreenMode = settings.autoFullscreenMode === "race" ? "race" : "off";
-    prestartRoundsSetting = Math.max(0, parseInt(settings.prestartRoundsSetting,10) || 0);
+    prestartRoundsSetting = 0;
     const importedViewSettings = {
       showWindArrow: settings.showWindArrow,
       showOptimal: settings.showOptimal,
@@ -734,7 +720,7 @@
     if (realtimePrepInp) realtimePrepInp.value = String(realtimePrepSeconds);
     if (turnRateInp) turnRateInp.value = String(turnRateDegPerSec);
     if (autoFullscreenModeSelect) autoFullscreenModeSelect.value = autoFullscreenMode;
-    prestartRoundsInp.value = String(prestartRoundsSetting);
+    prestartRoundsInp.value = "0";
 
     const incomingBoats = Array.isArray(snapshot.boats) ? snapshot.boats.slice(0, PLAYER_COUNT_MAX) : [];
     const previousTrails = boatTrails.map((trail) => Array.isArray(trail) ? trail.map((point) => ({ ...point })) : []);
@@ -752,27 +738,17 @@
       boats.push(normalizeBoatSnapshot(incomingBoats[i], i));
     }
 
-    phase = (race.phase === "prestart" || race.phase === "countdown" || race.phase === "finished")
+    phase = (race.phase === "countdown" || race.phase === "finished")
       ? race.phase
       : "race";
     const lobbyPreviewState = !!race.isLobbyPreview;
     const enteringOfficialRace = (previousPhase !== "race" || multiplayerLobbyPreview) && phase === "race" && !lobbyPreviewState;
-    prestartRoundsLeft = (phase === "prestart")
-      ? Math.max(0, parseInt(race.prestartRoundsLeft,10) || prestartRoundsSetting)
-      : 0;
-    currentPlayer = clamp(parseInt(race.currentPlayer,10) || 0, 0, boats.length-1);
+    prestartRoundsLeft = 0;
+    currentPlayer = Math.max(0, boats.findIndex((boat) => !boat.finished));
     raceFinishedCount = Math.max(0, parseInt(race.raceFinishedCount,10) || boats.filter((boat) => boat.finished).length);
-    const importedSubMovesLeft = parseInt(race.subMovesLeft,10);
-    subMovesLeft = clamp(Number.isFinite(importedSubMovesLeft) ? importedSubMovesLeft : movesPerTurn, 0, movesPerTurn);
-    hybridRound = Math.max(1, parseInt(race.hybridRound,10) || 1);
-    if (Array.isArray(race.hybridMovesLeft) && race.hybridMovesLeft.length === boats.length){
-      hybridMovesLeft = race.hybridMovesLeft.map((value, idx) => {
-        if (boats[idx]?.finished) return 0;
-        return clamp(parseInt(value,10) || 0, 0, movesPerTurn);
-      });
-    } else {
-      hybridMovesLeft = boats.map((boat) => boat.finished ? 0 : movesPerTurn);
-    }
+    subMovesLeft = 0;
+    hybridRound = 1;
+    hybridMovesLeft = [];
     resetLocalRealtimePauseState();
     const importedPauseStartedAt = Math.max(0, parseInt(race.realtimePauseStartedAt,10) || 0);
     const importedMultiplayerPause = !!race.realtimePaused && importedPauseStartedAt > 0;

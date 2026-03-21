@@ -1785,8 +1785,6 @@ def simulate_realtime_tick(game_state: dict[str, Any], controls: dict[int, dict[
             or changed
         )
 
-    race["currentPlayer"] = next((idx for idx, boat in enumerate(boats) if not boat.get("finished")), 0)
-    race["subMovesLeft"] = 0
     if not any_unfinished and race.get("phase") == "race":
         changed = True
         race["phase"] = "finished"

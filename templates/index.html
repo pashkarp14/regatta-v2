@@ -194,8 +194,7 @@
           <label class="control">
             <span>Режим игры</span>
             <select id="playMode" data-room-lock="setup">
-              <option value="turns" selected>По очереди</option>
-              <option value="realtime">В реальном времени</option>
+              <option value="realtime" selected>Realtime</option>
             </select>
           </label>
 
@@ -224,18 +223,15 @@
               </select>
             </label>
 
-            <label class="control" id="prestartRoundsControl">
-              <span>Кругов до старта</span>
-              <input id="prestartRounds" type="number" min="0" max="20" step="1" value="0" data-room-lock="setup" />
-            </label>
-
             <label class="control wide-control" id="realtimePrepControl">
               <span>Маневры до старта, с</span>
               <input id="realtimePrepSeconds" type="number" min="0" max="120" step="1" value="18" data-room-lock="setup" />
             </label>
           </div>
 
-          <p class="panel-note">Режим игры можно выбрать при запуске или поменять здесь, когда хост вернул комнату в лобби на редактирование.</p>
+          <input id="prestartRounds" type="hidden" value="0" />
+
+          <p class="panel-note">Regatta теперь всегда работает в realtime-режиме. Перед стартом задаётся только время на манёвры перед общим сигналом.</p>
           <p id="deckRulesModeHint" class="panel-note"></p>
           <p id="interactionModeInfo" class="panel-note"></p>
         </section>
@@ -303,10 +299,7 @@
               <input id="snapThreshold" type="number" min="0" max="1" step="0.05" value="0.8" data-room-lock="setup" />
             </label>
 
-            <label class="control">
-              <span>Ходов за раз</span>
-              <input id="movesPerTurn" type="number" min="1" max="10" step="1" value="1" />
-            </label>
+            <input id="movesPerTurn" type="hidden" value="1" />
 
             <label class="control">
               <span>Штраф смены галса</span>
@@ -531,7 +524,7 @@
               <button type="button" id="menuChooseLocal" class="menu-action-card menu-action-card--accent">
                 <span class="menu-action-card__eyebrow">Локально</span>
                 <strong>Локальная игра</strong>
-                <span>Один экран, передача хода по очереди, боты или локальная игра в реальном времени.</span>
+                <span>Один экран, боты или совместная realtime-гонка без отдельной пошаговой раскладки.</span>
               </button>
 
               <button type="button" id="menuChooseNetwork" class="menu-action-card">
@@ -578,7 +571,7 @@
                 <span class="meta-label">Шаг 3</span>
                 <h3>Локальная игра</h3>
               </div>
-              <p>Сначала выбираем, с кем играешь, затем — режим игры. Все текущие настройки дистанции и лодок сохраняются.</p>
+              <p>Сначала выбираем, с кем играешь. Локальный запуск теперь всегда идёт в realtime, а текущие настройки дистанции и лодок сохраняются.</p>
             </div>
 
             <div class="menu-choice-stack">
@@ -592,7 +585,7 @@
                   <button type="button" id="menuLocalPartyHotseat" class="menu-action-card">
                     <span class="menu-action-card__eyebrow">Локально</span>
                     <strong>На одном устройстве</strong>
-                    <span>Несколько игроков по очереди на одном экране.</span>
+                    <span>Несколько игроков делят один экран и в любой момент берут управление своей лодкой.</span>
                   </button>
 
                   <button type="button" id="menuLocalPartyBots" class="menu-action-card">
@@ -600,18 +593,6 @@
                     <strong>Против ботов</strong>
                     <span>Лодка 1 остаётся у человека, остальные экипажи ведёт автопилот.</span>
                   </button>
-                </div>
-              </section>
-
-              <section class="menu-choice-block">
-                <div class="menu-choice-head">
-                  <span class="meta-label">Режим игры</span>
-                  <h4>Пошаговая или в реальном времени</h4>
-                </div>
-
-                <div class="menu-mode-switch" role="group" aria-label="Режим локальной игры">
-                  <button type="button" id="menuLocalPlayModeTurns" class="menu-mode-btn">Пошаговая</button>
-                  <button type="button" id="menuLocalPlayModeRealtime" class="menu-mode-btn">В реальном времени</button>
                 </div>
               </section>
             </div>
@@ -665,22 +646,10 @@
 
               <button type="button" id="menuJoinRoom" class="menu-action-card">
                 <span class="menu-action-card__eyebrow">Вход</span>
-                <strong>Войти по коду</strong>
-                <span>Подключиться к существующей комнате. Сценарий и карта придут от хоста.</span>
+                <strong>Войти по ссылке или коду</strong>
+                <span>Подключиться к существующей комнате. Сценарий, карта и статус гонки придут от хоста.</span>
               </button>
             </div>
-
-            <section class="menu-choice-block">
-              <div class="menu-choice-head">
-                <span class="meta-label">Режим комнаты</span>
-                <h4>Пошаговая или в реальном времени</h4>
-              </div>
-
-              <div class="menu-mode-switch" role="group" aria-label="Режим сетевой комнаты">
-                <button type="button" id="menuNetworkPlayModeTurns" class="menu-mode-btn">Пошаговая</button>
-                <button type="button" id="menuNetworkPlayModeRealtime" class="menu-mode-btn">В реальном времени</button>
-              </div>
-            </section>
 
             <p id="menuNetworkHint" class="menu-inline-note"></p>
           </div>

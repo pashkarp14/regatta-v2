@@ -22,10 +22,7 @@ VIEW_SETTINGS_KEYS = VIEW_SETTINGS_BOOLEAN_KEYS + VIEW_SETTINGS_TARGET_KEYS
 
 
 def state_play_mode(game_state: dict[str, Any] | None) -> str:
-    if not isinstance(game_state, dict):
-        return "turns"
-    settings = game_state.get("settings") or {}
-    return "realtime" if settings.get("playMode") in {"realtime", "hybrid"} else "turns"
+    return "realtime"
 
 
 def state_auto_gusts_enabled(game_state: dict[str, Any] | None) -> bool:
@@ -205,6 +202,7 @@ def normalize_room_start_state(game_state: dict[str, Any], *, arm_realtime: bool
     race = game_state.setdefault("race", {})
     boats = list(game_state.get("boats") or [])
 
+    settings["playMode"] = "realtime"
     settings.setdefault("realtimePrepSeconds", 18)
     settings.setdefault("turnRateDegPerSec", 120)
     settings["interactionMode"] = _normalize_interaction_mode(settings.get("interactionMode"))
@@ -217,22 +215,17 @@ def normalize_room_start_state(game_state: dict[str, Any], *, arm_realtime: bool
             round_sweep_default=0,
         )
 
-    if settings.get("playMode") in {"realtime", "hybrid"}:
-        settings["playMode"] = "realtime"
-        prep_seconds = max(0.0, float(settings.get("realtimePrepSeconds") or 0.0))
-        race["phase"] = "countdown"
-        race["realtimeCountdownEndsAt"] = (
-            int(time.time() * 1000) + int(prep_seconds * 1000) if arm_realtime else 0
-        )
-        race["currentPlayer"] = 0
-        race["subMovesLeft"] = 0
-        race["raceFinishedCount"] = 0
-        race["prestartRoundsLeft"] = 0
-        race.pop("hybridRound", None)
-        race.pop("hybridMovesLeft", None)
-    else:
-        race.pop("realtimeCountdownEndsAt", None)
-
+    prep_seconds = max(0.0, float(settings.get("realtimePrepSeconds") or 0.0))
+    race["phase"] = "countdown"
+    race["realtimeCountdownEndsAt"] = (
+        int(time.time() * 1000) + int(prep_seconds * 1000) if arm_realtime else 0
+    )
+    race["raceFinishedCount"] = 0
+    race.pop("currentPlayer", None)
+    race.pop("subMovesLeft", None)
+    race.pop("prestartRoundsLeft", None)
+    race.pop("hybridRound", None)
+    race.pop("hybridMovesLeft", None)
     race["realtimePaused"] = False
     race["realtimePauseStartedAt"] = 0
     race["isLobbyPreview"] = False
@@ -250,6 +243,7 @@ def normalize_lobby_preview_state(game_state: Any) -> dict[str, Any]:
     race = preview_state.setdefault("race", {})
     boats = list(preview_state.get("boats") or [])
     preview_state["boats"] = boats
+    settings["playMode"] = "realtime"
 
     for boat in boats:
         if not isinstance(boat, dict):
@@ -266,22 +260,14 @@ def normalize_lobby_preview_state(game_state: Any) -> dict[str, Any]:
     race["realtimePaused"] = False
     race["realtimePauseStartedAt"] = 0
     race["isLobbyPreview"] = True
-    race["subMovesLeft"] = 0
-    race["prestartRoundsLeft"] = 0
     race["raceFinishedCount"] = int(
         race.get("raceFinishedCount") or sum(1 for boat in boats if boat.get("finished"))
     )
-    current_player = race.get("currentPlayer")
-    if not isinstance(current_player, int) or not (0 <= current_player < len(boats)):
-        race["currentPlayer"] = next(
-            (idx for idx, boat in enumerate(boats) if not boat.get("finished")),
-            0,
-        )
-
-    if settings.get("playMode") in {"hybrid"}:
-        settings["playMode"] = "turns"
-        race.pop("hybridRound", None)
-        race.pop("hybridMovesLeft", None)
+    race.pop("currentPlayer", None)
+    race.pop("subMovesLeft", None)
+    race.pop("prestartRoundsLeft", None)
+    race.pop("hybridRound", None)
+    race.pop("hybridMovesLeft", None)
 
     race.setdefault("gustExpiresAt", 0)
     race.setdefault("nextAutoGustAt", 0)

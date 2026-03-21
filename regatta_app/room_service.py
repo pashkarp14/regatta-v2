@@ -12,9 +12,10 @@ from .room_store import (
     normalize_host_role,
     normalize_name,
     normalize_room_code,
+    player_for_id,
     player_for_token,
     public_room_view,
-    room_start_ready,
+    room_can_start,
     validate_game_state,
 )
 from .session_state import (
@@ -37,11 +38,14 @@ def current_room() -> dict[str, Any] | None:
     return room
 
 
-def leave_current_room() -> None:
+def leave_current_room() -> tuple[str | None, dict[str, Any] | None]:
     session_state = current_session_state()
+    room_code = session_state.room_code
+    updated_room = None
     if session_state.room_code and session_state.player_token:
-        room_store().remove_player(session_state.room_code, session_state.player_token)
+        updated_room = room_store().remove_player(session_state.room_code, session_state.player_token)
     clear_room_session()
+    return room_code, updated_room
 
 
 def create_room_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -112,8 +116,8 @@ def start_room_match(
         raise RoomNotFound("Room not found.")
     if room["host_token"] != player_token:
         raise RoomForbidden("Only the room host can start the match.")
-    if not room_start_ready(room):
-        raise RoomValidationError("Wait until every racing seat is occupied.")
+    if not room_can_start(room):
+        raise RoomValidationError("Add at least one racing skipper before starting the room.")
 
     _ensure_initial_lobby_state(room)
     provided_snapshot = None
@@ -130,6 +134,23 @@ def start_room_match(
     room["revision"] += 1
     room_store().save_room(room)
     return room, player_token
+
+
+def kick_room_player(room_code: str, player_id: str | None) -> tuple[dict[str, Any], str | None, str | None, list[str], list[str]]:
+    actor_token = current_session_state().player_token
+    room = room_store().get_room(room_code)
+    if room is None:
+        raise RoomNotFound("Room not found.")
+
+    target_player = player_for_id(room, player_id)
+    if target_player is None:
+        raise RoomNotFound("Player not found.")
+
+    old_racer_ids = [player["player_id"] for player in room.get("players", []) if not player.get("is_observer")]
+    kicked_token = target_player.get("token")
+    updated_room = room_store().kick_player(room_code, actor_token, player_id)
+    new_racer_ids = [player["player_id"] for player in updated_room.get("players", []) if not player.get("is_observer")]
+    return updated_room, actor_token, kicked_token, old_racer_ids, new_racer_ids
 
 
 def edit_room_match(room_code: str) -> tuple[dict[str, Any], str | None]:

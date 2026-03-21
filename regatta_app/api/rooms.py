@@ -10,12 +10,13 @@ from ..room_service import (
     create_room_from_payload,
     edit_room_match,
     join_room_from_payload,
+    kick_room_player,
     leave_current_room,
     reset_room_lobby,
     room_view,
     start_room_match,
 )
-from ..sockets import ensure_realtime_room_loop, pop_realtime_control
+from ..sockets import emit_room_kicked, ensure_realtime_room_loop, pop_realtime_control, remap_realtime_controls
 
 
 bp = Blueprint("rooms", __name__)
@@ -37,7 +38,11 @@ def join_room():
 
 @bp.post("/api/rooms/leave")
 def leave_room():
-    leave_current_room()
+    room_code, room = leave_current_room()
+    if room_code and room is not None:
+        if room_requires_live_loop(room):
+            ensure_realtime_room_loop(room["code"])
+        broadcast_room_snapshot(room)
     return {"room": None}
 
 
@@ -73,5 +78,17 @@ def edit_room(room_code: str):
 def reset_lobby(room_code: str):
     room, player_token = reset_room_lobby(room_code)
     pop_realtime_control(room["code"])
+    broadcast_room_snapshot(room)
+    return serialize_room(room, player_token)
+
+
+@bp.post("/api/rooms/<room_code>/kick")
+def kick_room(room_code: str):
+    payload = json_payload()
+    room, player_token, kicked_token, old_racer_ids, new_racer_ids = kick_room_player(room_code, payload.get("player_id"))
+    remap_realtime_controls(room_code, old_racer_ids, new_racer_ids)
+    emit_room_kicked(room_code, kicked_token)
+    if room_requires_live_loop(room):
+        ensure_realtime_room_loop(room["code"])
     broadcast_room_snapshot(room)
     return serialize_room(room, player_token)

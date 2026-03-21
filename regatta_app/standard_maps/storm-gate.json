@@ -19,7 +19,6 @@
       "windAngleDeg": -15,
       "deadZoneDeg": 38,
       "snapThreshold": 0.82,
-      "movesPerTurn": 1,
       "roundingSide": "port",
       "playMode": "realtime",
       "interactionMode": "ghost",
@@ -27,10 +26,9 @@
       "autoGustsEnabled": true,
       "autoGustIntervalSec": 8,
       "autoGustDurationSec": 5,
-    "realtimePrepSeconds": 18,
+      "realtimePrepSeconds": 18,
       "autoFullscreenMode": "race",
-      "finishSeparate": true,
-      "prestartRoundsSetting": 0
+      "finishSeparate": true
     },
     "course": {
       "markCount": 3,
@@ -52,15 +50,10 @@
       }
     },
     "race": {
-      "currentPlayer": 0,
       "raceFinishedCount": 0,
-      "subMovesLeft": 0,
-      "hybridRound": 1,
-      "hybridMovesLeft": [1, 1, 1, 1, 1, 1],
       "realtimeCountdownEndsAt": 0,
       "gustExpiresAt": 0,
       "nextAutoGustAt": 0,
-      "prestartRoundsLeft": 0,
       "phase": "countdown"
     },
     "boats": [

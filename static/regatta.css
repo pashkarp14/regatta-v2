@@ -536,6 +536,12 @@ body.menu-open .app-shell{
   gap:10px;
 }
 
+.room-kick-btn{
+  padding:6px 10px;
+  min-height:auto;
+  font-size:12px;
+}
+
 .room-seat{
   display:inline-flex;
   align-items:center;
