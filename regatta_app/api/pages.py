@@ -13,11 +13,17 @@ bp = Blueprint("pages", __name__)
 
 @bp.get("/")
 def index():
-    return render_template(
-        "index.html",
-        app_name=current_app.config["APP_NAME"],
-        version=current_app.config["ASSET_VERSION"],
+    response = current_app.make_response(
+        render_template(
+            "index.html",
+            app_name=current_app.config["APP_NAME"],
+            version=current_app.config["ASSET_VERSION"],
+        )
     )
+    response.headers["Cache-Control"] = "no-store, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 
 @bp.get("/healthz")
@@ -44,6 +50,7 @@ def bootstrap():
     room = current_room()
     return {
         "version": current_app.config["APP_VERSION"],
+        "asset_version": current_app.config["ASSET_VERSION"],
         "display_name": session_state.display_name,
         "room": public_room_view(room, session_state.player_token) if room else None,
     }

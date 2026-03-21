@@ -1055,7 +1055,8 @@ document.addEventListener("DOMContentLoaded", () => {
       menuState.networkAction = "join";
       await ensureSoloContext();
       syncDeckFieldsFromMenu();
-      await window.RegattaMultiplayer?.joinRoom?.();
+      const joined = await window.RegattaMultiplayer?.joinRoom?.();
+      if (!joined) return;
       closeMenu();
       showToast("Подключение к комнате выполнено.");
     } catch (error) {

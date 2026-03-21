@@ -98,11 +98,55 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function clearJoinLinkQuery() {
     const url = new URL(window.location.href);
-    const hadParams = url.searchParams.has("room") || url.searchParams.has("join");
+    const hadParams = url.searchParams.has("room") || url.searchParams.has("join") || url.searchParams.has("_asset");
     if (!hadParams) return;
     url.searchParams.delete("room");
     url.searchParams.delete("join");
+    if (url.searchParams.get("_asset") === currentAssetVersion()) {
+      url.searchParams.delete("_asset");
+    }
     window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+  }
+
+  function currentAssetVersion() {
+    return document.documentElement?.dataset?.assetVersion || "";
+  }
+
+  function clearAssetRefreshQuery() {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("_asset") !== currentAssetVersion()) return;
+    url.searchParams.delete("_asset");
+    window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+  }
+
+  function refreshForAssetMismatch(serverAssetVersion) {
+    const nextVersion = typeof serverAssetVersion === "string" ? serverAssetVersion.trim() : "";
+    const clientVersion = currentAssetVersion();
+    if (!nextVersion || !clientVersion || nextVersion === clientVersion) {
+      return false;
+    }
+
+    const url = new URL(window.location.href);
+    url.searchParams.set("_asset", nextVersion);
+    showToast("Обновляю страницу");
+    window.location.replace(`${url.pathname}${url.search}${url.hash}`);
+    return true;
+  }
+
+  async function ensureFreshAssets() {
+    const clientVersion = currentAssetVersion();
+    if (!clientVersion) return true;
+
+    try {
+      const payload = await apiRequest("/api/bootstrap");
+      if (refreshForAssetMismatch(payload?.asset_version)) {
+        return false;
+      }
+    } catch (error) {
+      return true;
+    }
+
+    return true;
   }
 
   function buildRoomInviteLink(roomCode) {
@@ -955,6 +999,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   async function createRoom(overrides = {}) {
+    if (!await ensureFreshAssets()) return null;
     const payload = await apiRequest("/api/rooms", {
       method: "POST",
       body: {
@@ -992,6 +1037,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   async function joinRoom(overrides = {}) {
+    if (!await ensureFreshAssets()) return false;
     clearPendingRoomDraft({ silent: true });
     const nextDisplayName = typeof overrides.display_name === "string"
       ? overrides.display_name.trim()
@@ -1024,10 +1070,12 @@ document.addEventListener("DOMContentLoaded", () => {
       joinLinkState.handled = true;
       clearJoinLinkQuery();
     }
+    return true;
   }
 
   async function startRoom({ armRealtime = true } = {}) {
     if (!roomState.room) return;
+    if (!await ensureFreshAssets()) return false;
     const payload = await apiRequest(`/api/rooms/${roomState.room.code}/start`, {
       method: "POST",
       body: {
@@ -1049,6 +1097,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     renderRoom(payload.room);
     void trySendRealtimeControl(true);
+    return true;
   }
 
   async function editRoom() {
@@ -1138,7 +1187,8 @@ document.addEventListener("DOMContentLoaded", () => {
       } else {
         await regatta.resetRaceToReadyState?.();
       }
-      await startRoom({ armRealtime });
+      const started = await startRoom({ armRealtime });
+      if (started === false) return;
     } catch (error) {
       setNotice(error.message, "danger");
     } finally {
@@ -1188,6 +1238,10 @@ document.addEventListener("DOMContentLoaded", () => {
   async function bootstrapRoom() {
     try {
       const payload = await apiRequest("/api/bootstrap");
+      if (refreshForAssetMismatch(payload?.asset_version)) {
+        return;
+      }
+      clearAssetRefreshQuery();
       roomStartPending = false;
       if (payload.display_name) {
         displayNameInput.value = payload.display_name;
@@ -1206,10 +1260,11 @@ document.addEventListener("DOMContentLoaded", () => {
         const canAutoJoin = !payload.room && joinLinkState.autoJoinRequested && !!joinLinkState.roomCode;
         if (canAutoJoin && !joinLinkState.handled) {
           try {
-            await joinRoom({
+            const joined = await joinRoom({
               display_name: displayNameInput.value.trim(),
               room_code: joinLinkState.roomCode,
             });
+            if (!joined) return;
           } catch (error) {
             setNotice(error.message, "danger");
           } finally {
@@ -1306,7 +1361,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
   joinRoomBtn.addEventListener("click", async () => {
     try {
-      await joinRoom();
+      const joined = await joinRoom();
+      if (!joined) return;
     } catch (error) {
       setNotice(error.message, "danger");
     }

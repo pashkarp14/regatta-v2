@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from .helpers import build_realtime_state, load_app, wait_for_room
@@ -78,3 +80,59 @@ def test_open_room_action_exposes_working_invite_link(browser, base_url):
     finally:
         guest_page.context.close()
         host_page.context.close()
+
+
+def test_stale_page_refreshes_before_opening_room(page, base_url):
+    load_app(page, base_url)
+
+    state = build_realtime_state(page, "overlay", countdown=False)
+    page.evaluate(
+        """({ state }) => {
+            document.documentElement.dataset.assetVersion = "stale-build";
+            document.getElementById("displayName").value = "Host";
+            window.RegattaApp.importState(state);
+            window.RegattaApp.setMode("play");
+            window.RegattaMultiplayer.setPendingRoomDraft({
+                display_name: "Host",
+                max_players: state.boats.length,
+                host_role: "player",
+                source: "map",
+                mode: "edit",
+            });
+        }""",
+        {"state": state},
+    )
+
+    page.evaluate("""() => document.getElementById("startRoom").click()""")
+    page.wait_for_url(re.compile(re.escape(base_url) + r"/\?_asset=.*"))
+    page.wait_for_function("() => !!window.RegattaApp && !!window.RegattaMultiplayer")
+
+    refreshed_state = build_realtime_state(page, "overlay", countdown=False)
+    page.evaluate(
+        """({ state }) => {
+            document.getElementById("displayName").value = "Host";
+            window.RegattaApp.importState(state);
+            window.RegattaApp.setMode("play");
+            window.RegattaMultiplayer.setPendingRoomDraft({
+                display_name: "Host",
+                max_players: state.boats.length,
+                host_role: "player",
+                source: "map",
+                mode: "edit",
+            });
+        }""",
+        {"state": refreshed_state},
+    )
+
+    page.evaluate("""() => document.getElementById("startRoom").click()""")
+    page.wait_for_function(
+        """() => {
+            const room = window.RegattaMultiplayer.getRoomState().room;
+            return !!room && typeof room.code === "string" && room.code.length === 6;
+        }"""
+    )
+
+    room_code = page.locator("#roomCodeValue").inner_text().strip()
+    notice = page.locator("#roomNotice").inner_text().strip()
+
+    assert f"{base_url}/?room={room_code}&join=1" in notice
