@@ -42,6 +42,16 @@ document.addEventListener("DOMContentLoaded", () => {
     };
   })();
 
+  function getJoinLinkState() {
+    if (!joinLinkState || joinLinkState.handled || !joinLinkState.roomCode) {
+      return null;
+    }
+    return {
+      roomCode: joinLinkState.roomCode,
+      autoJoinRequested: joinLinkState.autoJoinRequested,
+    };
+  }
+
   function setupLockedControls() {
     return Array.from(document.querySelectorAll("[data-room-lock='setup']"));
   }
@@ -1253,26 +1263,14 @@ document.addEventListener("DOMContentLoaded", () => {
         renderRoom(null);
       }
 
-      if (joinLinkState?.roomCode) {
-        joinRoomCodeInput.value = joinLinkState.roomCode;
-        announceJoinLink(joinLinkState.roomCode);
-
-        const canAutoJoin = !payload.room && joinLinkState.autoJoinRequested && !!joinLinkState.roomCode;
-        if (canAutoJoin && !joinLinkState.handled) {
-          try {
-            const joined = await joinRoom({
-              display_name: displayNameInput.value.trim(),
-              room_code: joinLinkState.roomCode,
-            });
-            if (!joined) return;
-          } catch (error) {
-            setNotice(error.message, "danger");
-          } finally {
-            joinLinkState.handled = true;
-            clearJoinLinkQuery();
-          }
-        } else if (!joinLinkState.handled) {
+      const pendingJoinLink = getJoinLinkState();
+      if (pendingJoinLink?.roomCode) {
+        joinRoomCodeInput.value = pendingJoinLink.roomCode;
+        if (payload.room?.code && payload.room.code === pendingJoinLink.roomCode) {
+          joinLinkState.handled = true;
           clearJoinLinkQuery();
+        } else {
+          announceJoinLink(pendingJoinLink.roomCode);
         }
       }
     } catch (error) {
@@ -1467,6 +1465,7 @@ document.addEventListener("DOMContentLoaded", () => {
       selfIsObserver: roomState.selfIsObserver,
       serverClockOffsetMs: roomState.serverClockOffsetMs,
     }),
+    getJoinLinkState,
   };
 
   bootstrapRoom();

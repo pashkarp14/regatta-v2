@@ -654,6 +654,38 @@
             <p id="menuNetworkHint" class="menu-inline-note"></p>
           </div>
 
+          <div class="menu-screen hidden" data-menu-screen="invite">
+            <div class="menu-screen-head">
+              <div>
+                <span class="meta-label">Приглашение</span>
+                <h3>Вход в комнату</h3>
+              </div>
+              <p>
+                Ты открыл приглашение в комнату. Введи своё имя, нажми «Продолжить» и сразу попадёшь в лобби.
+              </p>
+            </div>
+
+            <div class="menu-summary-card menu-invite-card">
+              <span class="meta-label">Комната</span>
+              <div class="menu-summary-card__body menu-summary-card__body--compact">
+                <div><strong>Код:</strong> <span id="menuInviteRoomCode">------</span></div>
+              </div>
+            </div>
+
+            <div class="menu-form-grid menu-form-grid--invite">
+              <label class="control wide-control">
+                <span>Твоё имя</span>
+                <input id="menuInviteDisplayName" type="text" maxlength="24" placeholder="Шкипер" />
+              </label>
+            </div>
+
+            <div class="action-row">
+              <button type="button" id="menuInviteContinue" class="action-primary">Продолжить</button>
+            </div>
+
+            <p id="menuInviteHint" class="menu-inline-note menu-inline-note-strong"></p>
+          </div>
+
           <div class="menu-screen hidden" data-menu-screen="maps">
             <div class="menu-screen-head">
               <div>

@@ -41,6 +41,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const menuLaunchLocalGameBtn = document.getElementById("menuLaunchLocalGame");
   const menuCreateRoomBtn = document.getElementById("menuCreateRoom");
   const menuJoinRoomBtn = document.getElementById("menuJoinRoom");
+  const menuInviteContinueBtn = document.getElementById("menuInviteContinue");
   const menuDeckRoomBtn = document.getElementById("menuDeckRoom");
   const menuDeckCourseBtn = document.getElementById("menuDeckCourse");
   const menuDeckRulesBtn = document.getElementById("menuDeckRules");
@@ -55,6 +56,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const menuLocalSelectionSummaryEl = document.getElementById("menuLocalSelectionSummary");
   const menuLocalHintEl = document.getElementById("menuLocalHint");
   const menuNetworkHintEl = document.getElementById("menuNetworkHint");
+  const menuInviteHintEl = document.getElementById("menuInviteHint");
   const mapsScreenHintEl = document.getElementById("mapsScreenHint");
   const racesScreenHintEl = document.getElementById("racesScreenHint");
 
@@ -69,6 +71,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const joinRoomCodeInput = document.getElementById("joinRoomCode");
   const menuDisplayNameInput = document.getElementById("menuDisplayName");
   const menuJoinCodeInput = document.getElementById("menuJoinCode");
+  const menuInviteDisplayNameInput = document.getElementById("menuInviteDisplayName");
+  const menuInviteRoomCodeEl = document.getElementById("menuInviteRoomCode");
   const playModeSelect = document.getElementById("playMode");
   const finishSeparateSelect = document.getElementById("finishSeparate");
   const deckRoomSectionEl = document.getElementById("deckRoomSection");
@@ -91,6 +95,7 @@ document.addEventListener("DOMContentLoaded", () => {
     localParty: null,
     localPlayMode: null,
     networkPlayMode: null,
+    inviteRoomCode: "",
     maps: [],
     races: [],
   };
@@ -157,6 +162,14 @@ document.addEventListener("DOMContentLoaded", () => {
     return menuName || mainName || "Шкипер";
   }
 
+  function normalizeRoomCode(value) {
+    return String(value || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6);
+  }
+
+  function currentJoinLinkState() {
+    return window.RegattaMultiplayer?.getJoinLinkState?.() || null;
+  }
+
   function formatPlayModeLabel(mode) {
     return "Realtime";
   }
@@ -184,6 +197,12 @@ document.addEventListener("DOMContentLoaded", () => {
     if (menuJoinCodeInput && joinRoomCodeInput) {
       menuJoinCodeInput.value = joinRoomCodeInput.value;
     }
+    if (menuInviteDisplayNameInput && displayNameInput && document.activeElement !== menuInviteDisplayNameInput) {
+      menuInviteDisplayNameInput.value = displayNameInput.value;
+    }
+    if (menuInviteRoomCodeEl) {
+      menuInviteRoomCodeEl.textContent = menuState.inviteRoomCode || "------";
+    }
   }
 
   function syncDeckFieldsFromMenu() {
@@ -194,6 +213,71 @@ document.addEventListener("DOMContentLoaded", () => {
       joinRoomCodeInput.value = menuJoinCodeInput.value.trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6);
       menuJoinCodeInput.value = joinRoomCodeInput.value;
     }
+  }
+
+  function syncDeckFieldsFromInvite() {
+    const inviteName = menuInviteDisplayNameInput?.value?.trim() || "";
+    const roomCode = normalizeRoomCode(menuState.inviteRoomCode || currentJoinLinkState()?.roomCode || "");
+    if (displayNameInput) {
+      displayNameInput.value = inviteName;
+    }
+    if (menuDisplayNameInput) {
+      menuDisplayNameInput.value = inviteName;
+    }
+    if (joinRoomCodeInput) {
+      joinRoomCodeInput.value = roomCode;
+    }
+    if (menuJoinCodeInput) {
+      menuJoinCodeInput.value = roomCode;
+    }
+    menuState.inviteRoomCode = roomCode;
+  }
+
+  function setInviteRoomCode(roomCode) {
+    menuState.inviteRoomCode = normalizeRoomCode(roomCode);
+    if (menuInviteRoomCodeEl) {
+      menuInviteRoomCodeEl.textContent = menuState.inviteRoomCode || "------";
+    }
+    if (joinRoomCodeInput) {
+      joinRoomCodeInput.value = menuState.inviteRoomCode;
+    }
+    if (menuJoinCodeInput) {
+      menuJoinCodeInput.value = menuState.inviteRoomCode;
+    }
+  }
+
+  function renderInviteSelection() {
+    const linkedRoomCode = normalizeRoomCode(menuState.inviteRoomCode || currentJoinLinkState()?.roomCode || "");
+    if (linkedRoomCode !== menuState.inviteRoomCode) {
+      setInviteRoomCode(linkedRoomCode);
+    } else if (menuInviteRoomCodeEl) {
+      menuInviteRoomCodeEl.textContent = linkedRoomCode || "------";
+    }
+    if (menuInviteDisplayNameInput && displayNameInput && document.activeElement !== menuInviteDisplayNameInput) {
+      menuInviteDisplayNameInput.value = displayNameInput.value;
+    }
+    const hasName = !!menuInviteDisplayNameInput?.value?.trim();
+    if (menuInviteContinueBtn) {
+      menuInviteContinueBtn.disabled = !linkedRoomCode || !hasName;
+    }
+    if (menuInviteHintEl) {
+      menuInviteHintEl.textContent = linkedRoomCode
+        ? `Код ${linkedRoomCode}. После продолжения ты сразу попадёшь в лобби этой комнаты.`
+        : "Ссылка на комнату недействительна или уже устарела.";
+    }
+  }
+
+  function activateInviteFlow(roomCode) {
+    const normalized = normalizeRoomCode(roomCode);
+    if (!normalized) return;
+    setInviteRoomCode(normalized);
+    menuState.transport = "network";
+    menuState.networkAction = "invite";
+    if (!roomSummary().room) {
+      openMenu("invite");
+      return;
+    }
+    renderHints();
   }
 
   function setControlValue(control, value) {
@@ -227,6 +311,18 @@ document.addEventListener("DOMContentLoaded", () => {
     if (overlay) {
       overlay.dataset.screen = name;
     }
+    if (overlayTitleEl) {
+      overlayTitleEl.textContent = ({
+        home: "Главное меню",
+        mode: "Новая игра",
+        scenario: "Сценарий старта",
+        local: "Локальная игра",
+        network: "Сетевая игра",
+        invite: "Вход в комнату",
+        maps: "Карты",
+        races: "Сохранения",
+      })[name] || "Главное меню";
+    }
     screens.forEach((screen) => {
       screen.classList.toggle("hidden", screen.dataset.menuScreen !== name);
     });
@@ -238,6 +334,9 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     if (name === "network") {
       renderNetworkSelection();
+    }
+    if (name === "invite") {
+      renderInviteSelection();
     }
     if (name === "maps" || name === "races") {
       renderLibraryLists();
@@ -592,6 +691,10 @@ document.addEventListener("DOMContentLoaded", () => {
       menuNetworkHintEl.textContent = menuState.networkAction === "join"
         ? "Если входишь в чужую комнату, карта, ветер и гонка придут от хоста автоматически."
         : `Для новой комнаты сейчас выбран ${modeLabel}. Новая карта создастся с этим режимом, а готовые карты и сохранения сохранят свой текущий формат.`;
+    }
+
+    if (menuInviteHintEl) {
+      renderInviteSelection();
     }
 
     if (mapsScreenHintEl) {
@@ -1064,6 +1167,24 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
+  menuInviteContinueBtn?.addEventListener("click", async () => {
+    try {
+      menuState.transport = "network";
+      menuState.networkAction = "invite";
+      await ensureSoloContext();
+      syncDeckFieldsFromInvite();
+      const joined = await window.RegattaMultiplayer?.joinRoom?.({
+        display_name: displayNameInput?.value?.trim() || "",
+        room_code: menuState.inviteRoomCode,
+      });
+      if (!joined) return;
+      closeMenu();
+      showToast("Подключение к комнате выполнено.");
+    } catch (error) {
+      showToast(error.message || "Не удалось войти в комнату.");
+    }
+  });
+
   menuDeckRoomBtn?.addEventListener("click", () => focusDeckSection("deckRoomSection"));
   menuDeckCourseBtn?.addEventListener("click", () => focusDeckSection("deckCourseSection"));
   menuDeckRulesBtn?.addEventListener("click", () => focusDeckSection("deckRulesSection"));
@@ -1132,6 +1253,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
   menuDisplayNameInput?.addEventListener("input", syncDeckFieldsFromMenu);
   menuJoinCodeInput?.addEventListener("input", syncDeckFieldsFromMenu);
+  menuInviteDisplayNameInput?.addEventListener("input", () => {
+    syncDeckFieldsFromInvite();
+    renderInviteSelection();
+  });
   displayNameInput?.addEventListener("input", syncMenuFieldsFromDeck);
 
   window.addEventListener("regatta:state-changed", () => {
@@ -1146,6 +1271,17 @@ document.addEventListener("DOMContentLoaded", () => {
     if (room) {
       menuState.transport = "network";
       menuState.networkAction = null;
+      if (menuState.inviteRoomCode && room.code === menuState.inviteRoomCode) {
+        menuState.inviteRoomCode = "";
+      }
+      if (menuState.screen === "invite") {
+        showScreen("home");
+      }
+    } else {
+      const joinLink = currentJoinLinkState();
+      if (joinLink?.roomCode) {
+        activateInviteFlow(joinLink.roomCode);
+      }
     }
     renderHomeSummary();
     renderSettingsSummary();
@@ -1159,7 +1295,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (draft) {
       menuState.transport = "network";
       menuState.networkAction = "create";
-    } else if (!roomSummary().room) {
+    } else if (!roomSummary().room && menuState.networkAction !== "invite") {
       menuState.networkAction = null;
     }
     renderHomeSummary();
@@ -1171,17 +1307,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   window.addEventListener("regatta:join-link", (event) => {
     const roomCode = event.detail?.roomCode || "";
-    if (menuJoinCodeInput && roomCode) {
-      menuJoinCodeInput.value = roomCode;
-    }
-    syncDeckFieldsFromMenu();
-    menuState.transport = "network";
-    menuState.networkAction = "join";
-    if (!roomSummary().room) {
-      openMenu("network");
-    } else {
-      renderHints();
-    }
+    activateInviteFlow(roomCode);
   });
 
   window.addEventListener("keydown", (event) => {
@@ -1212,5 +1338,10 @@ document.addEventListener("DOMContentLoaded", () => {
   refreshLibrary().catch((error) => {
     showToast(error.message || "Не удалось загрузить библиотеку.");
   });
-  openMenu("home");
+  const initialJoinLink = currentJoinLinkState();
+  if (initialJoinLink?.roomCode) {
+    activateInviteFlow(initialJoinLink.roomCode);
+  } else {
+    openMenu("home");
+  }
 });

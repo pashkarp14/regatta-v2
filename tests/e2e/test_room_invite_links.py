@@ -10,7 +10,7 @@ from .helpers import build_realtime_state, load_app, wait_for_room
 pytestmark = [pytest.mark.e2e, pytest.mark.network]
 
 
-def test_open_room_action_exposes_working_invite_link(browser, base_url):
+def test_invite_link_opens_join_flow_and_guest_stays_in_lobby_on_start(browser, base_url):
     host_page = browser.new_page()
     guest_page = browser.new_page()
     try:
@@ -51,12 +51,38 @@ def test_open_room_action_exposes_working_invite_link(browser, base_url):
         guest_page.wait_for_function("() => !!window.RegattaApp && !!window.RegattaMultiplayer")
         guest_page.wait_for_function(
             """(expectedCode) => {
+                const overlay = document.getElementById("mainMenuOverlay");
                 const room = window.RegattaMultiplayer.getRoomState().room;
-                return !!room
-                    && room.code === expectedCode
-                    && room.players.some((player) => player.is_self);
+                const inviteCode = document.getElementById("menuInviteRoomCode");
+                return overlay?.dataset?.screen === "invite"
+                    && !room
+                    && inviteCode?.textContent?.includes(expectedCode);
             }""",
             arg=room_code,
+        )
+
+        assert guest_page.evaluate("() => window.RegattaMultiplayer.getRoomState().room") is None
+        assert guest_page.locator("#menuInviteDisplayName").is_visible()
+        assert guest_page.locator("#menuInviteContinue").is_visible()
+        assert guest_page.locator("#menuJoinCode").is_hidden()
+
+        guest_page.locator("#menuInviteDisplayName").fill("Crewmate")
+        guest_page.locator("#menuInviteContinue").click()
+        guest_page.wait_for_function(
+            """({ expectedCode, expectedName }) => {
+                const room = window.RegattaMultiplayer.getRoomState().room;
+                const self = room?.players?.find((player) => player.is_self);
+                return !!room
+                    && room.code === expectedCode
+                    && self?.name === expectedName;
+            }""",
+            arg={"expectedCode": room_code, "expectedName": "Crewmate"},
+        )
+        guest_page.wait_for_function(
+            """() => {
+                const url = new URL(window.location.href);
+                return !url.searchParams.has("room") && !url.searchParams.has("join");
+            }"""
         )
 
         guest_room = guest_page.evaluate(
@@ -69,7 +95,7 @@ def test_open_room_action_exposes_working_invite_link(browser, base_url):
                 };
             }"""
         )
-        assert guest_room == {"code": room_code, "selfName": "Skipper"}
+        assert guest_room == {"code": room_code, "selfName": "Crewmate"}
 
         joined_room = wait_for_room(
             host_page,
@@ -77,6 +103,27 @@ def test_open_room_action_exposes_working_invite_link(browser, base_url):
             lambda room: bool(room and room.get("joined_count") == 2),
         )
         assert joined_room["code"] == room_code
+
+        host_page.evaluate(
+            """({ state }) => {
+                window.RegattaApp.importState(state);
+                window.RegattaApp.setMode("play");
+            }""",
+            {"state": state},
+        )
+        host_page.evaluate("""() => window.RegattaMultiplayer.startRoom({ armRealtime: true })""")
+
+        guest_page.wait_for_function(
+            """({ expectedCode, expectedName }) => {
+                const room = window.RegattaMultiplayer.getRoomState().room;
+                const self = room?.players?.find((player) => player.is_self);
+                return !!room
+                    && room.code === expectedCode
+                    && room.status === "live"
+                    && self?.name === expectedName;
+            }""",
+            arg={"expectedCode": room_code, "expectedName": "Crewmate"},
+        )
     finally:
         guest_page.context.close()
         host_page.context.close()
