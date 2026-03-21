@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +40,14 @@ def build_asset_version(app: Flask) -> str:
     return f"{base_version}-{latest_mtime_ns}" if latest_mtime_ns else base_version
 
 
+def configure_logging(app: Flask) -> None:
+    level_name = str(app.config.get("APP_LOG_LEVEL", "INFO")).upper()
+    level = getattr(logging, level_name, logging.INFO)
+    app.logger.setLevel(level)
+    for handler in app.logger.handlers:
+        handler.setLevel(level)
+
+
 def create_app(config_overrides: Mapping[str, Any] | None = None) -> Flask:
     app = Flask(__name__, static_folder="../static", template_folder="../templates")
     app.config.from_object(get_config())
@@ -47,6 +56,7 @@ def create_app(config_overrides: Mapping[str, Any] | None = None) -> Flask:
         if "SESSION_TYPE" not in config_overrides:
             app.config["SESSION_TYPE"] = "redis" if app.config.get("REDIS_URL") else "filesystem"
     app.config["ASSET_VERSION"] = build_asset_version(app)
+    configure_logging(app)
 
     redis_client = build_redis_client(app)
     if redis_client is not None:

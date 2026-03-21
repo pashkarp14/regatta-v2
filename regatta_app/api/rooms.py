@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from flask import Blueprint, request
+from flask import Blueprint, current_app, request
 
 from ..game_state import room_requires_live_loop
 from ..room_events import broadcast_room_snapshot, serialize_room
@@ -26,9 +26,39 @@ def json_payload() -> dict[str, Any]:
     return request.get_json(silent=True) or {}
 
 
+def payload_boat_count(payload: dict[str, Any]) -> int | None:
+    boats = (payload.get("game_state") or {}).get("boats") if isinstance(payload, dict) else None
+    return len(boats) if isinstance(boats, list) else None
+
+
+def remote_addr_label() -> str:
+    forwarded_for = request.headers.get("X-Forwarded-For", "").strip()
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+    return request.remote_addr or "-"
+
+
 @bp.post("/api/rooms")
 def create_room():
-    return {"room": create_room_from_payload(json_payload())}
+    payload = json_payload()
+    current_app.logger.info(
+        "room.create.request remote_addr=%s content_length=%s display_name=%r host_role=%s requested_max_players=%s game_state_boats=%s",
+        remote_addr_label(),
+        request.content_length or 0,
+        payload.get("display_name"),
+        payload.get("host_role"),
+        payload.get("max_players"),
+        payload_boat_count(payload),
+    )
+    room = create_room_from_payload(payload)
+    current_app.logger.info(
+        "room.create.response room_code=%s status=%s joined_count=%s joined_racers_count=%s",
+        room.get("code"),
+        room.get("status"),
+        room.get("joined_count"),
+        room.get("joined_racers_count"),
+    )
+    return {"room": room}
 
 
 @bp.post("/api/rooms/join")

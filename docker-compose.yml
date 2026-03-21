@@ -9,6 +9,11 @@ services:
       REDIS_URL: redis://redis:6380/0
       PORT: 5001
       APP_VERSION: 2.0.0
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "1"
     depends_on:
       - redis
     restart: unless-stopped
@@ -20,6 +25,11 @@ services:
       - "6380:6380"
     volumes:
       - redis_data:/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "1"
     restart: unless-stopped
 
 volumes:

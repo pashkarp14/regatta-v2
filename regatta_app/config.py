@@ -10,6 +10,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 class BaseConfig:
     APP_NAME = "Парусная регата"
     APP_VERSION = os.getenv("APP_VERSION", "2.0.0")
+    APP_LOG_LEVEL = os.getenv("APP_LOG_LEVEL", "INFO")
     PORT = int(os.getenv("PORT", "5001"))
     SECRET_KEY = os.getenv("SECRET_KEY", "regatta-v2-dev-secret")
     TESTING = False

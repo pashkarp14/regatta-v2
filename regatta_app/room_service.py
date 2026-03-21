@@ -3,9 +3,12 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from flask import current_app
+
 from .app_state import room_store
 from .game_state import normalize_lobby_preview_state, normalize_room_start_state
 from .room_store import (
+    RoomStoreError,
     RoomForbidden,
     RoomNotFound,
     RoomValidationError,
@@ -48,20 +51,74 @@ def leave_current_room() -> tuple[str | None, dict[str, Any] | None]:
     return room_code, updated_room
 
 
+def _boat_count(snapshot: Any) -> int | None:
+    if not isinstance(snapshot, dict):
+        return None
+    boats = snapshot.get("boats")
+    return len(boats) if isinstance(boats, list) else None
+
+
 def create_room_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    session_state = current_session_state()
     game_state = payload.get("game_state")
     max_players = int(payload.get("max_players", 0))
     host_role = normalize_host_role(payload.get("host_role"))
     player_name = normalize_name(payload.get("display_name") or session_display_name())
 
-    leave_current_room()
-    room, player_token = room_store().create_room(
+    current_app.logger.info(
+        "room.create.begin session_room_code=%s session_has_player=%s display_name=%r host_role=%s requested_max_players=%s game_state_boats=%s",
+        session_state.room_code or "-",
+        bool(session_state.player_token),
         player_name,
+        host_role,
         max_players,
-        game_state,
-        host_role=host_role,
+        _boat_count(game_state),
     )
+
+    previous_room_code, previous_room = leave_current_room()
+    if previous_room_code:
+        current_app.logger.info(
+            "room.create.left_previous_room previous_room_code=%s previous_room_still_exists=%s",
+            previous_room_code,
+            previous_room is not None,
+        )
+
+    try:
+        room, player_token = room_store().create_room(
+            player_name,
+            max_players,
+            game_state,
+            host_role=host_role,
+        )
+    except RoomStoreError as exc:
+        current_app.logger.warning(
+            "room.create.rejected display_name=%r host_role=%s requested_max_players=%s game_state_boats=%s error=%s",
+            player_name,
+            host_role,
+            max_players,
+            _boat_count(game_state),
+            exc,
+        )
+        raise
+    except Exception:
+        current_app.logger.exception(
+            "room.create.crashed display_name=%r host_role=%s requested_max_players=%s game_state_boats=%s",
+            player_name,
+            host_role,
+            max_players,
+            _boat_count(game_state),
+        )
+        raise
+
     bind_room_session(room["code"], player_token, player_name)
+    current_app.logger.info(
+        "room.create.success room_code=%s host_role=%s joined_players=%s joined_racers=%s room_boats=%s",
+        room.get("code"),
+        host_role,
+        len(room.get("players", [])),
+        len(room.get("racer_player_ids", [])),
+        _boat_count(room.get("game_state")),
+    )
     return public_room_view(room, player_token)
 
 
