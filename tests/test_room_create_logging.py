@@ -131,3 +131,49 @@ def test_create_room_logs_rejection_reason(app, caplog):
     assert "room.create.begin" in messages
     assert "room.create.rejected" in messages
     assert "Room size cannot exceed 20 boats." in messages
+
+
+def test_create_room_proceeds_when_previous_room_cleanup_crashes(app, caplog, monkeypatch):
+    client = app.test_client()
+    first_response = client.post(
+        "/api/rooms",
+        json={
+            "display_name": "Host",
+            "host_role": "player",
+            "max_players": 2,
+            "game_state": make_realtime_state(),
+        },
+    )
+    assert first_response.status_code == 200, first_response.get_json()
+    first_room_code = first_response.get_json()["room"]["code"]
+
+    def run_immediately(task, *args, **kwargs):
+        return task(*args, **kwargs)
+
+    def fail_cleanup(room_code, player_token):
+        raise RuntimeError(f"cleanup failure for {room_code}")
+
+    monkeypatch.setattr(app.extensions["socketio"], "start_background_task", run_immediately)
+    monkeypatch.setattr(app.extensions["room_store"], "remove_player", fail_cleanup)
+
+    with caplog.at_level(logging.INFO, logger=app.logger.name):
+        second_response = client.post(
+            "/api/rooms",
+            json={
+                "display_name": "Host",
+                "host_role": "player",
+                "max_players": 2,
+                "game_state": make_realtime_state(),
+            },
+        )
+
+    assert second_response.status_code == 200, second_response.get_json()
+    second_room_code = second_response.get_json()["room"]["code"]
+    assert second_room_code != first_room_code
+
+    messages = "\n".join(record.getMessage() for record in caplog.records)
+    assert f"room.create.session_reset previous_room_code={first_room_code}" in messages
+    assert f"room.create.cleanup_previous_room.scheduled previous_room_code={first_room_code}" in messages
+    assert f"room.create.cleanup_previous_room.begin previous_room_code={first_room_code}" in messages
+    assert f"room.create.cleanup_previous_room.crashed previous_room_code={first_room_code}" in messages
+    assert f"room.create.success room_code={second_room_code}" in messages

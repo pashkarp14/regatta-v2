@@ -5,8 +5,9 @@ from typing import Any
 
 from flask import current_app
 
-from .app_state import room_store
-from .game_state import normalize_lobby_preview_state, normalize_room_start_state
+from .app_state import room_store, socketio_ext
+from .game_state import normalize_lobby_preview_state, normalize_room_start_state, room_requires_live_loop
+from .room_events import broadcast_room_snapshot
 from .room_store import (
     RoomStoreError,
     RoomForbidden,
@@ -21,6 +22,7 @@ from .room_store import (
     room_can_start,
     validate_game_state,
 )
+from .sockets import ensure_realtime_room_loop
 from .session_state import (
     bind_room_session,
     clear_room_session,
@@ -58,6 +60,48 @@ def _boat_count(snapshot: Any) -> int | None:
     return len(boats) if isinstance(boats, list) else None
 
 
+def _cleanup_previous_room_async(room_code: str | None, player_token: str | None) -> None:
+    if not room_code or not player_token:
+        return
+
+    app = current_app._get_current_object()
+    current_app.logger.info(
+        "room.create.cleanup_previous_room.scheduled previous_room_code=%s",
+        room_code,
+    )
+
+    def task() -> None:
+        with app.app_context():
+            try:
+                app.logger.info(
+                    "room.create.cleanup_previous_room.begin previous_room_code=%s",
+                    room_code,
+                )
+                updated_room = room_store().remove_player(room_code, player_token)
+                app.logger.info(
+                    "room.create.cleanup_previous_room.done previous_room_code=%s previous_room_still_exists=%s",
+                    room_code,
+                    updated_room is not None,
+                )
+                if updated_room is not None:
+                    if room_requires_live_loop(updated_room):
+                        ensure_realtime_room_loop(updated_room["code"])
+                    broadcast_room_snapshot(updated_room)
+            except RoomStoreError as exc:
+                app.logger.warning(
+                    "room.create.cleanup_previous_room.rejected previous_room_code=%s error=%s",
+                    room_code,
+                    exc,
+                )
+            except Exception:
+                app.logger.exception(
+                    "room.create.cleanup_previous_room.crashed previous_room_code=%s",
+                    room_code,
+                )
+
+    socketio_ext().start_background_task(task)
+
+
 def create_room_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
     session_state = current_session_state()
     game_state = payload.get("game_state")
@@ -75,13 +119,14 @@ def create_room_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
         _boat_count(game_state),
     )
 
-    previous_room_code, previous_room = leave_current_room()
-    if previous_room_code:
+    if session_state.room_code or session_state.player_token:
         current_app.logger.info(
-            "room.create.left_previous_room previous_room_code=%s previous_room_still_exists=%s",
-            previous_room_code,
-            previous_room is not None,
+            "room.create.session_reset previous_room_code=%s session_had_player=%s",
+            session_state.room_code or "-",
+            bool(session_state.player_token),
         )
+        clear_room_session()
+        _cleanup_previous_room_async(session_state.room_code, session_state.player_token)
 
     try:
         room, player_token = room_store().create_room(
