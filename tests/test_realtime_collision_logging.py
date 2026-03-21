@@ -9,6 +9,7 @@ from regatta_app.factory import create_app
 from regatta_app.realtime_engine import (
     resolve_realtime_overlaps,
     resolve_realtime_pressure_jams,
+    simulate_realtime_tick,
 )
 
 
@@ -43,6 +44,40 @@ def make_boat(
         "roundSweep": 0,
         "startDeltaMs": None,
         "falseStartDeltaMs": None,
+    }
+
+
+def make_realtime_state(boats: list[dict], *, marks: list[dict] | None = None) -> dict:
+    return {
+        "version": 2,
+        "world": {"width": 30, "height": 30},
+        "settings": {
+            "playMode": "realtime",
+            "finishSeparate": False,
+            "realtimePrepSeconds": 10,
+            "turnRateDegPerSec": 360,
+            "interactionMode": "contact",
+            "windAngleDeg": 0,
+            "deadZoneDeg": 0,
+        },
+        "course": {
+            "markCount": len(marks or []),
+            "marks": list(marks or []),
+            "startA": {"x": 8, "y": 2},
+            "startB": {"x": 22, "y": 2},
+            "finishA": {"x": 8, "y": 2},
+            "finishB": {"x": 22, "y": 2},
+        },
+        "race": {
+            "phase": "race",
+            "raceFinishedCount": 0,
+            "realtimeCountdownEndsAt": 0,
+            "realtimePaused": False,
+            "realtimePauseStartedAt": 0,
+            "gustExpiresAt": 0,
+            "nextAutoGustAt": 0,
+        },
+        "boats": boats,
     }
 
 
@@ -146,3 +181,48 @@ def test_pressure_unstick_logs_detection_and_resolution(app, caplog):
     assert "left_index=0" in messages
     assert "right_index=1" in messages
     assert "realtime.unstick.pressure.resolved" in messages
+
+
+def test_simulate_realtime_tick_logs_mark_collision_detection(app, caplog):
+    game_state = make_realtime_state(
+        [make_boat(10.0, 10.0, heading=0.0, has_heading=True)],
+        marks=[{"x": 11.35, "y": 10.0}],
+    )
+    controls = {
+        0: {
+            "active": True,
+            "target": {"x": 20.0, "y": 10.0},
+        }
+    }
+
+    with app.app_context(), caplog.at_level(logging.INFO, logger=app.logger.name):
+        simulate_realtime_tick(game_state, controls, 0.5, 10_000)
+
+    messages = "\n".join(record.getMessage() for record in caplog.records)
+    assert "realtime.collision.mark.detected" in messages
+    assert "boat_index=0" in messages
+    assert "mark_index=0" in messages
+
+
+def test_simulate_realtime_tick_logs_boats_collision_detection_before_unstick(app, caplog):
+    game_state = make_realtime_state(
+        [
+            make_boat(10.0, 10.0, heading=0.0, has_heading=True),
+            make_boat(12.05, 10.0, heading=0.0, has_heading=True),
+        ]
+    )
+    controls = {
+        0: {
+            "active": True,
+            "target": {"x": 20.0, "y": 10.0},
+        }
+    }
+
+    with app.app_context(), caplog.at_level(logging.INFO, logger=app.logger.name):
+        simulate_realtime_tick(game_state, controls, 0.5, 10_000)
+
+    messages = "\n".join(record.getMessage() for record in caplog.records)
+    assert "realtime.collision.boats.detected" in messages
+    assert "boat_index=0" in messages
+    assert "other_index=1" in messages
+    assert "other_moving=false" in messages

@@ -70,6 +70,78 @@ def _log_realtime_event(event: str, **fields: Any) -> None:
     _realtime_logger().info(message)
 
 
+def _log_mark_collision_detected(
+    *,
+    boat_index: int,
+    mark_index: int,
+    collision_kind: str,
+    prev_pos: dict[str, float],
+    dest_pos: dict[str, float],
+    mark_pos: dict[str, float],
+    distance: float,
+    required_distance: float,
+    proposal_distance: float,
+) -> None:
+    _log_realtime_event(
+        "realtime.collision.mark.detected",
+        boat_index=boat_index,
+        mark_index=mark_index,
+        collision_kind=collision_kind,
+        prev_pos=prev_pos,
+        dest_pos=dest_pos,
+        mark_pos=mark_pos,
+        distance=distance,
+        required_distance=required_distance,
+        proposal_distance=proposal_distance,
+    )
+
+
+def _log_boat_collision_detected(
+    *,
+    scope: str,
+    collision_kind: str,
+    boat_index: int | None = None,
+    other_index: int | None = None,
+    left_index: int | None = None,
+    right_index: int | None = None,
+    prev_pos: dict[str, float] | None = None,
+    dest_pos: dict[str, float] | None = None,
+    other_pos: dict[str, float] | None = None,
+    left_prev: dict[str, float] | None = None,
+    left_dest: dict[str, float] | None = None,
+    right_prev: dict[str, float] | None = None,
+    right_dest: dict[str, float] | None = None,
+    distance: float,
+    required_distance: float,
+    proposal_distance: float | None = None,
+    other_distance: float | None = None,
+    pressure_pair_added: bool = False,
+    other_moving: bool | None = None,
+) -> None:
+    _log_realtime_event(
+        "realtime.collision.boats.detected",
+        scope=scope,
+        collision_kind=collision_kind,
+        boat_index=boat_index,
+        other_index=other_index,
+        left_index=left_index,
+        right_index=right_index,
+        prev_pos=prev_pos,
+        dest_pos=dest_pos,
+        other_pos=other_pos,
+        left_prev=left_prev,
+        left_dest=left_dest,
+        right_prev=right_prev,
+        right_dest=right_dest,
+        distance=distance,
+        required_distance=required_distance,
+        proposal_distance=proposal_distance,
+        other_distance=other_distance,
+        pressure_pair_added=pressure_pair_added,
+        other_moving=other_moving,
+    )
+
+
 def clamp(value: float, min_value: float, max_value: float) -> float:
     return max(min_value, min(max_value, value))
 
@@ -1833,10 +1905,37 @@ def simulate_realtime_tick(game_state: dict[str, Any], controls: dict[int, dict[
             invalid.add(index)
             continue
         for mark_index in range(mark_count):
-            if capsule_intersects_mark(candidate_capsule, marks[mark_index], MARK_CLEARANCE_MARGIN):
+            mark = marks[mark_index]
+            required_mark_distance = candidate_capsule["r"] + MARK_RADIUS + MARK_CLEARANCE_MARGIN
+            mark_distance, _, _ = point_to_segment(mark, candidate_capsule["a"], candidate_capsule["b"])
+            if mark_distance < required_mark_distance - 1e-9:
+                _log_mark_collision_detected(
+                    boat_index=index,
+                    mark_index=mark_index,
+                    collision_kind="overlap",
+                    prev_pos=proposal["prev"],
+                    dest_pos=dest,
+                    mark_pos=mark,
+                    distance=mark_distance,
+                    required_distance=required_mark_distance,
+                    proposal_distance=float(proposal.get("distance") or 0.0),
+                )
                 invalid.add(index)
                 break
-            if segment_distance_to_point(proposal["prev"], dest, marks[mark_index]) < (MARK_RADIUS + BOAT_SWEEP_RADIUS + MARK_CLEARANCE_MARGIN - 1e-9):
+            sweep_required_distance = MARK_RADIUS + BOAT_SWEEP_RADIUS + MARK_CLEARANCE_MARGIN
+            sweep_distance = segment_distance_to_point(proposal["prev"], dest, mark)
+            if sweep_distance < sweep_required_distance - 1e-9:
+                _log_mark_collision_detected(
+                    boat_index=index,
+                    mark_index=mark_index,
+                    collision_kind="sweep",
+                    prev_pos=proposal["prev"],
+                    dest_pos=dest,
+                    mark_pos=mark,
+                    distance=sweep_distance,
+                    required_distance=sweep_required_distance,
+                    proposal_distance=float(proposal.get("distance") or 0.0),
+                )
                 invalid.add(index)
                 break
         if index in invalid:
@@ -1850,14 +1949,57 @@ def simulate_realtime_tick(game_state: dict[str, Any], controls: dict[int, dict[
                     float(other_boat.get("heading") or 0.0),
                     bool(other_boat.get("hasHeading")),
                 )
-                if capsules_overlap(candidate_capsule, other_capsule, BOAT_CLEARANCE_MARGIN):
-                    if proposals[other_index]["accepted"]:
+                required_boat_distance = candidate_capsule["r"] + other_capsule["r"] + BOAT_CLEARANCE_MARGIN
+                _, _, boat_distance = segment_segment_closest_points(
+                    candidate_capsule["a"],
+                    candidate_capsule["b"],
+                    other_capsule["a"],
+                    other_capsule["b"],
+                )
+                other_proposal = proposals[other_index]
+                other_moving = bool(other_proposal["accepted"]) and float(other_proposal.get("distance") or 0.0) > 1e-5
+                if boat_distance < required_boat_distance - 1e-9:
+                    pressure_pair_added = bool(other_proposal["accepted"])
+                    if pressure_pair_added:
                         pressure_pairs.add((min(index, other_index), max(index, other_index)))
+                    _log_boat_collision_detected(
+                        scope="proposal_vs_current",
+                        collision_kind="overlap",
+                        boat_index=index,
+                        other_index=other_index,
+                        prev_pos=proposal["prev"],
+                        dest_pos=dest,
+                        other_pos={"x": float(other_boat["x"]), "y": float(other_boat["y"])},
+                        distance=boat_distance,
+                        required_distance=required_boat_distance,
+                        proposal_distance=float(proposal.get("distance") or 0.0),
+                        other_distance=float(other_proposal.get("distance") or 0.0),
+                        pressure_pair_added=pressure_pair_added,
+                        other_moving=other_moving,
+                    )
                     invalid.add(index)
                     break
-                if segment_segment_distance(proposal["prev"], dest, other_capsule["a"], other_capsule["b"]) < (BOAT_SWEEP_RADIUS + other_capsule["r"] + BOAT_CLEARANCE_MARGIN - 1e-9):
-                    if proposals[other_index]["accepted"]:
+                sweep_required_distance = BOAT_SWEEP_RADIUS + other_capsule["r"] + BOAT_CLEARANCE_MARGIN
+                sweep_distance = segment_segment_distance(proposal["prev"], dest, other_capsule["a"], other_capsule["b"])
+                if sweep_distance < sweep_required_distance - 1e-9:
+                    pressure_pair_added = bool(other_proposal["accepted"])
+                    if pressure_pair_added:
                         pressure_pairs.add((min(index, other_index), max(index, other_index)))
+                    _log_boat_collision_detected(
+                        scope="proposal_vs_current",
+                        collision_kind="sweep",
+                        boat_index=index,
+                        other_index=other_index,
+                        prev_pos=proposal["prev"],
+                        dest_pos=dest,
+                        other_pos={"x": float(other_boat["x"]), "y": float(other_boat["y"])},
+                        distance=sweep_distance,
+                        required_distance=sweep_required_distance,
+                        proposal_distance=float(proposal.get("distance") or 0.0),
+                        other_distance=float(other_proposal.get("distance") or 0.0),
+                        pressure_pair_added=pressure_pair_added,
+                        other_moving=other_moving,
+                    )
                     invalid.add(index)
                     break
 
@@ -1872,13 +2014,51 @@ def simulate_realtime_tick(game_state: dict[str, Any], controls: dict[int, dict[
                 if not right_proposal["accepted"] or right in invalid:
                     continue
                 right_capsule = boat_capsule_at(right_proposal["dest"], right_proposal["heading"], right_proposal["hasHeading"])
-                if capsules_overlap(left_capsule, right_capsule, BOAT_CLEARANCE_MARGIN):
+                required_pair_distance = left_capsule["r"] + right_capsule["r"] + BOAT_CLEARANCE_MARGIN
+                _, _, pair_distance = segment_segment_closest_points(
+                    left_capsule["a"],
+                    left_capsule["b"],
+                    right_capsule["a"],
+                    right_capsule["b"],
+                )
+                if pair_distance < required_pair_distance - 1e-9:
+                    _log_boat_collision_detected(
+                        scope="proposal_pair",
+                        collision_kind="overlap",
+                        left_index=left,
+                        right_index=right,
+                        left_prev=left_proposal["prev"],
+                        left_dest=left_proposal["dest"],
+                        right_prev=right_proposal["prev"],
+                        right_dest=right_proposal["dest"],
+                        distance=pair_distance,
+                        required_distance=required_pair_distance,
+                        proposal_distance=float(left_proposal.get("distance") or 0.0),
+                        other_distance=float(right_proposal.get("distance") or 0.0),
+                        pressure_pair_added=True,
+                    )
                     pressure_pairs.add((left, right))
                     invalid.add(left)
                     invalid.add(right)
                     continue
                 min_center_distance = segment_segment_distance(left_proposal["prev"], left_proposal["dest"], right_proposal["prev"], right_proposal["dest"])
-                if min_center_distance < (BOAT_SWEEP_RADIUS * 2 + BOAT_CLEARANCE_MARGIN - 1e-9):
+                sweep_required_distance = BOAT_SWEEP_RADIUS * 2 + BOAT_CLEARANCE_MARGIN
+                if min_center_distance < sweep_required_distance - 1e-9:
+                    _log_boat_collision_detected(
+                        scope="proposal_pair",
+                        collision_kind="sweep",
+                        left_index=left,
+                        right_index=right,
+                        left_prev=left_proposal["prev"],
+                        left_dest=left_proposal["dest"],
+                        right_prev=right_proposal["prev"],
+                        right_dest=right_proposal["dest"],
+                        distance=min_center_distance,
+                        required_distance=sweep_required_distance,
+                        proposal_distance=float(left_proposal.get("distance") or 0.0),
+                        other_distance=float(right_proposal.get("distance") or 0.0),
+                        pressure_pair_added=True,
+                    )
                     pressure_pairs.add((left, right))
                     invalid.add(left)
                     invalid.add(right)
