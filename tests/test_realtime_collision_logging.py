@@ -256,6 +256,51 @@ def test_pressure_unstick_resolves_one_sided_pressure_jam(app, caplog):
     assert "realtime.unstick.pressure.one_sided.resolved" in messages
 
 
+def test_pressure_unstick_resolves_prod_pair_pressure_jam(app, caplog):
+    boats = [
+        make_boat(18.430, 6.920, heading=-1.7783, has_heading=True),
+        make_boat(19.385, 5.501, heading=1.1494, has_heading=True),
+    ]
+    proposals = [
+        {
+            "accepted": True,
+            "distance": 0.020,
+            "prev": {"x": 18.430, "y": 6.920},
+            "dest": {"x": 18.426, "y": 6.901},
+            "motionDirection": {"x": -0.004, "y": -0.019},
+        },
+        {
+            "accepted": True,
+            "distance": 0.086,
+            "prev": {"x": 19.385, "y": 5.501},
+            "dest": {"x": 19.420, "y": 5.579},
+            "motionDirection": {"x": 0.035, "y": 0.078},
+        },
+    ]
+    settings = {"interactionMode": "contact"}
+    before_clearance = boat_boat_clearance(make_realtime_state(boats))
+
+    with app.app_context(), caplog.at_level(logging.INFO, logger=app.logger.name):
+        changed = resolve_realtime_pressure_jams(
+            boats,
+            proposals,
+            {(0, 1)},
+            settings,
+            world_w=60.0,
+            world_h=60.0,
+        )
+
+    after_clearance = boat_boat_clearance(make_realtime_state(boats))
+    messages = "\n".join(record.getMessage() for record in caplog.records)
+    assert changed is True
+    assert after_clearance > before_clearance + 0.02
+    assert "realtime.unstick.pressure.detected" in messages
+    assert (
+        "realtime.unstick.pressure.resolved" in messages
+        or "realtime.unstick.pressure.fallback.resolved" in messages
+    )
+
+
 def test_simulate_realtime_tick_logs_mark_collision_detection(app, caplog):
     game_state = make_realtime_state(
         [make_boat(10.0, 10.0, heading=0.0, has_heading=True)],

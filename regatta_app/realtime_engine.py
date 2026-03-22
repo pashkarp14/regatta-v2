@@ -1283,7 +1283,16 @@ def resolve_realtime_pressure_jams(
             )
             required_distance = left_capsule["r"] + right_capsule["r"] + BOAT_CLEARANCE_MARGIN
             target_distance = required_distance + PRESSURE_UNSTICK_EXTRA_CLEARANCE
-            if separation >= target_distance - 1e-9:
+            sweep_distance = math.inf
+            sweep_target_distance = BOAT_SWEEP_RADIUS * 2 + BOAT_CLEARANCE_MARGIN
+            if isinstance(left_proposal, dict) and isinstance(right_proposal, dict):
+                sweep_distance = segment_segment_distance(
+                    left_proposal.get("prev") or left_position,
+                    left_proposal.get("dest") or left_position,
+                    right_proposal.get("prev") or right_position,
+                    right_proposal.get("dest") or right_position,
+                )
+            if separation >= target_distance - 1e-9 and sweep_distance >= sweep_target_distance - 1e-9:
                 continue
 
             left_motion = proposal_motion_unit(left_proposal)
@@ -1308,6 +1317,7 @@ def resolve_realtime_pressure_jams(
             push_distance = max(
                 PRESSURE_UNSTICK_MIN_PUSH / 2.0,
                 (target_distance - separation + UNSTICK_PUSH_EPS) / 2.0,
+                (sweep_target_distance - sweep_distance + UNSTICK_PUSH_EPS) / 2.0,
                 attempted_push / 2.0,
             )
             _log_realtime_event(
@@ -1318,6 +1328,8 @@ def resolve_realtime_pressure_jams(
                 left_pos=left_position,
                 right_pos=right_position,
                 separation=separation,
+                sweep_distance=sweep_distance,
+                sweep_target_distance=sweep_target_distance,
                 target_distance=target_distance,
                 attempted_push=attempted_push,
                 push_distance=push_distance,
@@ -1347,6 +1359,8 @@ def resolve_realtime_pressure_jams(
                     left_pos=left_position,
                     right_pos=right_position,
                     separation=separation,
+                    sweep_distance=sweep_distance,
+                    sweep_target_distance=sweep_target_distance,
                     target_distance=target_distance,
                     push_distance=push_distance,
                     reason="no_candidate",
