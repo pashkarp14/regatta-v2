@@ -216,6 +216,46 @@ def test_pressure_unstick_logs_detection_and_resolution(app, caplog):
     assert "realtime.unstick.pressure.resolved" in messages
 
 
+def test_pressure_unstick_resolves_one_sided_pressure_jam(app, caplog):
+    boats = [
+        make_boat(36.698, 9.006, has_heading=False),
+        make_boat(35.465, 7.737, has_heading=False),
+    ]
+    proposals = [
+        {
+            "accepted": True,
+            "distance": 0.2,
+            "motionDirection": {"x": 0.985, "y": 0.174},
+        },
+        {
+            "accepted": True,
+            "distance": 0.2,
+            "motionDirection": {"x": 0.73, "y": 0.684},
+        },
+    ]
+    settings = {"interactionMode": "contact"}
+    before_clearance = boat_boat_clearance(make_realtime_state(boats))
+
+    with app.app_context(), caplog.at_level(logging.INFO, logger=app.logger.name):
+        changed = resolve_realtime_pressure_jams(
+            boats,
+            proposals,
+            {(0, 1)},
+            settings,
+            world_w=60.0,
+            world_h=60.0,
+        )
+
+    after_clearance = boat_boat_clearance(make_realtime_state(boats))
+    messages = "\n".join(record.getMessage() for record in caplog.records)
+    assert changed is True
+    assert after_clearance > before_clearance + 0.02
+    assert "realtime.unstick.pressure.one_sided.detected" in messages
+    assert "pushing_index=1" in messages
+    assert "blocked_index=0" in messages
+    assert "realtime.unstick.pressure.one_sided.resolved" in messages
+
+
 def test_simulate_realtime_tick_logs_mark_collision_detection(app, caplog):
     game_state = make_realtime_state(
         [make_boat(10.0, 10.0, heading=0.0, has_heading=True)],
@@ -313,3 +353,35 @@ def test_simulate_realtime_tick_unsticks_active_boats_deadlock(app, caplog):
     assert after_clearance >= required_clearance - 0.02
     assert "realtime.stuck.boats.detected" in messages
     assert "realtime.stuck.boats.resolved" in messages
+
+
+def test_simulate_realtime_tick_unsticks_one_sided_proposal_pair_deadlock(app, caplog):
+    game_state = make_realtime_state(
+        [
+            make_boat(36.698, 9.006, heading=0.177, has_heading=True),
+            make_boat(35.465, 7.737, heading=0.754, has_heading=True),
+        ]
+    )
+    game_state["world"]["width"] = 60
+    game_state["world"]["height"] = 60
+    controls = {
+        0: {
+            "active": True,
+            "direction": {"x": 0.985, "y": 0.174},
+        },
+        1: {
+            "active": True,
+            "direction": {"x": 0.730, "y": 0.684},
+        },
+    }
+    before_clearance = boat_boat_clearance(game_state)
+
+    with app.app_context(), caplog.at_level(logging.INFO, logger=app.logger.name):
+        changed = simulate_realtime_tick(game_state, controls, 0.0833333, 10_000)
+
+    after_clearance = boat_boat_clearance(game_state)
+    messages = "\n".join(record.getMessage() for record in caplog.records)
+    assert changed is True
+    assert after_clearance > before_clearance + 0.02
+    assert "realtime.unstick.pressure.one_sided.detected" in messages
+    assert "realtime.unstick.pressure.one_sided.resolved" in messages

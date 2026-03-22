@@ -1172,6 +1172,88 @@ def resolve_realtime_pressure_jams(
             left_presses = proposal_presses_into_boat(left_boat, right_boat, left_proposal)
             right_presses = proposal_presses_into_boat(right_boat, left_boat, right_proposal)
             if not (left_presses and right_presses):
+                if left_presses != right_presses:
+                    pushing_index = left_index if left_presses else right_index
+                    blocked_index = right_index if left_presses else left_index
+                    pushing_boat = left_boat if left_presses else right_boat
+                    blocked_boat = right_boat if left_presses else left_boat
+                    pushing_proposal = left_proposal if left_presses else right_proposal
+                    pushing_position = boat_position(pushing_boat)
+                    blocked_position = boat_position(blocked_boat)
+                    pushing_heading = float(pushing_boat.get("heading") or 0.0)
+                    blocked_heading = float(blocked_boat.get("heading") or 0.0)
+                    pushing_has_heading = bool(pushing_boat.get("hasHeading"))
+                    blocked_has_heading = bool(blocked_boat.get("hasHeading"))
+                    pushing_capsule = boat_capsule_at(pushing_position, pushing_heading, pushing_has_heading)
+                    blocked_capsule = boat_capsule_at(blocked_position, blocked_heading, blocked_has_heading)
+                    closest_pushing, closest_blocked, separation = segment_segment_closest_points(
+                        pushing_capsule["a"],
+                        pushing_capsule["b"],
+                        blocked_capsule["a"],
+                        blocked_capsule["b"],
+                    )
+                    required_distance = pushing_capsule["r"] + blocked_capsule["r"] + BOAT_CLEARANCE_MARGIN
+                    pushing_distance = float((pushing_proposal or {}).get("distance") or 0.0)
+                    push_distance = max(
+                        PRESSURE_UNSTICK_MIN_PUSH,
+                        min(PRESSURE_UNSTICK_EXTRA_CLEARANCE, pushing_distance),
+                        max(0.0, required_distance - separation + UNSTICK_PUSH_EPS),
+                    )
+                    _log_realtime_event(
+                        "realtime.unstick.pressure.one_sided.detected",
+                        left_index=left_index,
+                        right_index=right_index,
+                        pass_index=pass_index + 1,
+                        pushing_index=pushing_index,
+                        blocked_index=blocked_index,
+                        pushing_pos=pushing_position,
+                        blocked_pos=blocked_position,
+                        separation=separation,
+                        required_distance=required_distance,
+                        push_distance=push_distance,
+                    )
+                    next_position = best_single_boat_unstick_position(
+                        pushing_position,
+                        pushing_heading,
+                        pushing_has_heading,
+                        blocked_position,
+                        blocked_heading,
+                        blocked_has_heading,
+                        push_distance,
+                        {
+                            "x": closest_pushing["x"] - closest_blocked["x"],
+                            "y": closest_pushing["y"] - closest_blocked["y"],
+                        },
+                        proposal_escape_direction(pushing_proposal),
+                        world_w=world_w,
+                        world_h=world_h,
+                    )
+                    if next_position is not None and dist(pushing_position, next_position) > 1e-6:
+                        next_capsule = boat_capsule_at(next_position, pushing_heading, pushing_has_heading)
+                        _, _, next_clearance = segment_segment_closest_points(
+                            next_capsule["a"],
+                            next_capsule["b"],
+                            blocked_capsule["a"],
+                            blocked_capsule["b"],
+                        )
+                        pushing_boat["x"] = next_position["x"]
+                        pushing_boat["y"] = next_position["y"]
+                        pushing_boat["currentSpeedUnitsPerSec"] = 0.0
+                        pass_changed = True
+                        _log_realtime_event(
+                            "realtime.unstick.pressure.one_sided.resolved",
+                            left_index=left_index,
+                            right_index=right_index,
+                            pass_index=pass_index + 1,
+                            pushing_index=pushing_index,
+                            blocked_index=blocked_index,
+                            from_pos=pushing_position,
+                            to_pos=next_position,
+                            moved=dist(pushing_position, next_position),
+                            push_distance=push_distance,
+                            selected_clearance=next_clearance,
+                        )
+                        continue
                 _log_realtime_event(
                     "realtime.unstick.pressure.skip",
                     left_index=left_index,
