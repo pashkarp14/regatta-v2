@@ -5111,7 +5111,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function laylineCourseVectors(){
     const base = upwindVec();
-    const half = Math.max(5, deadZoneDeg / 2) * Math.PI / 180;
+    const half = Math.max(5, deadZoneDeg) * Math.PI / 180;
     return [
       rotateVec(base, half),
       rotateVec(base, -half)

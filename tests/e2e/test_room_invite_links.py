@@ -4,7 +4,7 @@ import re
 
 import pytest
 
-from .helpers import build_realtime_state, load_app, wait_for_room
+from .helpers import build_realtime_state, create_room, load_app, wait_for_room
 
 
 pytestmark = [pytest.mark.e2e, pytest.mark.network]
@@ -183,3 +183,88 @@ def test_stale_page_refreshes_before_opening_room(page, base_url):
     notice = page.locator("#roomNotice").inner_text().strip()
 
     assert f"{base_url}/?room={room_code}&join=1" in notice
+
+
+def test_second_invite_link_stays_on_join_flow_even_with_previous_room_session(browser, base_url):
+    host_one_page = browser.new_page()
+    host_two_page = browser.new_page()
+    guest_page = browser.new_page()
+    try:
+        load_app(host_one_page, base_url)
+        load_app(host_two_page, base_url)
+
+        room_one_code = create_room(
+            host_one_page,
+            build_realtime_state(host_one_page, "overlay", countdown=False),
+            display_name="Host One",
+        )
+        room_two_code = create_room(
+            host_two_page,
+            build_realtime_state(host_two_page, "overlay", countdown=False),
+            display_name="Host Two",
+        )
+
+        guest_page.goto(f"{base_url}/?room={room_one_code}&join=1", wait_until="networkidle")
+        guest_page.wait_for_function("() => !!window.RegattaApp && !!window.RegattaMultiplayer")
+        guest_page.wait_for_function(
+            """(expectedCode) => {
+                const overlay = document.getElementById("mainMenuOverlay");
+                const room = window.RegattaMultiplayer.getRoomState().room;
+                const inviteCode = document.getElementById("menuInviteRoomCode");
+                return overlay?.dataset?.screen === "invite"
+                    && !room
+                    && inviteCode?.textContent?.includes(expectedCode);
+            }""",
+            arg=room_one_code,
+        )
+
+        guest_page.locator("#menuInviteDisplayName").fill("Crewmate")
+        guest_page.locator("#menuInviteContinue").click()
+        guest_page.wait_for_function(
+            """({ expectedCode, expectedName }) => {
+                const room = window.RegattaMultiplayer.getRoomState().room;
+                const self = room?.players?.find((player) => player.is_self);
+                return !!room
+                    && room.code === expectedCode
+                    && self?.name === expectedName;
+            }""",
+            arg={"expectedCode": room_one_code, "expectedName": "Crewmate"},
+        )
+
+        guest_page.goto(f"{base_url}/?room={room_two_code}&join=1", wait_until="networkidle")
+        guest_page.wait_for_function("() => !!window.RegattaApp && !!window.RegattaMultiplayer")
+        guest_page.wait_for_function(
+            """(expectedCode) => {
+                const overlay = document.getElementById("mainMenuOverlay");
+                const room = window.RegattaMultiplayer.getRoomState().room;
+                const inviteCode = document.getElementById("menuInviteRoomCode");
+                return overlay?.dataset?.screen === "invite"
+                    && !room
+                    && inviteCode?.textContent?.includes(expectedCode);
+            }""",
+            arg=room_two_code,
+        )
+
+        guest_page.locator("#menuInviteDisplayName").fill("Crewmate Two")
+        guest_page.locator("#menuInviteContinue").click()
+        guest_page.wait_for_function(
+            """({ expectedCode, expectedName }) => {
+                const room = window.RegattaMultiplayer.getRoomState().room;
+                const self = room?.players?.find((player) => player.is_self);
+                return !!room
+                    && room.code === expectedCode
+                    && self?.name === expectedName;
+            }""",
+            arg={"expectedCode": room_two_code, "expectedName": "Crewmate Two"},
+        )
+
+        joined_room = wait_for_room(
+            host_two_page,
+            room_two_code,
+            lambda room: bool(room and room.get("joined_count") == 2),
+        )
+        assert joined_room["code"] == room_two_code
+    finally:
+        guest_page.context.close()
+        host_two_page.context.close()
+        host_one_page.context.close()

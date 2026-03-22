@@ -52,6 +52,13 @@ document.addEventListener("DOMContentLoaded", () => {
     };
   }
 
+  function joinLinkOverridesRoom(room, pendingJoinLink = getJoinLinkState()) {
+    const roomCode = typeof room?.code === "string"
+      ? room.code.trim().toUpperCase()
+      : "";
+    return !!pendingJoinLink?.roomCode && !!roomCode && roomCode !== pendingJoinLink.roomCode;
+  }
+
   function setupLockedControls() {
     return Array.from(document.querySelectorAll("[data-room-lock='setup']"));
   }
@@ -1256,17 +1263,21 @@ document.addEventListener("DOMContentLoaded", () => {
       if (payload.display_name) {
         displayNameInput.value = payload.display_name;
       }
-      if (payload.room) {
+      const pendingJoinLink = getJoinLinkState();
+      const holdInviteFlow = joinLinkOverridesRoom(payload.room, pendingJoinLink);
+      if (payload.room && !holdInviteFlow) {
         handleIncomingRoom(payload.room);
         ensureSocket();
       } else {
+        if (holdInviteFlow) {
+          disconnectSocket();
+        }
         renderRoom(null);
       }
 
-      const pendingJoinLink = getJoinLinkState();
       if (pendingJoinLink?.roomCode) {
         joinRoomCodeInput.value = pendingJoinLink.roomCode;
-        if (payload.room?.code && payload.room.code === pendingJoinLink.roomCode) {
+        if (!holdInviteFlow && payload.room?.code && payload.room.code === pendingJoinLink.roomCode) {
           joinLinkState.handled = true;
           clearJoinLinkQuery();
         } else {
