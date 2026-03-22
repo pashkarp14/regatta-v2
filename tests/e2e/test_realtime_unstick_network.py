@@ -133,3 +133,93 @@ def test_network_realtime_unstick_breaks_active_boat_pressure_jam(browser, base_
     finally:
         guest_page.context.close()
         host_page.context.close()
+
+
+def test_network_realtime_unstick_breaks_active_mark_deadlock(browser, base_url):
+    host_page = browser.new_page()
+    guest_page = browser.new_page()
+    try:
+        load_app(host_page, base_url)
+        load_app(guest_page, base_url)
+        state = build_realtime_state(host_page, "overlay", countdown=True)
+        state["boats"][0]["x"] = 10.0
+        state["boats"][0]["y"] = 10.0
+        state["boats"][0]["heading"] = 0.0
+        state["boats"][0]["hasHeading"] = True
+        state["boats"][1]["x"] = 24.0
+        state["boats"][1]["y"] = 24.0
+        state["boats"][1]["heading"] = 0.0
+        state["boats"][1]["hasHeading"] = True
+        state["course"]["marks"] = [{"x": 11.35, "y": 10.0}]
+        state["course"]["markCount"] = 1
+        before_clearance = mark_segment_distance(state)
+        room_code = create_room(host_page, state)
+        guest_page.evaluate(
+            """async (roomCode) => {
+                document.getElementById("displayName").value = "Guest";
+                document.getElementById("joinRoomCode").value = roomCode;
+                await window.RegattaMultiplayer.joinRoom();
+            }""",
+            room_code,
+        )
+        start_room(host_page, state, room_code=room_code)
+        move_pointer_to_world(host_page, {"x": 20.0, "y": 10.0})
+        room = wait_for_room(
+            host_page,
+            room_code,
+            lambda current_room: (
+                current_room is not None
+                and mark_segment_distance(current_room["game_state"]) > before_clearance + 0.02
+            ),
+            timeout_ms=4_000,
+            interval_ms=200,
+        )
+        assert room["status"] == "live"
+    finally:
+        guest_page.context.close()
+        host_page.context.close()
+
+
+def test_network_realtime_unstick_breaks_one_sided_boat_deadlock(browser, base_url):
+    host_page = browser.new_page()
+    guest_page = browser.new_page()
+    try:
+        load_app(host_page, base_url)
+        load_app(guest_page, base_url)
+        state = build_realtime_state(host_page, "overlay", countdown=True)
+        state["boats"][0]["x"] = 10.0
+        state["boats"][0]["y"] = 10.0
+        state["boats"][0]["heading"] = 0.0
+        state["boats"][0]["hasHeading"] = True
+        state["boats"][1]["x"] = 11.75
+        state["boats"][1]["y"] = 10.0
+        state["boats"][1]["heading"] = 0.0
+        state["boats"][1]["hasHeading"] = True
+        state["course"]["marks"] = [{"x": 26.0, "y": 26.0}]
+        state["course"]["markCount"] = 1
+        before_clearance = boat_segment_distance(state)
+        room_code = create_room(host_page, state)
+        guest_page.evaluate(
+            """async (roomCode) => {
+                document.getElementById("displayName").value = "Guest";
+                document.getElementById("joinRoomCode").value = roomCode;
+                await window.RegattaMultiplayer.joinRoom();
+            }""",
+            room_code,
+        )
+        start_room(host_page, state, room_code=room_code)
+        move_pointer_to_world(host_page, {"x": 20.0, "y": 10.0})
+        room = wait_for_room(
+            host_page,
+            room_code,
+            lambda current_room: (
+                current_room is not None
+                and boat_segment_distance(current_room["game_state"]) > before_clearance + 0.02
+            ),
+            timeout_ms=4_000,
+            interval_ms=200,
+        )
+        assert room["status"] == "live"
+    finally:
+        guest_page.context.close()
+        host_page.context.close()

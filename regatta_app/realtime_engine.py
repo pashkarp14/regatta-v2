@@ -572,6 +572,309 @@ def best_boat_unstick_pair(
     return best_pair
 
 
+def best_single_boat_unstick_position(
+    position: dict[str, float],
+    heading: float,
+    has_heading: bool,
+    other_position: dict[str, float],
+    other_heading: float,
+    other_has_heading: bool,
+    push_distance: float,
+    primary: dict[str, float],
+    fallback: dict[str, float],
+    *,
+    world_w: float,
+    world_h: float,
+) -> dict[str, float] | None:
+    other_axis = boat_axis_unit(other_heading, other_has_heading)
+    other_perpendicular = {"x": -other_axis["y"], "y": other_axis["x"]}
+    directions = separation_direction_candidates(
+        primary,
+        fallback,
+        heading=heading,
+        has_heading=has_heading,
+        extra_vectors=[
+            other_axis,
+            {"x": -other_axis["x"], "y": -other_axis["y"]},
+            other_perpendicular,
+            {"x": -other_perpendicular["x"], "y": -other_perpendicular["y"]},
+        ],
+    )
+    other_capsule = boat_capsule_at(other_position, other_heading, other_has_heading)
+    best_position: dict[str, float] | None = None
+    best_clearance = -math.inf
+    best_movement = 0.0
+
+    for direction in directions:
+        next_position = clamp_position_to_capsule_field(
+            {
+                "x": position["x"] + direction["x"] * push_distance,
+                "y": position["y"] + direction["y"] * push_distance,
+            },
+            heading,
+            has_heading,
+            world_w,
+            world_h,
+            BOAT_CLEARANCE_MARGIN,
+        )
+        moved = dist(position, next_position)
+        if moved <= 1e-6:
+            continue
+
+        next_capsule = boat_capsule_at(next_position, heading, has_heading)
+        _, _, next_clearance = segment_segment_closest_points(
+            next_capsule["a"],
+            next_capsule["b"],
+            other_capsule["a"],
+            other_capsule["b"],
+        )
+        if (
+            best_position is None
+            or next_clearance > best_clearance + 1e-6
+            or (abs(next_clearance - best_clearance) <= 1e-6 and moved > best_movement + 1e-6)
+        ):
+            best_position = next_position
+            best_clearance = next_clearance
+            best_movement = moved
+
+    return best_position
+
+
+def proposal_escape_direction(proposal: dict[str, Any] | None) -> dict[str, float]:
+    motion = proposal_motion_unit(proposal)
+    if motion is None:
+        return {"x": 0.0, "y": 0.0}
+    return {"x": -motion["x"], "y": -motion["y"]}
+
+
+def resolve_realtime_stuck_motion(
+    boats: list[dict[str, Any]],
+    proposals: list[dict[str, Any]],
+    blocked_events: list[dict[str, Any]],
+    *,
+    world_w: float,
+    world_h: float,
+) -> bool:
+    changed = False
+
+    for event in blocked_events:
+        kind = str(event.get("kind") or "")
+        boat_index = int(event.get("boat_index") or 0)
+        if not (0 <= boat_index < len(boats)):
+            continue
+
+        proposal = proposals[boat_index] if boat_index < len(proposals) else None
+        if not isinstance(proposal, dict) or not proposal.get("accepted"):
+            continue
+        proposal_distance = float(proposal.get("distance") or 0.0)
+        if proposal_distance <= 1e-5:
+            continue
+
+        boat = boats[boat_index]
+        position = boat_position(boat)
+        heading = float(boat.get("heading") or 0.0)
+        has_heading = bool(boat.get("hasHeading"))
+        reverse_motion = proposal_escape_direction(proposal)
+
+        if kind == "mark":
+            mark = event.get("mark")
+            mark_index = int(event.get("mark_index") or 0)
+            if not isinstance(mark, dict):
+                continue
+            capsule = boat_capsule_at(position, heading, has_heading)
+            current_distance, nearest_point, _ = point_to_segment(mark, capsule["a"], capsule["b"])
+            required_distance = capsule["r"] + MARK_RADIUS + MARK_CLEARANCE_MARGIN
+            push_distance = max(
+                PRESSURE_UNSTICK_MIN_PUSH,
+                min(PRESSURE_UNSTICK_EXTRA_CLEARANCE, proposal_distance),
+                required_distance - current_distance + UNSTICK_PUSH_EPS,
+            )
+            primary = {"x": nearest_point["x"] - float(mark["x"]), "y": nearest_point["y"] - float(mark["y"])}
+            fallback = reverse_motion
+            _log_realtime_event(
+                "realtime.stuck.mark.detected",
+                boat_index=boat_index,
+                mark_index=mark_index,
+                boat_pos=position,
+                mark_pos=mark,
+                current_distance=current_distance,
+                required_distance=required_distance,
+                proposal_distance=proposal_distance,
+                push_distance=push_distance,
+            )
+            next_position = best_mark_unstick_position(
+                position,
+                mark,
+                heading,
+                has_heading,
+                push_distance,
+                primary,
+                fallback,
+                world_w=world_w,
+                world_h=world_h,
+            )
+            if next_position is None:
+                _log_realtime_event(
+                    "realtime.stuck.mark.unresolved",
+                    boat_index=boat_index,
+                    mark_index=mark_index,
+                    boat_pos=position,
+                    mark_pos=mark,
+                    current_distance=current_distance,
+                    required_distance=required_distance,
+                    proposal_distance=proposal_distance,
+                    push_distance=push_distance,
+                    reason="no_candidate",
+                )
+                continue
+
+            next_capsule = boat_capsule_at(next_position, heading, has_heading)
+            next_clearance, _, _ = point_to_segment(mark, next_capsule["a"], next_capsule["b"])
+            if dist(position, next_position) <= 1e-6:
+                _log_realtime_event(
+                    "realtime.stuck.mark.unresolved",
+                    boat_index=boat_index,
+                    mark_index=mark_index,
+                    boat_pos=position,
+                    mark_pos=mark,
+                    current_distance=current_distance,
+                    required_distance=required_distance,
+                    proposal_distance=proposal_distance,
+                    push_distance=push_distance,
+                    reason="zero_move",
+                )
+                continue
+
+            boat["x"] = next_position["x"]
+            boat["y"] = next_position["y"]
+            boat["currentSpeedUnitsPerSec"] = 0.0
+            changed = True
+            _log_realtime_event(
+                "realtime.stuck.mark.resolved",
+                boat_index=boat_index,
+                mark_index=mark_index,
+                from_pos=position,
+                to_pos=next_position,
+                moved=dist(position, next_position),
+                push_distance=push_distance,
+                selected_clearance=next_clearance,
+            )
+            continue
+
+        if kind == "boats":
+            other_index = int(event.get("other_index") or -1)
+            if not (0 <= other_index < len(boats)) or other_index == boat_index:
+                continue
+
+            other_boat = boats[other_index]
+            other_position = boat_position(other_boat)
+            other_heading = float(other_boat.get("heading") or 0.0)
+            other_has_heading = bool(other_boat.get("hasHeading"))
+            capsule = boat_capsule_at(position, heading, has_heading)
+            other_capsule = boat_capsule_at(other_position, other_heading, other_has_heading)
+            closest_self, closest_other, current_distance = segment_segment_closest_points(
+                capsule["a"],
+                capsule["b"],
+                other_capsule["a"],
+                other_capsule["b"],
+            )
+            required_distance = capsule["r"] + other_capsule["r"] + BOAT_CLEARANCE_MARGIN
+            push_distance = max(
+                PRESSURE_UNSTICK_MIN_PUSH,
+                min(PRESSURE_UNSTICK_EXTRA_CLEARANCE, proposal_distance),
+                required_distance - current_distance + UNSTICK_PUSH_EPS,
+            )
+            primary = {
+                "x": closest_self["x"] - closest_other["x"],
+                "y": closest_self["y"] - closest_other["y"],
+            }
+            fallback = reverse_motion
+            other_proposal = proposals[other_index] if other_index < len(proposals) else None
+            other_moving = bool((other_proposal or {}).get("accepted")) and float((other_proposal or {}).get("distance") or 0.0) > 1e-5
+            _log_realtime_event(
+                "realtime.stuck.boats.detected",
+                boat_index=boat_index,
+                other_index=other_index,
+                boat_pos=position,
+                other_pos=other_position,
+                current_distance=current_distance,
+                required_distance=required_distance,
+                proposal_distance=proposal_distance,
+                push_distance=push_distance,
+                other_moving=other_moving,
+            )
+            next_position = best_single_boat_unstick_position(
+                position,
+                heading,
+                has_heading,
+                other_position,
+                other_heading,
+                other_has_heading,
+                push_distance,
+                primary,
+                fallback,
+                world_w=world_w,
+                world_h=world_h,
+            )
+            if next_position is None:
+                _log_realtime_event(
+                    "realtime.stuck.boats.unresolved",
+                    boat_index=boat_index,
+                    other_index=other_index,
+                    boat_pos=position,
+                    other_pos=other_position,
+                    current_distance=current_distance,
+                    required_distance=required_distance,
+                    proposal_distance=proposal_distance,
+                    push_distance=push_distance,
+                    other_moving=other_moving,
+                    reason="no_candidate",
+                )
+                continue
+
+            next_capsule = boat_capsule_at(next_position, heading, has_heading)
+            _, _, next_clearance = segment_segment_closest_points(
+                next_capsule["a"],
+                next_capsule["b"],
+                other_capsule["a"],
+                other_capsule["b"],
+            )
+            if dist(position, next_position) <= 1e-6:
+                _log_realtime_event(
+                    "realtime.stuck.boats.unresolved",
+                    boat_index=boat_index,
+                    other_index=other_index,
+                    boat_pos=position,
+                    other_pos=other_position,
+                    current_distance=current_distance,
+                    required_distance=required_distance,
+                    proposal_distance=proposal_distance,
+                    push_distance=push_distance,
+                    other_moving=other_moving,
+                    reason="zero_move",
+                )
+                continue
+
+            boat["x"] = next_position["x"]
+            boat["y"] = next_position["y"]
+            boat["currentSpeedUnitsPerSec"] = 0.0
+            changed = True
+            _log_realtime_event(
+                "realtime.stuck.boats.resolved",
+                boat_index=boat_index,
+                other_index=other_index,
+                from_pos=position,
+                to_pos=next_position,
+                other_pos=other_position,
+                moved=dist(position, next_position),
+                push_distance=push_distance,
+                selected_clearance=next_clearance,
+                other_moving=other_moving,
+            )
+
+    return changed
+
+
 def downwind_vec(wind_angle_deg: float) -> dict[str, float]:
     t = wind_angle_deg * math.pi / 180.0
     return {"x": math.sin(t), "y": -math.cos(t)}
@@ -1887,6 +2190,7 @@ def simulate_realtime_tick(game_state: dict[str, Any], controls: dict[int, dict[
 
     invalid: set[int] = set()
     pressure_pairs: set[tuple[int, int]] = set()
+    blocked_events: dict[int, dict[str, Any]] = {}
 
     for index, proposal in enumerate(proposals):
         if not proposal["accepted"]:
@@ -1909,6 +2213,15 @@ def simulate_realtime_tick(game_state: dict[str, Any], controls: dict[int, dict[
             required_mark_distance = candidate_capsule["r"] + MARK_RADIUS + MARK_CLEARANCE_MARGIN
             mark_distance, _, _ = point_to_segment(mark, candidate_capsule["a"], candidate_capsule["b"])
             if mark_distance < required_mark_distance - 1e-9:
+                blocked_events.setdefault(
+                    index,
+                    {
+                        "kind": "mark",
+                        "boat_index": index,
+                        "mark_index": mark_index,
+                        "mark": {"x": float(mark["x"]), "y": float(mark["y"])},
+                    },
+                )
                 _log_mark_collision_detected(
                     boat_index=index,
                     mark_index=mark_index,
@@ -1925,6 +2238,15 @@ def simulate_realtime_tick(game_state: dict[str, Any], controls: dict[int, dict[
             sweep_required_distance = MARK_RADIUS + BOAT_SWEEP_RADIUS + MARK_CLEARANCE_MARGIN
             sweep_distance = segment_distance_to_point(proposal["prev"], dest, mark)
             if sweep_distance < sweep_required_distance - 1e-9:
+                blocked_events.setdefault(
+                    index,
+                    {
+                        "kind": "mark",
+                        "boat_index": index,
+                        "mark_index": mark_index,
+                        "mark": {"x": float(mark["x"]), "y": float(mark["y"])},
+                    },
+                )
                 _log_mark_collision_detected(
                     boat_index=index,
                     mark_index=mark_index,
@@ -1962,6 +2284,14 @@ def simulate_realtime_tick(game_state: dict[str, Any], controls: dict[int, dict[
                     pressure_pair_added = bool(other_proposal["accepted"])
                     if pressure_pair_added:
                         pressure_pairs.add((min(index, other_index), max(index, other_index)))
+                    blocked_events.setdefault(
+                        index,
+                        {
+                            "kind": "boats",
+                            "boat_index": index,
+                            "other_index": other_index,
+                        },
+                    )
                     _log_boat_collision_detected(
                         scope="proposal_vs_current",
                         collision_kind="overlap",
@@ -1985,6 +2315,14 @@ def simulate_realtime_tick(game_state: dict[str, Any], controls: dict[int, dict[
                     pressure_pair_added = bool(other_proposal["accepted"])
                     if pressure_pair_added:
                         pressure_pairs.add((min(index, other_index), max(index, other_index)))
+                    blocked_events.setdefault(
+                        index,
+                        {
+                            "kind": "boats",
+                            "boat_index": index,
+                            "other_index": other_index,
+                        },
+                    )
                     _log_boat_collision_detected(
                         scope="proposal_vs_current",
                         collision_kind="sweep",
@@ -2116,6 +2454,27 @@ def simulate_realtime_tick(game_state: dict[str, Any], controls: dict[int, dict[
     )
     changed = pressure_changed or changed
     if pressure_changed:
+        changed = (
+            resolve_realtime_overlaps(
+                boats,
+                marks,
+                mark_count,
+                settings,
+                world_w=world_w,
+                world_h=world_h,
+                wind_angle_deg=wind_angle_deg,
+            )
+            or changed
+        )
+    stuck_changed = resolve_realtime_stuck_motion(
+        boats,
+        proposals,
+        list(blocked_events.values()),
+        world_w=world_w,
+        world_h=world_h,
+    )
+    changed = stuck_changed or changed
+    if stuck_changed:
         changed = (
             resolve_realtime_overlaps(
                 boats,

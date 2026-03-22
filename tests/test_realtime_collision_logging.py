@@ -7,9 +7,16 @@ import pytest
 
 from regatta_app.factory import create_app
 from regatta_app.realtime_engine import (
+    boat_capsule_at,
+    point_to_segment,
     resolve_realtime_overlaps,
     resolve_realtime_pressure_jams,
+    segment_segment_distance,
     simulate_realtime_tick,
+    BOAT_CLEARANCE_MARGIN,
+    BOAT_COLLISION_RADIUS,
+    MARK_CLEARANCE_MARGIN,
+    MARK_RADIUS,
 )
 
 
@@ -79,6 +86,32 @@ def make_realtime_state(boats: list[dict], *, marks: list[dict] | None = None) -
         },
         "boats": boats,
     }
+
+
+def boat_mark_clearance(state: dict, boat_index: int = 0, mark_index: int = 0) -> float:
+    boat = state["boats"][boat_index]
+    capsule = boat_capsule_at(
+        {"x": float(boat["x"]), "y": float(boat["y"])},
+        float(boat.get("heading") or 0.0),
+        bool(boat.get("hasHeading")),
+    )
+    return point_to_segment(state["course"]["marks"][mark_index], capsule["a"], capsule["b"])[0]
+
+
+def boat_boat_clearance(state: dict, left_index: int = 0, right_index: int = 1) -> float:
+    left = state["boats"][left_index]
+    right = state["boats"][right_index]
+    left_capsule = boat_capsule_at(
+        {"x": float(left["x"]), "y": float(left["y"])},
+        float(left.get("heading") or 0.0),
+        bool(left.get("hasHeading")),
+    )
+    right_capsule = boat_capsule_at(
+        {"x": float(right["x"]), "y": float(right["y"])},
+        float(right.get("heading") or 0.0),
+        bool(right.get("hasHeading")),
+    )
+    return segment_segment_distance(left_capsule["a"], left_capsule["b"], right_capsule["a"], right_capsule["b"])
 
 
 @pytest.fixture
@@ -226,3 +259,57 @@ def test_simulate_realtime_tick_logs_boats_collision_detection_before_unstick(ap
     assert "boat_index=0" in messages
     assert "other_index=1" in messages
     assert "other_moving=false" in messages
+
+
+def test_simulate_realtime_tick_unsticks_active_mark_deadlock(app, caplog):
+    game_state = make_realtime_state(
+        [make_boat(10.0, 10.0, heading=0.0, has_heading=True)],
+        marks=[{"x": 11.35, "y": 10.0}],
+    )
+    controls = {
+        0: {
+            "active": True,
+            "target": {"x": 20.0, "y": 10.0},
+        }
+    }
+    before_clearance = boat_mark_clearance(game_state)
+    required_clearance = BOAT_COLLISION_RADIUS + MARK_RADIUS + MARK_CLEARANCE_MARGIN
+
+    with app.app_context(), caplog.at_level(logging.INFO, logger=app.logger.name):
+        changed = simulate_realtime_tick(game_state, controls, 0.5, 10_000)
+
+    after_clearance = boat_mark_clearance(game_state)
+    messages = "\n".join(record.getMessage() for record in caplog.records)
+    assert changed is True
+    assert after_clearance > before_clearance + 0.02
+    assert after_clearance >= required_clearance - 0.02
+    assert "realtime.stuck.mark.detected" in messages
+    assert "realtime.stuck.mark.resolved" in messages
+
+
+def test_simulate_realtime_tick_unsticks_active_boats_deadlock(app, caplog):
+    game_state = make_realtime_state(
+        [
+            make_boat(10.0, 10.0, heading=0.0, has_heading=True),
+            make_boat(11.75, 10.0, heading=0.0, has_heading=True),
+        ]
+    )
+    controls = {
+        0: {
+            "active": True,
+            "target": {"x": 20.0, "y": 10.0},
+        }
+    }
+    before_clearance = boat_boat_clearance(game_state)
+    required_clearance = BOAT_COLLISION_RADIUS * 2 + BOAT_CLEARANCE_MARGIN
+
+    with app.app_context(), caplog.at_level(logging.INFO, logger=app.logger.name):
+        changed = simulate_realtime_tick(game_state, controls, 0.5, 10_000)
+
+    after_clearance = boat_boat_clearance(game_state)
+    messages = "\n".join(record.getMessage() for record in caplog.records)
+    assert changed is True
+    assert after_clearance > before_clearance + 0.02
+    assert after_clearance >= required_clearance - 0.02
+    assert "realtime.stuck.boats.detected" in messages
+    assert "realtime.stuck.boats.resolved" in messages
