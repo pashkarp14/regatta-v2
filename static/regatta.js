@@ -4162,6 +4162,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const previousBoats = boats.slice();
     const realtimeStartDepth = Math.min(PRESTART_DEPTH * 0.35, 1.25);
     const prestartNormal = prestartNormalUnit();
+    const keepCountdownPreview = isLocalRealtimeMode() || isLobbyPreviewMode();
     const shouldRandomizeBehindStart = (randomizeBehindStart === null)
       ? isRealtimePlayMode()
       : !!randomizeBehindStart;
@@ -4172,7 +4173,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     prestartRoundsSetting = 0;
     prestartRoundsLeft = 0;
-    phase = isLocalRealtimeMode() ? "countdown" : "race";
+    phase = keepCountdownPreview ? "countdown" : "race";
 
     for (let i=0;i<n;i++){
       boats.push({
@@ -4230,7 +4231,7 @@ document.addEventListener("DOMContentLoaded", () => {
     hybridMovesLeft = [];
     resetLocalRealtimePauseState();
     multiplayerRealtimePauseStartedAtMs = 0;
-    realtimeCountdownEndsAt = (isLocalRealtimeMode() && armRealtime)
+    realtimeCountdownEndsAt = (keepCountdownPreview && armRealtime)
       ? (currentRaceTimeMs() + (realtimePrepSeconds * 1000))
       : 0;
     realtimeCursorTarget = null;
@@ -4681,7 +4682,7 @@ document.addEventListener("DOMContentLoaded", () => {
         phase,
         realtimePaused: isMultiplayerRealtimePaused(),
         realtimePauseStartedAt: isMultiplayerRealtimePaused() ? multiplayerRealtimePauseStartedAtMs : 0,
-        isLobbyPreview: false
+        isLobbyPreview: isLobbyPreviewMode()
       },
       boats: boats.map((boat) => ({
         x: boat.x,

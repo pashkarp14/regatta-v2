@@ -255,7 +255,7 @@ def normalize_lobby_preview_state(game_state: Any) -> dict[str, Any]:
             round_sweep_default=0.0,
         )
 
-    race["phase"] = "race"
+    race["phase"] = "countdown"
     race["realtimeCountdownEndsAt"] = 0
     race["realtimePaused"] = False
     race["realtimePauseStartedAt"] = 0

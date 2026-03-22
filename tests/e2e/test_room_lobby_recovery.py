@@ -217,3 +217,50 @@ def test_host_can_restore_initial_lobby_snapshot_without_dropping_players(browse
     finally:
         guest_page.context.close()
         host_page.context.close()
+
+
+def test_host_reset_in_lobby_preview_keeps_countdown_phase(browser, base_url):
+    host_page = browser.new_page()
+    guest_page = browser.new_page()
+    try:
+        load_app(host_page, base_url)
+        load_app(guest_page, base_url)
+        state = build_realtime_state(host_page, "overlay", countdown=False)
+        room_code = create_room(host_page, state)
+        _join_guest(guest_page, room_code)
+        wait_for_room(host_page, room_code, lambda room: bool(room and room.get("start_ready")))
+        start_room(host_page, state, room_code=room_code)
+
+        edit_result = _edit_room(host_page)
+        assert edit_result["ok"], edit_result
+
+        lobby_room = wait_for_room(
+            host_page,
+            room_code,
+            lambda room: bool(room and room.get("status") == "lobby"),
+        )
+        assert lobby_room["game_state"]["race"]["phase"] == "countdown"
+        assert lobby_room["game_state"]["race"]["isLobbyPreview"] is True
+
+        host_page.evaluate("""() => window.RegattaApp.resetRaceToReadyState()""")
+
+        host_page.wait_for_function(
+            """() => {
+                const state = window.RegattaApp.exportState();
+                return state?.race?.phase === "countdown" && state?.race?.isLobbyPreview === true;
+            }"""
+        )
+        lobby_room = wait_for_room(
+            host_page,
+            room_code,
+            lambda room: bool(
+                room
+                and room.get("status") == "lobby"
+                and (room.get("game_state", {}).get("race") or {}).get("phase") == "countdown"
+                and (room.get("game_state", {}).get("race") or {}).get("isLobbyPreview") is True
+            ),
+        )
+        assert lobby_room["code"] == room_code
+    finally:
+        guest_page.context.close()
+        host_page.context.close()
