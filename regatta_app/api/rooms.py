@@ -4,10 +4,12 @@ from typing import Any
 
 from flask import Blueprint, current_app, request
 
+from ..app_state import room_store
 from ..game_state import room_requires_live_loop
 from ..room_events import broadcast_room_snapshot, serialize_room
 from ..room_service import (
     create_room_from_payload,
+    current_room,
     edit_room_match,
     join_room_from_payload,
     kick_room_player,
@@ -16,6 +18,7 @@ from ..room_service import (
     room_view,
     start_room_match,
 )
+from ..session_state import clear_room_session, current_session_state
 from ..sockets import emit_room_kicked, ensure_realtime_room_loop, pop_realtime_control, remap_realtime_controls
 
 
@@ -68,6 +71,24 @@ def join_room():
 
 @bp.post("/api/rooms/leave")
 def leave_room():
+    session_state = current_session_state()
+    room_before = current_room()
+    leaving_token = session_state.player_token
+
+    if room_before is not None and leaving_token and room_before.get("host_token") == leaving_token:
+        room_code = room_before["code"]
+        displaced_tokens = [
+            player.get("token")
+            for player in room_before.get("players", [])
+            if player.get("token") and player.get("token") != leaving_token
+        ]
+        room_store().delete_room(room_code)
+        clear_room_session()
+        pop_realtime_control(room_code)
+        for token in displaced_tokens:
+            emit_room_kicked(room_code, token)
+        return {"room": None}
+
     room_code, room = leave_current_room()
     if room_code and room is not None:
         if room_requires_live_loop(room):
