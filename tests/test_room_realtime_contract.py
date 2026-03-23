@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import pytest
 
+from regatta_app import sockets as realtime_sockets
 from regatta_app.factory import create_app
 from regatta_app.extensions import socketio
 
@@ -232,3 +234,55 @@ def test_kicked_player_receives_room_kicked_socket_event(app, client_factory):
 
     events = socket_client.get_received()
     assert any(event["name"] == "room:kicked" for event in events), events
+
+
+def test_live_room_loop_stops_after_last_socket_disconnect(app, client_factory):
+    host = client_factory()
+    guest = client_factory()
+
+    room = create_room(host, host_role="player", state=make_realtime_state(2))
+    room_code = room["code"]
+    join_room(guest, room_code, "Guest")
+
+    latest_room = fetch_room(host, room_code)
+    start_response = host.post(
+        f"/api/rooms/{room_code}/start",
+        json={
+            "arm_realtime": True,
+            "game_state": latest_room["game_state"],
+        },
+    )
+    assert start_response.status_code == 200, start_response.get_json()
+
+    host_socket = socketio.test_client(app, flask_test_client=host)
+    guest_socket = socketio.test_client(app, flask_test_client=guest)
+    assert host_socket.is_connected()
+    assert guest_socket.is_connected()
+
+    host_socket.emit("room:join_socket", {"room_code": room_code})
+    guest_socket.emit("room:join_socket", {"room_code": room_code})
+    host_socket.get_received()
+    guest_socket.get_received()
+
+    deadline = time.time() + 1.0
+    while time.time() < deadline:
+        with realtime_sockets._realtime_lock:
+            if room_code in realtime_sockets._realtime_loops:
+                break
+        time.sleep(0.02)
+
+    with realtime_sockets._realtime_lock:
+        assert room_code in realtime_sockets._realtime_loops
+
+    host_socket.disconnect()
+    guest_socket.disconnect()
+
+    deadline = time.time() + 1.5
+    while time.time() < deadline:
+        with realtime_sockets._realtime_lock:
+            if room_code not in realtime_sockets._realtime_loops:
+                break
+        time.sleep(0.02)
+
+    with realtime_sockets._realtime_lock:
+        assert room_code not in realtime_sockets._realtime_loops

@@ -116,6 +116,11 @@ def any_active_control(controls: dict[int, dict[str, Any]]) -> bool:
     return any(control.get("active") for control in controls.values())
 
 
+def room_has_connected_socket(room_code: str) -> bool:
+    with _realtime_lock:
+        return any(saved_room_code == room_code for saved_room_code, _ in _socket_memberships.values())
+
+
 def register_player_socket(sid: str, room_code: str, player_token: str) -> None:
     with _realtime_lock:
         previous = _socket_memberships.pop(sid, None)
@@ -177,6 +182,9 @@ def run_realtime_room_loop(app, room_code: str) -> None:
             with app.app_context():
                 room = room_store().get_room(room_code)
                 if room is None:
+                    break
+
+                if room.get("status") == "live" and not room_has_connected_socket(room_code):
                     break
 
                 now_ms = int(time.time() * 1000)
