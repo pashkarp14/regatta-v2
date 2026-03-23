@@ -54,7 +54,8 @@ document.addEventListener("DOMContentLoaded", () => {
     if (room) {
       try {
         await window.RegattaMultiplayer?.leaveRoom?.();
-      } catch (_) {}
+      } catch (_) {
+      }
       clearSession();
       window.location.replace(window.location.pathname);
       return;
@@ -95,7 +96,11 @@ document.addEventListener("DOMContentLoaded", () => {
     window.RegattaApp.importState = (...args) => {
       const result = originalImportState(...args);
       const room = window.RegattaMultiplayer?.getRoomState?.().room || null;
-      if (room) setRoomSession(room.code); else setLocalSession();
+      if (room) {
+        setRoomSession(room.code);
+      } else {
+        setLocalSession();
+      }
       return result;
     };
   }
@@ -105,7 +110,11 @@ document.addEventListener("DOMContentLoaded", () => {
     window.RegattaApp.resetRaceToReadyState = async (...args) => {
       const result = await originalResetRaceToReadyState(...args);
       const room = window.RegattaMultiplayer?.getRoomState?.().room || null;
-      if (room) setRoomSession(room.code); else setLocalSession();
+      if (room) {
+        setRoomSession(room.code);
+      } else {
+        setLocalSession();
+      }
       return result;
     };
   }
@@ -142,9 +151,13 @@ document.addEventListener("DOMContentLoaded", () => {
     const room = window.RegattaMultiplayer?.getRoomState?.().room || null;
     if (room?.code) {
       setRoomSession(room.code);
-    } else {
-      const state = readSession();
-      if (state?.kind === "room") clearSession();
+      return;
+    }
+
+    const state = readSession();
+    if (state?.kind === "room") {
+      clearSession();
+      window.location.replace(window.location.pathname);
     }
   });
 
@@ -153,7 +166,8 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!room) return;
     try {
       navigator.sendBeacon("/api/rooms/leave", new Blob([], { type: "application/json" }));
-    } catch (_) {}
+    } catch (_) {
+    }
   });
 
   syncUi();
