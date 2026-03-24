@@ -12,7 +12,7 @@ from .config import get_config
 from .error_handlers import register_error_handlers
 from .extensions import session_ext, socketio
 from .library_store import LibraryStore
-from .room_store import RoomStore
+from .locked_room_store import LockedRoomStore
 from .routes import bp as main_bp
 from .sockets import register_socket_handlers
 
@@ -21,7 +21,6 @@ def build_redis_client(app: Flask) -> Redis | None:
     redis_url = app.config.get("REDIS_URL")
     if not redis_url:
         return None
-    # Flask-Session stores binary payloads in Redis, so responses must stay as bytes.
     return Redis.from_url(redis_url, decode_responses=False)
 
 
@@ -70,7 +69,7 @@ def create_app(config_overrides: Mapping[str, Any] | None = None) -> Flask:
     )
 
     app.extensions["redis_client"] = redis_client
-    app.extensions["room_store"] = RoomStore(redis_client, app.config["ROOM_TTL_SECONDS"])
+    app.extensions["room_store"] = LockedRoomStore(redis_client, app.config["ROOM_TTL_SECONDS"])
     app.extensions["library_store"] = LibraryStore(
         app.config["LIBRARY_DIR"],
         app.config["STANDARD_MAPS_DIR"],
