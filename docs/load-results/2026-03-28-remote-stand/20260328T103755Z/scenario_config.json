@@ -1,0 +1,24 @@
+{
+  "scenario": "live_race",
+  "base_url": "http://158.160.217.19:5001",
+  "users": 4,
+  "rooms": 1,
+  "users_per_room": 4,
+  "duration_seconds": 20,
+  "baseline_snapshot_source": {
+    "strategy": "remote_library",
+    "record_id": "std-training-bay",
+    "record_name": "Тренировочная бухта",
+    "record_scope": "standard"
+  },
+  "started_at": "2026-03-28T10:37:59.530Z",
+  "result": {
+    "rooms": 1,
+    "users": 4,
+    "room_codes": [
+      "SLWY9V"
+    ],
+    "duration_seconds": 20
+  },
+  "finished_at": "2026-03-28T10:38:26.513Z"
+}

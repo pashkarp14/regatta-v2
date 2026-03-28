@@ -1,0 +1,24 @@
+{
+  "scenario": "smoke_1x2",
+  "base_url": "http://158.160.217.19:5001",
+  "users": 2,
+  "rooms": 1,
+  "users_per_room": 2,
+  "duration_seconds": 30,
+  "baseline_snapshot_source": {
+    "strategy": "remote_library",
+    "record_id": "std-training-bay",
+    "record_name": "Тренировочная бухта",
+    "record_scope": "standard"
+  },
+  "started_at": "2026-03-28T10:11:48.317Z",
+  "result": {
+    "rooms": 1,
+    "users": 2,
+    "room_codes": [
+      "IY0T7Q"
+    ],
+    "duration_seconds": 30
+  },
+  "finished_at": "2026-03-28T10:12:22.091Z"
+}

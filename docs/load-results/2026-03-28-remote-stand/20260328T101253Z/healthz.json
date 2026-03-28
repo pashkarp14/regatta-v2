@@ -1,0 +1,18 @@
+{
+  "url": "http://158.160.217.19:5001healthz",
+  "path": "/healthz",
+  "method": "GET",
+  "status": 200,
+  "duration_ms": 23.25,
+  "response_bytes": 175,
+  "body": {
+    "client_telemetry_enabled": true,
+    "metrics_enabled": true,
+    "redis": true,
+    "redis_backend": "redis",
+    "session_backend": "redis",
+    "status": "ok",
+    "structured_logs": true,
+    "version": "2.0.0"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "ts": "2026-03-28T10:34:37.593Z",
+  "message": "Scenario execution failed.",
+  "details": {
+    "scenario": "join_storm_1x20",
+    "error": "Timed out connecting Socket.IO client."
+  }
+}

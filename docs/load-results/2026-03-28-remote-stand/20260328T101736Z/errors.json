@@ -1,0 +1,18 @@
+[
+  {
+    "source": "socket",
+    "event": "connect",
+    "error": "",
+    "user_id": "Skipper-1-7",
+    "room_code": "KH1RUC",
+    "ts": "2026-03-28T10:22:51.921Z"
+  },
+  {
+    "source": "socket",
+    "event": "connect",
+    "error": "",
+    "user_id": "Skipper-1-9",
+    "room_code": "KH1RUC",
+    "ts": "2026-03-28T10:22:51.921Z"
+  }
+]

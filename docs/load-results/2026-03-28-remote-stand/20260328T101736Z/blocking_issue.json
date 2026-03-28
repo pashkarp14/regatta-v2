@@ -1,0 +1,8 @@
+{
+  "ts": "2026-03-28T10:22:51.991Z",
+  "message": "Scenario execution failed.",
+  "details": {
+    "scenario": "join_storm_1x20",
+    "error": ""
+  }
+}

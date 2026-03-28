@@ -1,0 +1,651 @@
+# HELP python_gc_objects_collected_total Objects collected during gc
+# TYPE python_gc_objects_collected_total counter
+python_gc_objects_collected_total{generation="0"} 31552.0
+python_gc_objects_collected_total{generation="1"} 9871.0
+python_gc_objects_collected_total{generation="2"} 301.0
+# HELP python_gc_objects_uncollectable_total Uncollectable objects found during GC
+# TYPE python_gc_objects_uncollectable_total counter
+python_gc_objects_uncollectable_total{generation="0"} 0.0
+python_gc_objects_uncollectable_total{generation="1"} 0.0
+python_gc_objects_uncollectable_total{generation="2"} 0.0
+# HELP python_gc_collections_total Number of times this generation was collected
+# TYPE python_gc_collections_total counter
+python_gc_collections_total{generation="0"} 195.0
+python_gc_collections_total{generation="1"} 17.0
+python_gc_collections_total{generation="2"} 1.0
+# HELP python_info Python platform information
+# TYPE python_info gauge
+python_info{implementation="CPython",major="3",minor="12",patchlevel="13",version="3.12.13"} 1.0
+# HELP process_virtual_memory_bytes Virtual memory size in bytes.
+# TYPE process_virtual_memory_bytes gauge
+process_virtual_memory_bytes 2.35558912e+09
+# HELP process_resident_memory_bytes Resident memory size in bytes.
+# TYPE process_resident_memory_bytes gauge
+process_resident_memory_bytes 6.9763072e+07
+# HELP process_start_time_seconds Start time of the process since unix epoch in seconds.
+# TYPE process_start_time_seconds gauge
+process_start_time_seconds 1.77469099703e+09
+# HELP process_cpu_seconds_total Total user and system CPU time spent in seconds.
+# TYPE process_cpu_seconds_total counter
+process_cpu_seconds_total 6.109999999999999
+# HELP process_open_fds Number of open file descriptors.
+# TYPE process_open_fds gauge
+process_open_fds 27.0
+# HELP process_max_fds Maximum number of open file descriptors.
+# TYPE process_max_fds gauge
+process_max_fds 1024.0
+# HELP regatta_http_requests_total HTTP requests handled by endpoint, method, and status.
+# TYPE regatta_http_requests_total counter
+regatta_http_requests_total{endpoint="/",method="GET",status="200"} 1.0
+regatta_http_requests_total{endpoint="/static/<path:filename>",method="GET",status="500"} 6.0
+regatta_http_requests_total{endpoint="/metrics",method="GET",status="200"} 13.0
+regatta_http_requests_total{endpoint="/healthz",method="GET",status="200"} 9.0
+regatta_http_requests_total{endpoint="/api/bootstrap",method="GET",status="200"} 7.0
+regatta_http_requests_total{endpoint="/api/library/maps",method="GET",status="200"} 7.0
+regatta_http_requests_total{endpoint="/favicon.ico",method="GET",status="404"} 1.0
+regatta_http_requests_total{endpoint="/api/library/maps/<record_id>",method="GET",status="200"} 6.0
+regatta_http_requests_total{endpoint="/api/rooms",method="POST",status="200"} 6.0
+regatta_http_requests_total{endpoint="/api/rooms/join",method="POST",status="200"} 48.0
+regatta_http_requests_total{endpoint="/api/rooms/<room_code>",method="GET",status="200"} 2.0
+regatta_http_requests_total{endpoint="/api/rooms/<room_code>/start",method="POST",status="200"} 2.0
+regatta_http_requests_total{endpoint="/api/rooms/leave",method="POST",status="200"} 4.0
+# HELP regatta_http_requests_created HTTP requests handled by endpoint, method, and status.
+# TYPE regatta_http_requests_created gauge
+regatta_http_requests_created{endpoint="/",method="GET",status="200"} 1.7746910602605433e+09
+regatta_http_requests_created{endpoint="/static/<path:filename>",method="GET",status="500"} 1.774691060345236e+09
+regatta_http_requests_created{endpoint="/metrics",method="GET",status="200"} 1.774691225453603e+09
+regatta_http_requests_created{endpoint="/healthz",method="GET",status="200"} 1.774691291234486e+09
+regatta_http_requests_created{endpoint="/api/bootstrap",method="GET",status="200"} 1.7746912912672248e+09
+regatta_http_requests_created{endpoint="/api/library/maps",method="GET",status="200"} 1.7746913063243253e+09
+regatta_http_requests_created{endpoint="/favicon.ico",method="GET",status="404"} 1.7746923620393612e+09
+regatta_http_requests_created{endpoint="/api/library/maps/<record_id>",method="GET",status="200"} 1.77469252351047e+09
+regatta_http_requests_created{endpoint="/api/rooms",method="POST",status="200"} 1.7746925245562997e+09
+regatta_http_requests_created{endpoint="/api/rooms/join",method="POST",status="200"} 1.7746925255826402e+09
+regatta_http_requests_created{endpoint="/api/rooms/<room_code>",method="GET",status="200"} 1.7746925256422415e+09
+regatta_http_requests_created{endpoint="/api/rooms/<room_code>/start",method="POST",status="200"} 1.7746925256683362e+09
+regatta_http_requests_created{endpoint="/api/rooms/leave",method="POST",status="200"} 1.7746925569840934e+09
+# HELP regatta_http_request_duration_seconds HTTP request duration by endpoint, method, and status.
+# TYPE regatta_http_request_duration_seconds histogram
+regatta_http_request_duration_seconds_bucket{endpoint="/",le="0.005",method="GET",status="200"} 0.0
+regatta_http_request_duration_seconds_bucket{endpoint="/",le="0.01",method="GET",status="200"} 0.0
+regatta_http_request_duration_seconds_bucket{endpoint="/",le="0.025",method="GET",status="200"} 1.0
+regatta_http_request_duration_seconds_bucket{endpoint="/",le="0.05",method="GET",status="200"} 1.0
+regatta_http_request_duration_seconds_bucket{endpoint="/",le="0.1",method="GET",status="200"} 1.0
+regatta_http_request_duration_seconds_bucket{endpoint="/",le="0.2",method="GET",status="200"} 1.0
+regatta_http_request_duration_seconds_bucket{endpoint="/",le="0.4",method="GET",status="200"} 1.0
+regatta_http_request_duration_seconds_bucket{endpoint="/",le="1.0",method="GET",status="200"} 1.0
+regatta_http_request_duration_seconds_bucket{endpoint="/",le="2.0",method="GET",status="200"} 1.0
+regatta_http_request_duration_seconds_bucket{endpoint="/",le="5.0",method="GET",status="200"} 1.0
+regatta_http_request_duration_seconds_bucket{endpoint="/",le="+Inf",method="GET",status="200"} 1.0
+regatta_http_request_duration_seconds_count{endpoint="/",method="GET",status="200"} 1.0
+regatta_http_request_duration_seconds_sum{endpoint="/",method="GET",status="200"} 0.01069736573845148
+regatta_http_request_duration_seconds_bucket{endpoint="/static/<path:filename>",le="0.005",method="GET",status="500"} 6.0
+regatta_http_request_duration_seconds_bucket{endpoint="/static/<path:filename>",le="0.01",method="GET",status="500"} 6.0
+regatta_http_request_duration_seconds_bucket{endpoint="/static/<path:filename>",le="0.025",method="GET",status="500"} 6.0
+regatta_http_request_duration_seconds_bucket{endpoint="/static/<path:filename>",le="0.05",method="GET",status="500"} 6.0
+regatta_http_request_duration_seconds_bucket{endpoint="/static/<path:filename>",le="0.1",method="GET",status="500"} 6.0
+regatta_http_request_duration_seconds_bucket{endpoint="/static/<path:filename>",le="0.2",method="GET",status="500"} 6.0
+regatta_http_request_duration_seconds_bucket{endpoint="/static/<path:filename>",le="0.4",method="GET",status="500"} 6.0
+regatta_http_request_duration_seconds_bucket{endpoint="/static/<path:filename>",le="1.0",method="GET",status="500"} 6.0
+regatta_http_request_duration_seconds_bucket{endpoint="/static/<path:filename>",le="2.0",method="GET",status="500"} 6.0
+regatta_http_request_duration_seconds_bucket{endpoint="/static/<path:filename>",le="5.0",method="GET",status="500"} 6.0
+regatta_http_request_duration_seconds_bucket{endpoint="/static/<path:filename>",le="+Inf",method="GET",status="500"} 6.0
+regatta_http_request_duration_seconds_count{endpoint="/static/<path:filename>",method="GET",status="500"} 6.0
+regatta_http_request_duration_seconds_sum{endpoint="/static/<path:filename>",method="GET",status="500"} 0.01054295338690281
+regatta_http_request_duration_seconds_bucket{endpoint="/metrics",le="0.005",method="GET",status="200"} 3.0
+regatta_http_request_duration_seconds_bucket{endpoint="/metrics",le="0.01",method="GET",status="200"} 12.0
+regatta_http_request_duration_seconds_bucket{endpoint="/metrics",le="0.025",method="GET",status="200"} 13.0
+regatta_http_request_duration_seconds_bucket{endpoint="/metrics",le="0.05",method="GET",status="200"} 13.0
+regatta_http_request_duration_seconds_bucket{endpoint="/metrics",le="0.1",method="GET",status="200"} 13.0
+regatta_http_request_duration_seconds_bucket{endpoint="/metrics",le="0.2",method="GET",status="200"} 13.0
+regatta_http_request_duration_seconds_bucket{endpoint="/metrics",le="0.4",method="GET",status="200"} 13.0
+regatta_http_request_duration_seconds_bucket{endpoint="/metrics",le="1.0",method="GET",status="200"} 13.0
+regatta_http_request_duration_seconds_bucket{endpoint="/metrics",le="2.0",method="GET",status="200"} 13.0
+regatta_http_request_duration_seconds_bucket{endpoint="/metrics",le="5.0",method="GET",status="200"} 13.0
+regatta_http_request_duration_seconds_bucket{endpoint="/metrics",le="+Inf",method="GET",status="200"} 13.0
+regatta_http_request_duration_seconds_count{endpoint="/metrics",method="GET",status="200"} 13.0
+regatta_http_request_duration_seconds_sum{endpoint="/metrics",method="GET",status="200"} 0.09473618678748608
+regatta_http_request_duration_seconds_bucket{endpoint="/healthz",le="0.005",method="GET",status="200"} 9.0
+regatta_http_request_duration_seconds_bucket{endpoint="/healthz",le="0.01",method="GET",status="200"} 9.0
+regatta_http_request_duration_seconds_bucket{endpoint="/healthz",le="0.025",method="GET",status="200"} 9.0
+regatta_http_request_duration_seconds_bucket{endpoint="/healthz",le="0.05",method="GET",status="200"} 9.0
+regatta_http_request_duration_seconds_bucket{endpoint="/healthz",le="0.1",method="GET",status="200"} 9.0
+regatta_http_request_duration_seconds_bucket{endpoint="/healthz",le="0.2",method="GET",status="200"} 9.0
+regatta_http_request_duration_seconds_bucket{endpoint="/healthz",le="0.4",method="GET",status="200"} 9.0
+regatta_http_request_duration_seconds_bucket{endpoint="/healthz",le="1.0",method="GET",status="200"} 9.0
+regatta_http_request_duration_seconds_bucket{endpoint="/healthz",le="2.0",method="GET",status="200"} 9.0
+regatta_http_request_duration_seconds_bucket{endpoint="/healthz",le="5.0",method="GET",status="200"} 9.0
+regatta_http_request_duration_seconds_bucket{endpoint="/healthz",le="+Inf",method="GET",status="200"} 9.0
+regatta_http_request_duration_seconds_count{endpoint="/healthz",method="GET",status="200"} 9.0
+regatta_http_request_duration_seconds_sum{endpoint="/healthz",method="GET",status="200"} 0.009074829518795013
+regatta_http_request_duration_seconds_bucket{endpoint="/api/bootstrap",le="0.005",method="GET",status="200"} 7.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/bootstrap",le="0.01",method="GET",status="200"} 7.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/bootstrap",le="0.025",method="GET",status="200"} 7.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/bootstrap",le="0.05",method="GET",status="200"} 7.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/bootstrap",le="0.1",method="GET",status="200"} 7.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/bootstrap",le="0.2",method="GET",status="200"} 7.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/bootstrap",le="0.4",method="GET",status="200"} 7.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/bootstrap",le="1.0",method="GET",status="200"} 7.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/bootstrap",le="2.0",method="GET",status="200"} 7.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/bootstrap",le="5.0",method="GET",status="200"} 7.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/bootstrap",le="+Inf",method="GET",status="200"} 7.0
+regatta_http_request_duration_seconds_count{endpoint="/api/bootstrap",method="GET",status="200"} 7.0
+regatta_http_request_duration_seconds_sum{endpoint="/api/bootstrap",method="GET",status="200"} 0.0028090327978134155
+regatta_http_request_duration_seconds_bucket{endpoint="/api/library/maps",le="0.005",method="GET",status="200"} 7.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/library/maps",le="0.01",method="GET",status="200"} 7.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/library/maps",le="0.025",method="GET",status="200"} 7.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/library/maps",le="0.05",method="GET",status="200"} 7.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/library/maps",le="0.1",method="GET",status="200"} 7.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/library/maps",le="0.2",method="GET",status="200"} 7.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/library/maps",le="0.4",method="GET",status="200"} 7.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/library/maps",le="1.0",method="GET",status="200"} 7.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/library/maps",le="2.0",method="GET",status="200"} 7.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/library/maps",le="5.0",method="GET",status="200"} 7.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/library/maps",le="+Inf",method="GET",status="200"} 7.0
+regatta_http_request_duration_seconds_count{endpoint="/api/library/maps",method="GET",status="200"} 7.0
+regatta_http_request_duration_seconds_sum{endpoint="/api/library/maps",method="GET",status="200"} 0.01001903135329485
+regatta_http_request_duration_seconds_bucket{endpoint="/favicon.ico",le="0.005",method="GET",status="404"} 1.0
+regatta_http_request_duration_seconds_bucket{endpoint="/favicon.ico",le="0.01",method="GET",status="404"} 1.0
+regatta_http_request_duration_seconds_bucket{endpoint="/favicon.ico",le="0.025",method="GET",status="404"} 1.0
+regatta_http_request_duration_seconds_bucket{endpoint="/favicon.ico",le="0.05",method="GET",status="404"} 1.0
+regatta_http_request_duration_seconds_bucket{endpoint="/favicon.ico",le="0.1",method="GET",status="404"} 1.0
+regatta_http_request_duration_seconds_bucket{endpoint="/favicon.ico",le="0.2",method="GET",status="404"} 1.0
+regatta_http_request_duration_seconds_bucket{endpoint="/favicon.ico",le="0.4",method="GET",status="404"} 1.0
+regatta_http_request_duration_seconds_bucket{endpoint="/favicon.ico",le="1.0",method="GET",status="404"} 1.0
+regatta_http_request_duration_seconds_bucket{endpoint="/favicon.ico",le="2.0",method="GET",status="404"} 1.0
+regatta_http_request_duration_seconds_bucket{endpoint="/favicon.ico",le="5.0",method="GET",status="404"} 1.0
+regatta_http_request_duration_seconds_bucket{endpoint="/favicon.ico",le="+Inf",method="GET",status="404"} 1.0
+regatta_http_request_duration_seconds_count{endpoint="/favicon.ico",method="GET",status="404"} 1.0
+regatta_http_request_duration_seconds_sum{endpoint="/favicon.ico",method="GET",status="404"} 0.000555520411580801
+regatta_http_request_duration_seconds_bucket{endpoint="/api/library/maps/<record_id>",le="0.005",method="GET",status="200"} 6.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/library/maps/<record_id>",le="0.01",method="GET",status="200"} 6.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/library/maps/<record_id>",le="0.025",method="GET",status="200"} 6.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/library/maps/<record_id>",le="0.05",method="GET",status="200"} 6.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/library/maps/<record_id>",le="0.1",method="GET",status="200"} 6.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/library/maps/<record_id>",le="0.2",method="GET",status="200"} 6.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/library/maps/<record_id>",le="0.4",method="GET",status="200"} 6.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/library/maps/<record_id>",le="1.0",method="GET",status="200"} 6.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/library/maps/<record_id>",le="2.0",method="GET",status="200"} 6.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/library/maps/<record_id>",le="5.0",method="GET",status="200"} 6.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/library/maps/<record_id>",le="+Inf",method="GET",status="200"} 6.0
+regatta_http_request_duration_seconds_count{endpoint="/api/library/maps/<record_id>",method="GET",status="200"} 6.0
+regatta_http_request_duration_seconds_sum{endpoint="/api/library/maps/<record_id>",method="GET",status="200"} 0.007632812950760126
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms",le="0.005",method="POST",status="200"} 5.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms",le="0.01",method="POST",status="200"} 6.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms",le="0.025",method="POST",status="200"} 6.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms",le="0.05",method="POST",status="200"} 6.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms",le="0.1",method="POST",status="200"} 6.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms",le="0.2",method="POST",status="200"} 6.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms",le="0.4",method="POST",status="200"} 6.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms",le="1.0",method="POST",status="200"} 6.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms",le="2.0",method="POST",status="200"} 6.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms",le="5.0",method="POST",status="200"} 6.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms",le="+Inf",method="POST",status="200"} 6.0
+regatta_http_request_duration_seconds_count{endpoint="/api/rooms",method="POST",status="200"} 6.0
+regatta_http_request_duration_seconds_sum{endpoint="/api/rooms",method="POST",status="200"} 0.02637428790330887
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms/join",le="0.005",method="POST",status="200"} 2.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms/join",le="0.01",method="POST",status="200"} 14.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms/join",le="0.025",method="POST",status="200"} 23.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms/join",le="0.05",method="POST",status="200"} 23.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms/join",le="0.1",method="POST",status="200"} 23.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms/join",le="0.2",method="POST",status="200"} 39.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms/join",le="0.4",method="POST",status="200"} 48.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms/join",le="1.0",method="POST",status="200"} 48.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms/join",le="2.0",method="POST",status="200"} 48.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms/join",le="5.0",method="POST",status="200"} 48.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms/join",le="+Inf",method="POST",status="200"} 48.0
+regatta_http_request_duration_seconds_count{endpoint="/api/rooms/join",method="POST",status="200"} 48.0
+regatta_http_request_duration_seconds_sum{endpoint="/api/rooms/join",method="POST",status="200"} 4.166502680629492
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms/<room_code>",le="0.005",method="GET",status="200"} 2.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms/<room_code>",le="0.01",method="GET",status="200"} 2.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms/<room_code>",le="0.025",method="GET",status="200"} 2.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms/<room_code>",le="0.05",method="GET",status="200"} 2.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms/<room_code>",le="0.1",method="GET",status="200"} 2.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms/<room_code>",le="0.2",method="GET",status="200"} 2.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms/<room_code>",le="0.4",method="GET",status="200"} 2.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms/<room_code>",le="1.0",method="GET",status="200"} 2.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms/<room_code>",le="2.0",method="GET",status="200"} 2.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms/<room_code>",le="5.0",method="GET",status="200"} 2.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms/<room_code>",le="+Inf",method="GET",status="200"} 2.0
+regatta_http_request_duration_seconds_count{endpoint="/api/rooms/<room_code>",method="GET",status="200"} 2.0
+regatta_http_request_duration_seconds_sum{endpoint="/api/rooms/<room_code>",method="GET",status="200"} 0.002166163641959429
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms/<room_code>/start",le="0.005",method="POST",status="200"} 2.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms/<room_code>/start",le="0.01",method="POST",status="200"} 2.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms/<room_code>/start",le="0.025",method="POST",status="200"} 2.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms/<room_code>/start",le="0.05",method="POST",status="200"} 2.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms/<room_code>/start",le="0.1",method="POST",status="200"} 2.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms/<room_code>/start",le="0.2",method="POST",status="200"} 2.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms/<room_code>/start",le="0.4",method="POST",status="200"} 2.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms/<room_code>/start",le="1.0",method="POST",status="200"} 2.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms/<room_code>/start",le="2.0",method="POST",status="200"} 2.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms/<room_code>/start",le="5.0",method="POST",status="200"} 2.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms/<room_code>/start",le="+Inf",method="POST",status="200"} 2.0
+regatta_http_request_duration_seconds_count{endpoint="/api/rooms/<room_code>/start",method="POST",status="200"} 2.0
+regatta_http_request_duration_seconds_sum{endpoint="/api/rooms/<room_code>/start",method="POST",status="200"} 0.009577647782862186
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms/leave",le="0.005",method="POST",status="200"} 2.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms/leave",le="0.01",method="POST",status="200"} 4.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms/leave",le="0.025",method="POST",status="200"} 4.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms/leave",le="0.05",method="POST",status="200"} 4.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms/leave",le="0.1",method="POST",status="200"} 4.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms/leave",le="0.2",method="POST",status="200"} 4.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms/leave",le="0.4",method="POST",status="200"} 4.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms/leave",le="1.0",method="POST",status="200"} 4.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms/leave",le="2.0",method="POST",status="200"} 4.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms/leave",le="5.0",method="POST",status="200"} 4.0
+regatta_http_request_duration_seconds_bucket{endpoint="/api/rooms/leave",le="+Inf",method="POST",status="200"} 4.0
+regatta_http_request_duration_seconds_count{endpoint="/api/rooms/leave",method="POST",status="200"} 4.0
+regatta_http_request_duration_seconds_sum{endpoint="/api/rooms/leave",method="POST",status="200"} 0.017766995821148157
+# HELP regatta_http_request_duration_seconds_created HTTP request duration by endpoint, method, and status.
+# TYPE regatta_http_request_duration_seconds_created gauge
+regatta_http_request_duration_seconds_created{endpoint="/",method="GET",status="200"} 1.774691060260579e+09
+regatta_http_request_duration_seconds_created{endpoint="/static/<path:filename>",method="GET",status="500"} 1.7746910603452678e+09
+regatta_http_request_duration_seconds_created{endpoint="/metrics",method="GET",status="200"} 1.774691225453627e+09
+regatta_http_request_duration_seconds_created{endpoint="/healthz",method="GET",status="200"} 1.7746912912345161e+09
+regatta_http_request_duration_seconds_created{endpoint="/api/bootstrap",method="GET",status="200"} 1.774691291267253e+09
+regatta_http_request_duration_seconds_created{endpoint="/api/library/maps",method="GET",status="200"} 1.7746913063243556e+09
+regatta_http_request_duration_seconds_created{endpoint="/favicon.ico",method="GET",status="404"} 1.774692362039389e+09
+regatta_http_request_duration_seconds_created{endpoint="/api/library/maps/<record_id>",method="GET",status="200"} 1.7746925235104992e+09
+regatta_http_request_duration_seconds_created{endpoint="/api/rooms",method="POST",status="200"} 1.7746925245563247e+09
+regatta_http_request_duration_seconds_created{endpoint="/api/rooms/join",method="POST",status="200"} 1.7746925255826657e+09
+regatta_http_request_duration_seconds_created{endpoint="/api/rooms/<room_code>",method="GET",status="200"} 1.7746925256422665e+09
+regatta_http_request_duration_seconds_created{endpoint="/api/rooms/<room_code>/start",method="POST",status="200"} 1.7746925256683636e+09
+regatta_http_request_duration_seconds_created{endpoint="/api/rooms/leave",method="POST",status="200"} 1.7746925569841268e+09
+# HELP regatta_http_request_bytes_total Inbound HTTP payload bytes by endpoint and method.
+# TYPE regatta_http_request_bytes_total counter
+regatta_http_request_bytes_total{endpoint="/",method="GET"} 0.0
+regatta_http_request_bytes_total{endpoint="/static/<path:filename>",method="GET"} 0.0
+regatta_http_request_bytes_total{endpoint="/metrics",method="GET"} 0.0
+regatta_http_request_bytes_total{endpoint="/healthz",method="GET"} 0.0
+regatta_http_request_bytes_total{endpoint="/api/bootstrap",method="GET"} 0.0
+regatta_http_request_bytes_total{endpoint="/api/library/maps",method="GET"} 0.0
+regatta_http_request_bytes_total{endpoint="/favicon.ico",method="GET"} 0.0
+regatta_http_request_bytes_total{endpoint="/api/library/maps/<record_id>",method="GET"} 0.0
+regatta_http_request_bytes_total{endpoint="/api/rooms",method="POST"} 25514.0
+regatta_http_request_bytes_total{endpoint="/api/rooms/join",method="POST"} 2458.0
+regatta_http_request_bytes_total{endpoint="/api/rooms/<room_code>",method="GET"} 0.0
+regatta_http_request_bytes_total{endpoint="/api/rooms/<room_code>/start",method="POST"} 3140.0
+regatta_http_request_bytes_total{endpoint="/api/rooms/leave",method="POST"} 0.0
+# HELP regatta_http_request_bytes_created Inbound HTTP payload bytes by endpoint and method.
+# TYPE regatta_http_request_bytes_created gauge
+regatta_http_request_bytes_created{endpoint="/",method="GET"} 1.7746910602498636e+09
+regatta_http_request_bytes_created{endpoint="/static/<path:filename>",method="GET"} 1.774691060342241e+09
+regatta_http_request_bytes_created{endpoint="/metrics",method="GET"} 1.774691225450147e+09
+regatta_http_request_bytes_created{endpoint="/healthz",method="GET"} 1.774691291233695e+09
+regatta_http_request_bytes_created{endpoint="/api/bootstrap",method="GET"} 1.7746912912668056e+09
+regatta_http_request_bytes_created{endpoint="/api/library/maps",method="GET"} 1.7746913063226137e+09
+regatta_http_request_bytes_created{endpoint="/favicon.ico",method="GET"} 1.7746923620388193e+09
+regatta_http_request_bytes_created{endpoint="/api/library/maps/<record_id>",method="GET"} 1.7746925235092382e+09
+regatta_http_request_bytes_created{endpoint="/api/rooms",method="POST"} 1.7746925245523596e+09
+regatta_http_request_bytes_created{endpoint="/api/rooms/join",method="POST"} 1.7746925255789096e+09
+regatta_http_request_bytes_created{endpoint="/api/rooms/<room_code>",method="GET"} 1.7746925256412363e+09
+regatta_http_request_bytes_created{endpoint="/api/rooms/<room_code>/start",method="POST"} 1.7746925256636295e+09
+regatta_http_request_bytes_created{endpoint="/api/rooms/leave",method="POST"} 1.7746925569781213e+09
+# HELP regatta_http_response_bytes_total Outbound HTTP payload bytes by endpoint, method, and status.
+# TYPE regatta_http_response_bytes_total counter
+regatta_http_response_bytes_total{endpoint="/",method="GET",status="200"} 35441.0
+regatta_http_response_bytes_total{endpoint="/static/<path:filename>",method="GET",status="500"} 1590.0
+regatta_http_response_bytes_total{endpoint="/metrics",method="GET",status="200"} 679518.0
+regatta_http_response_bytes_total{endpoint="/healthz",method="GET",status="200"} 1575.0
+regatta_http_response_bytes_total{endpoint="/api/bootstrap",method="GET",status="200"} 1008.0
+regatta_http_response_bytes_total{endpoint="/api/library/maps",method="GET",status="200"} 19915.0
+regatta_http_response_bytes_total{endpoint="/favicon.ico",method="GET",status="404"} 207.0
+regatta_http_response_bytes_total{endpoint="/api/library/maps/<record_id>",method="GET",status="200"} 19308.0
+regatta_http_response_bytes_total{endpoint="/api/rooms",method="POST",status="200"} 9888.0
+regatta_http_response_bytes_total{endpoint="/api/rooms/join",method="POST",status="200"} 246142.0
+regatta_http_response_bytes_total{endpoint="/api/rooms/<room_code>",method="GET",status="200"} 4328.0
+regatta_http_response_bytes_total{endpoint="/api/rooms/<room_code>/start",method="POST",status="200"} 4400.0
+regatta_http_response_bytes_total{endpoint="/api/rooms/leave",method="POST",status="200"} 56.0
+# HELP regatta_http_response_bytes_created Outbound HTTP payload bytes by endpoint, method, and status.
+# TYPE regatta_http_response_bytes_created gauge
+regatta_http_response_bytes_created{endpoint="/",method="GET",status="200"} 1.7746910602606294e+09
+regatta_http_response_bytes_created{endpoint="/static/<path:filename>",method="GET",status="500"} 1.774691060345316e+09
+regatta_http_response_bytes_created{endpoint="/metrics",method="GET",status="200"} 1.7746912254536653e+09
+regatta_http_response_bytes_created{endpoint="/healthz",method="GET",status="200"} 1.7746912912345614e+09
+regatta_http_response_bytes_created{endpoint="/api/bootstrap",method="GET",status="200"} 1.7746912912672982e+09
+regatta_http_response_bytes_created{endpoint="/api/library/maps",method="GET",status="200"} 1.7746913063243983e+09
+regatta_http_response_bytes_created{endpoint="/favicon.ico",method="GET",status="404"} 1.774692362039431e+09
+regatta_http_response_bytes_created{endpoint="/api/library/maps/<record_id>",method="GET",status="200"} 1.7746925235105417e+09
+regatta_http_response_bytes_created{endpoint="/api/rooms",method="POST",status="200"} 1.7746925245563629e+09
+regatta_http_response_bytes_created{endpoint="/api/rooms/join",method="POST",status="200"} 1.7746925255827067e+09
+regatta_http_response_bytes_created{endpoint="/api/rooms/<room_code>",method="GET",status="200"} 1.7746925256423082e+09
+regatta_http_response_bytes_created{endpoint="/api/rooms/<room_code>/start",method="POST",status="200"} 1.7746925256684058e+09
+regatta_http_response_bytes_created{endpoint="/api/rooms/leave",method="POST",status="200"} 1.7746925569841688e+09
+# HELP regatta_socket_events_total Socket.IO events handled by event name and result.
+# TYPE regatta_socket_events_total counter
+regatta_socket_events_total{event="room:join_socket",result="rejected"} 1.0
+regatta_socket_events_total{event="room:control",result="rejected"} 1.0
+regatta_socket_events_total{event="disconnect",result="ok"} 37.0
+regatta_socket_events_total{event="room:join_socket",result="ok"} 36.0
+regatta_socket_events_total{event="room:control",result="ok"} 480.0
+# HELP regatta_socket_events_created Socket.IO events handled by event name and result.
+# TYPE regatta_socket_events_created gauge
+regatta_socket_events_created{event="room:join_socket",result="rejected"} 1.7746911913192263e+09
+regatta_socket_events_created{event="room:control",result="rejected"} 1.7746911913200374e+09
+regatta_socket_events_created{event="disconnect",result="ok"} 1.7746911962137454e+09
+regatta_socket_events_created{event="room:join_socket",result="ok"} 1.774692525625689e+09
+regatta_socket_events_created{event="room:control",result="ok"} 1.7746925256823199e+09
+# HELP regatta_socket_event_duration_seconds Socket.IO event handling duration.
+# TYPE regatta_socket_event_duration_seconds histogram
+regatta_socket_event_duration_seconds_bucket{event="room:join_socket",le="0.001",result="rejected"} 0.0
+regatta_socket_event_duration_seconds_bucket{event="room:join_socket",le="0.005",result="rejected"} 1.0
+regatta_socket_event_duration_seconds_bucket{event="room:join_socket",le="0.01",result="rejected"} 1.0
+regatta_socket_event_duration_seconds_bucket{event="room:join_socket",le="0.025",result="rejected"} 1.0
+regatta_socket_event_duration_seconds_bucket{event="room:join_socket",le="0.05",result="rejected"} 1.0
+regatta_socket_event_duration_seconds_bucket{event="room:join_socket",le="0.1",result="rejected"} 1.0
+regatta_socket_event_duration_seconds_bucket{event="room:join_socket",le="0.25",result="rejected"} 1.0
+regatta_socket_event_duration_seconds_bucket{event="room:join_socket",le="0.5",result="rejected"} 1.0
+regatta_socket_event_duration_seconds_bucket{event="room:join_socket",le="1.0",result="rejected"} 1.0
+regatta_socket_event_duration_seconds_bucket{event="room:join_socket",le="+Inf",result="rejected"} 1.0
+regatta_socket_event_duration_seconds_count{event="room:join_socket",result="rejected"} 1.0
+regatta_socket_event_duration_seconds_sum{event="room:join_socket",result="rejected"} 0.0034834742546081543
+regatta_socket_event_duration_seconds_bucket{event="room:control",le="0.001",result="rejected"} 0.0
+regatta_socket_event_duration_seconds_bucket{event="room:control",le="0.005",result="rejected"} 1.0
+regatta_socket_event_duration_seconds_bucket{event="room:control",le="0.01",result="rejected"} 1.0
+regatta_socket_event_duration_seconds_bucket{event="room:control",le="0.025",result="rejected"} 1.0
+regatta_socket_event_duration_seconds_bucket{event="room:control",le="0.05",result="rejected"} 1.0
+regatta_socket_event_duration_seconds_bucket{event="room:control",le="0.1",result="rejected"} 1.0
+regatta_socket_event_duration_seconds_bucket{event="room:control",le="0.25",result="rejected"} 1.0
+regatta_socket_event_duration_seconds_bucket{event="room:control",le="0.5",result="rejected"} 1.0
+regatta_socket_event_duration_seconds_bucket{event="room:control",le="1.0",result="rejected"} 1.0
+regatta_socket_event_duration_seconds_bucket{event="room:control",le="+Inf",result="rejected"} 1.0
+regatta_socket_event_duration_seconds_count{event="room:control",result="rejected"} 1.0
+regatta_socket_event_duration_seconds_sum{event="room:control",result="rejected"} 0.0032370672561228275
+regatta_socket_event_duration_seconds_bucket{event="disconnect",le="0.001",result="ok"} 4.0
+regatta_socket_event_duration_seconds_bucket{event="disconnect",le="0.005",result="ok"} 15.0
+regatta_socket_event_duration_seconds_bucket{event="disconnect",le="0.01",result="ok"} 34.0
+regatta_socket_event_duration_seconds_bucket{event="disconnect",le="0.025",result="ok"} 37.0
+regatta_socket_event_duration_seconds_bucket{event="disconnect",le="0.05",result="ok"} 37.0
+regatta_socket_event_duration_seconds_bucket{event="disconnect",le="0.1",result="ok"} 37.0
+regatta_socket_event_duration_seconds_bucket{event="disconnect",le="0.25",result="ok"} 37.0
+regatta_socket_event_duration_seconds_bucket{event="disconnect",le="0.5",result="ok"} 37.0
+regatta_socket_event_duration_seconds_bucket{event="disconnect",le="1.0",result="ok"} 37.0
+regatta_socket_event_duration_seconds_bucket{event="disconnect",le="+Inf",result="ok"} 37.0
+regatta_socket_event_duration_seconds_count{event="disconnect",result="ok"} 37.0
+regatta_socket_event_duration_seconds_sum{event="disconnect",result="ok"} 0.21888086944818497
+regatta_socket_event_duration_seconds_bucket{event="room:join_socket",le="0.001",result="ok"} 0.0
+regatta_socket_event_duration_seconds_bucket{event="room:join_socket",le="0.005",result="ok"} 0.0
+regatta_socket_event_duration_seconds_bucket{event="room:join_socket",le="0.01",result="ok"} 6.0
+regatta_socket_event_duration_seconds_bucket{event="room:join_socket",le="0.025",result="ok"} 14.0
+regatta_socket_event_duration_seconds_bucket{event="room:join_socket",le="0.05",result="ok"} 31.0
+regatta_socket_event_duration_seconds_bucket{event="room:join_socket",le="0.1",result="ok"} 36.0
+regatta_socket_event_duration_seconds_bucket{event="room:join_socket",le="0.25",result="ok"} 36.0
+regatta_socket_event_duration_seconds_bucket{event="room:join_socket",le="0.5",result="ok"} 36.0
+regatta_socket_event_duration_seconds_bucket{event="room:join_socket",le="1.0",result="ok"} 36.0
+regatta_socket_event_duration_seconds_bucket{event="room:join_socket",le="+Inf",result="ok"} 36.0
+regatta_socket_event_duration_seconds_count{event="room:join_socket",result="ok"} 36.0
+regatta_socket_event_duration_seconds_sum{event="room:join_socket",result="ok"} 1.0391706638038158
+regatta_socket_event_duration_seconds_bucket{event="room:control",le="0.001",result="ok"} 64.0
+regatta_socket_event_duration_seconds_bucket{event="room:control",le="0.005",result="ok"} 478.0
+regatta_socket_event_duration_seconds_bucket{event="room:control",le="0.01",result="ok"} 478.0
+regatta_socket_event_duration_seconds_bucket{event="room:control",le="0.025",result="ok"} 478.0
+regatta_socket_event_duration_seconds_bucket{event="room:control",le="0.05",result="ok"} 480.0
+regatta_socket_event_duration_seconds_bucket{event="room:control",le="0.1",result="ok"} 480.0
+regatta_socket_event_duration_seconds_bucket{event="room:control",le="0.25",result="ok"} 480.0
+regatta_socket_event_duration_seconds_bucket{event="room:control",le="0.5",result="ok"} 480.0
+regatta_socket_event_duration_seconds_bucket{event="room:control",le="1.0",result="ok"} 480.0
+regatta_socket_event_duration_seconds_bucket{event="room:control",le="+Inf",result="ok"} 480.0
+regatta_socket_event_duration_seconds_count{event="room:control",result="ok"} 480.0
+regatta_socket_event_duration_seconds_sum{event="room:control",result="ok"} 0.72779092611745
+# HELP regatta_socket_event_duration_seconds_created Socket.IO event handling duration.
+# TYPE regatta_socket_event_duration_seconds_created gauge
+regatta_socket_event_duration_seconds_created{event="room:join_socket",result="rejected"} 1.7746911913192606e+09
+regatta_socket_event_duration_seconds_created{event="room:control",result="rejected"} 1.7746911913200607e+09
+regatta_socket_event_duration_seconds_created{event="disconnect",result="ok"} 1.7746911962137697e+09
+regatta_socket_event_duration_seconds_created{event="room:join_socket",result="ok"} 1.77469252562572e+09
+regatta_socket_event_duration_seconds_created{event="room:control",result="ok"} 1.7746925256823435e+09
+# HELP regatta_socket_payload_bytes_total Socket.IO payload bytes by event and direction.
+# TYPE regatta_socket_payload_bytes_total counter
+regatta_socket_payload_bytes_total{direction="in",event="room:join_socket"} 814.0
+regatta_socket_payload_bytes_total{direction="in",event="room:control"} 49947.0
+regatta_socket_payload_bytes_total{direction="in",event="disconnect"} 0.0
+regatta_socket_payload_bytes_total{direction="out",event="room:presence"} 248776.0
+regatta_socket_payload_bytes_total{direction="out",event="room:snapshot"} 7835.0
+regatta_socket_payload_bytes_total{direction="out",event="room:state_updated"} 1.657825e+06
+# HELP regatta_socket_payload_bytes_created Socket.IO payload bytes by event and direction.
+# TYPE regatta_socket_payload_bytes_created gauge
+regatta_socket_payload_bytes_created{direction="in",event="room:join_socket"} 1.774691191319321e+09
+regatta_socket_payload_bytes_created{direction="in",event="room:control"} 1.7746911913201e+09
+regatta_socket_payload_bytes_created{direction="in",event="disconnect"} 1.7746911962138135e+09
+regatta_socket_payload_bytes_created{direction="out",event="room:presence"} 1.7746925256240075e+09
+regatta_socket_payload_bytes_created{direction="out",event="room:snapshot"} 1.774692525666678e+09
+regatta_socket_payload_bytes_created{direction="out",event="room:state_updated"} 1.7746925257555773e+09
+# HELP regatta_socket_connected_clients Connected player socket count observed by this process.
+# TYPE regatta_socket_connected_clients gauge
+regatta_socket_connected_clients 0.0
+# HELP regatta_rooms_total Observed room count by status handled by this process.
+# TYPE regatta_rooms_total gauge
+regatta_rooms_total{status="lobby"} 4.0
+regatta_rooms_total{status="live"} 0.0
+# HELP regatta_room_players_histogram Player count per room snapshot/save.
+# TYPE regatta_room_players_histogram histogram
+regatta_room_players_histogram_bucket{le="0.0"} 0.0
+regatta_room_players_histogram_bucket{le="1.0"} 8.0
+regatta_room_players_histogram_bucket{le="2.0"} 748.0
+regatta_room_players_histogram_bucket{le="4.0"} 756.0
+regatta_room_players_histogram_bucket{le="8.0"} 772.0
+regatta_room_players_histogram_bucket{le="12.0"} 830.0
+regatta_room_players_histogram_bucket{le="16.0"} 834.0
+regatta_room_players_histogram_bucket{le="20.0"} 854.0
+regatta_room_players_histogram_bucket{le="24.0"} 854.0
+regatta_room_players_histogram_bucket{le="+Inf"} 854.0
+regatta_room_players_histogram_count 854.0
+regatta_room_players_histogram_sum 2651.0
+# HELP regatta_room_players_histogram_created Player count per room snapshot/save.
+# TYPE regatta_room_players_histogram_created gauge
+regatta_room_players_histogram_created 1.7746909982520797e+09
+# HELP regatta_realtime_loops_active Realtime room loops currently active in this process.
+# TYPE regatta_realtime_loops_active gauge
+regatta_realtime_loops_active 1.0
+# HELP regatta_realtime_ticks_total Realtime loop ticks by result.
+# TYPE regatta_realtime_ticks_total counter
+regatta_realtime_ticks_total{result="noop"} 2.0
+regatta_realtime_ticks_total{result="changed"} 720.0
+# HELP regatta_realtime_ticks_created Realtime loop ticks by result.
+# TYPE regatta_realtime_ticks_created gauge
+regatta_realtime_ticks_created{result="noop"} 1.7746925256695158e+09
+regatta_realtime_ticks_created{result="changed"} 1.7746925257567387e+09
+# HELP regatta_realtime_tick_duration_seconds End-to-end realtime tick duration.
+# TYPE regatta_realtime_tick_duration_seconds histogram
+regatta_realtime_tick_duration_seconds_bucket{le="0.001"} 0.0
+regatta_realtime_tick_duration_seconds_bucket{le="0.005"} 688.0
+regatta_realtime_tick_duration_seconds_bucket{le="0.01"} 722.0
+regatta_realtime_tick_duration_seconds_bucket{le="0.02"} 722.0
+regatta_realtime_tick_duration_seconds_bucket{le="0.04"} 722.0
+regatta_realtime_tick_duration_seconds_bucket{le="0.07"} 722.0
+regatta_realtime_tick_duration_seconds_bucket{le="0.1"} 722.0
+regatta_realtime_tick_duration_seconds_bucket{le="0.2"} 722.0
+regatta_realtime_tick_duration_seconds_bucket{le="0.5"} 722.0
+regatta_realtime_tick_duration_seconds_bucket{le="1.0"} 722.0
+regatta_realtime_tick_duration_seconds_bucket{le="+Inf"} 722.0
+regatta_realtime_tick_duration_seconds_count 722.0
+regatta_realtime_tick_duration_seconds_sum 2.438646111637354
+# HELP regatta_realtime_tick_duration_seconds_created End-to-end realtime tick duration.
+# TYPE regatta_realtime_tick_duration_seconds_created gauge
+regatta_realtime_tick_duration_seconds_created 1.7746909982521563e+09
+# HELP regatta_realtime_tick_drift_seconds Realtime loop drift above the tick budget.
+# TYPE regatta_realtime_tick_drift_seconds histogram
+regatta_realtime_tick_drift_seconds_bucket{le="0.0"} 722.0
+regatta_realtime_tick_drift_seconds_bucket{le="0.001"} 722.0
+regatta_realtime_tick_drift_seconds_bucket{le="0.005"} 722.0
+regatta_realtime_tick_drift_seconds_bucket{le="0.01"} 722.0
+regatta_realtime_tick_drift_seconds_bucket{le="0.02"} 722.0
+regatta_realtime_tick_drift_seconds_bucket{le="0.04"} 722.0
+regatta_realtime_tick_drift_seconds_bucket{le="0.08"} 722.0
+regatta_realtime_tick_drift_seconds_bucket{le="0.2"} 722.0
+regatta_realtime_tick_drift_seconds_bucket{le="1.0"} 722.0
+regatta_realtime_tick_drift_seconds_bucket{le="+Inf"} 722.0
+regatta_realtime_tick_drift_seconds_count 722.0
+regatta_realtime_tick_drift_seconds_sum 0.0
+# HELP regatta_realtime_tick_drift_seconds_created Realtime loop drift above the tick budget.
+# TYPE regatta_realtime_tick_drift_seconds_created gauge
+regatta_realtime_tick_drift_seconds_created 1.7746909982521915e+09
+# HELP regatta_realtime_tick_changed_total Realtime ticks that changed room state.
+# TYPE regatta_realtime_tick_changed_total counter
+regatta_realtime_tick_changed_total 720.0
+# HELP regatta_realtime_tick_changed_created Realtime ticks that changed room state.
+# TYPE regatta_realtime_tick_changed_created gauge
+regatta_realtime_tick_changed_created 1.7746909982522209e+09
+# HELP regatta_realtime_tick_noop_total Realtime ticks that did not change room state.
+# TYPE regatta_realtime_tick_noop_total counter
+regatta_realtime_tick_noop_total 2.0
+# HELP regatta_realtime_tick_noop_created Realtime ticks that did not change room state.
+# TYPE regatta_realtime_tick_noop_created gauge
+regatta_realtime_tick_noop_created 1.7746909982522335e+09
+# HELP regatta_room_store_operations_total Room store operations by operation, backend, and result.
+# TYPE regatta_room_store_operations_total counter
+regatta_room_store_operations_total{backend="redis",operation="get_room",result="ok"} 1342.0
+regatta_room_store_operations_total{backend="redis",operation="save_room",result="ok"} 778.0
+regatta_room_store_operations_total{backend="redis",operation="delete_room",result="ok"} 2.0
+# HELP regatta_room_store_operations_created Room store operations by operation, backend, and result.
+# TYPE regatta_room_store_operations_created gauge
+regatta_room_store_operations_created{backend="redis",operation="get_room",result="ok"} 1.7746911913170938e+09
+regatta_room_store_operations_created{backend="redis",operation="save_room",result="ok"} 1.774692524555233e+09
+regatta_room_store_operations_created{backend="redis",operation="delete_room",result="ok"} 1.7746925569821541e+09
+# HELP regatta_room_store_duration_seconds Room store operation duration.
+# TYPE regatta_room_store_duration_seconds histogram
+regatta_room_store_duration_seconds_bucket{backend="redis",le="0.0005",operation="get_room",result="ok"} 235.0
+regatta_room_store_duration_seconds_bucket{backend="redis",le="0.001",operation="get_room",result="ok"} 1145.0
+regatta_room_store_duration_seconds_bucket{backend="redis",le="0.005",operation="get_room",result="ok"} 1320.0
+regatta_room_store_duration_seconds_bucket{backend="redis",le="0.01",operation="get_room",result="ok"} 1338.0
+regatta_room_store_duration_seconds_bucket{backend="redis",le="0.025",operation="get_room",result="ok"} 1341.0
+regatta_room_store_duration_seconds_bucket{backend="redis",le="0.05",operation="get_room",result="ok"} 1342.0
+regatta_room_store_duration_seconds_bucket{backend="redis",le="0.1",operation="get_room",result="ok"} 1342.0
+regatta_room_store_duration_seconds_bucket{backend="redis",le="0.25",operation="get_room",result="ok"} 1342.0
+regatta_room_store_duration_seconds_bucket{backend="redis",le="0.5",operation="get_room",result="ok"} 1342.0
+regatta_room_store_duration_seconds_bucket{backend="redis",le="1.0",operation="get_room",result="ok"} 1342.0
+regatta_room_store_duration_seconds_bucket{backend="redis",le="+Inf",operation="get_room",result="ok"} 1342.0
+regatta_room_store_duration_seconds_count{backend="redis",operation="get_room",result="ok"} 1342.0
+regatta_room_store_duration_seconds_sum{backend="redis",operation="get_room",result="ok"} 1.2185118184424937
+regatta_room_store_duration_seconds_bucket{backend="redis",le="0.0005",operation="save_room",result="ok"} 0.0
+regatta_room_store_duration_seconds_bucket{backend="redis",le="0.001",operation="save_room",result="ok"} 685.0
+regatta_room_store_duration_seconds_bucket{backend="redis",le="0.005",operation="save_room",result="ok"} 778.0
+regatta_room_store_duration_seconds_bucket{backend="redis",le="0.01",operation="save_room",result="ok"} 778.0
+regatta_room_store_duration_seconds_bucket{backend="redis",le="0.025",operation="save_room",result="ok"} 778.0
+regatta_room_store_duration_seconds_bucket{backend="redis",le="0.05",operation="save_room",result="ok"} 778.0
+regatta_room_store_duration_seconds_bucket{backend="redis",le="0.1",operation="save_room",result="ok"} 778.0
+regatta_room_store_duration_seconds_bucket{backend="redis",le="0.25",operation="save_room",result="ok"} 778.0
+regatta_room_store_duration_seconds_bucket{backend="redis",le="0.5",operation="save_room",result="ok"} 778.0
+regatta_room_store_duration_seconds_bucket{backend="redis",le="1.0",operation="save_room",result="ok"} 778.0
+regatta_room_store_duration_seconds_bucket{backend="redis",le="+Inf",operation="save_room",result="ok"} 778.0
+regatta_room_store_duration_seconds_count{backend="redis",operation="save_room",result="ok"} 778.0
+regatta_room_store_duration_seconds_sum{backend="redis",operation="save_room",result="ok"} 0.6705768229439855
+regatta_room_store_duration_seconds_bucket{backend="redis",le="0.0005",operation="delete_room",result="ok"} 1.0
+regatta_room_store_duration_seconds_bucket{backend="redis",le="0.001",operation="delete_room",result="ok"} 1.0
+regatta_room_store_duration_seconds_bucket{backend="redis",le="0.005",operation="delete_room",result="ok"} 2.0
+regatta_room_store_duration_seconds_bucket{backend="redis",le="0.01",operation="delete_room",result="ok"} 2.0
+regatta_room_store_duration_seconds_bucket{backend="redis",le="0.025",operation="delete_room",result="ok"} 2.0
+regatta_room_store_duration_seconds_bucket{backend="redis",le="0.05",operation="delete_room",result="ok"} 2.0
+regatta_room_store_duration_seconds_bucket{backend="redis",le="0.1",operation="delete_room",result="ok"} 2.0
+regatta_room_store_duration_seconds_bucket{backend="redis",le="0.25",operation="delete_room",result="ok"} 2.0
+regatta_room_store_duration_seconds_bucket{backend="redis",le="0.5",operation="delete_room",result="ok"} 2.0
+regatta_room_store_duration_seconds_bucket{backend="redis",le="1.0",operation="delete_room",result="ok"} 2.0
+regatta_room_store_duration_seconds_bucket{backend="redis",le="+Inf",operation="delete_room",result="ok"} 2.0
+regatta_room_store_duration_seconds_count{backend="redis",operation="delete_room",result="ok"} 2.0
+regatta_room_store_duration_seconds_sum{backend="redis",operation="delete_room",result="ok"} 0.0017231632955372334
+# HELP regatta_room_store_duration_seconds_created Room store operation duration.
+# TYPE regatta_room_store_duration_seconds_created gauge
+regatta_room_store_duration_seconds_created{backend="redis",operation="get_room",result="ok"} 1.7746911913171375e+09
+regatta_room_store_duration_seconds_created{backend="redis",operation="save_room",result="ok"} 1.774692524555255e+09
+regatta_room_store_duration_seconds_created{backend="redis",operation="delete_room",result="ok"} 1.7746925569821858e+09
+# HELP regatta_room_store_payload_bytes Serialized room payload size for room store operations.
+# TYPE regatta_room_store_payload_bytes histogram
+regatta_room_store_payload_bytes_bucket{backend="redis",le="0.0",operation="save_room"} 0.0
+regatta_room_store_payload_bytes_bucket{backend="redis",le="256.0",operation="save_room"} 0.0
+regatta_room_store_payload_bytes_bucket{backend="redis",le="1024.0",operation="save_room"} 0.0
+regatta_room_store_payload_bytes_bucket{backend="redis",le="4096.0",operation="save_room"} 8.0
+regatta_room_store_payload_bytes_bucket{backend="redis",le="16384.0",operation="save_room"} 768.0
+regatta_room_store_payload_bytes_bucket{backend="redis",le="65536.0",operation="save_room"} 778.0
+regatta_room_store_payload_bytes_bucket{backend="redis",le="262144.0",operation="save_room"} 778.0
+regatta_room_store_payload_bytes_bucket{backend="redis",le="524288.0",operation="save_room"} 778.0
+regatta_room_store_payload_bytes_bucket{backend="redis",le="1.048576e+06",operation="save_room"} 778.0
+regatta_room_store_payload_bytes_bucket{backend="redis",le="+Inf",operation="save_room"} 778.0
+regatta_room_store_payload_bytes_count{backend="redis",operation="save_room"} 778.0
+regatta_room_store_payload_bytes_sum{backend="redis",operation="save_room"} 4.468121e+06
+regatta_room_store_payload_bytes_bucket{backend="redis",le="0.0",operation="get_room"} 0.0
+regatta_room_store_payload_bytes_bucket{backend="redis",le="256.0",operation="get_room"} 0.0
+regatta_room_store_payload_bytes_bucket{backend="redis",le="1024.0",operation="get_room"} 0.0
+regatta_room_store_payload_bytes_bucket{backend="redis",le="4096.0",operation="get_room"} 7.0
+regatta_room_store_payload_bytes_bucket{backend="redis",le="16384.0",operation="get_room"} 1303.0
+regatta_room_store_payload_bytes_bucket{backend="redis",le="65536.0",operation="get_room"} 1328.0
+regatta_room_store_payload_bytes_bucket{backend="redis",le="262144.0",operation="get_room"} 1328.0
+regatta_room_store_payload_bytes_bucket{backend="redis",le="524288.0",operation="get_room"} 1328.0
+regatta_room_store_payload_bytes_bucket{backend="redis",le="1.048576e+06",operation="get_room"} 1328.0
+regatta_room_store_payload_bytes_bucket{backend="redis",le="+Inf",operation="get_room"} 1328.0
+regatta_room_store_payload_bytes_count{backend="redis",operation="get_room"} 1328.0
+regatta_room_store_payload_bytes_sum{backend="redis",operation="get_room"} 8.206148e+06
+# HELP regatta_room_store_payload_bytes_created Serialized room payload size for room store operations.
+# TYPE regatta_room_store_payload_bytes_created gauge
+regatta_room_store_payload_bytes_created{backend="redis",operation="save_room"} 1.7746925245552974e+09
+regatta_room_store_payload_bytes_created{backend="redis",operation="get_room"} 1.774692525580199e+09
+# HELP regatta_public_room_view_duration_seconds Time spent building a public room snapshot.
+# TYPE regatta_public_room_view_duration_seconds histogram
+regatta_public_room_view_duration_seconds_bucket{le="0.0005"} 852.0
+regatta_public_room_view_duration_seconds_bucket{le="0.001"} 853.0
+regatta_public_room_view_duration_seconds_bucket{le="0.005"} 854.0
+regatta_public_room_view_duration_seconds_bucket{le="0.01"} 854.0
+regatta_public_room_view_duration_seconds_bucket{le="0.025"} 854.0
+regatta_public_room_view_duration_seconds_bucket{le="0.05"} 854.0
+regatta_public_room_view_duration_seconds_bucket{le="0.1"} 854.0
+regatta_public_room_view_duration_seconds_bucket{le="0.25"} 854.0
+regatta_public_room_view_duration_seconds_bucket{le="+Inf"} 854.0
+regatta_public_room_view_duration_seconds_count 854.0
+regatta_public_room_view_duration_seconds_sum 0.11873878492042422
+# HELP regatta_public_room_view_duration_seconds_created Time spent building a public room snapshot.
+# TYPE regatta_public_room_view_duration_seconds_created gauge
+regatta_public_room_view_duration_seconds_created 1.7746909982522955e+09
+# HELP regatta_public_room_view_payload_bytes Payload size of a public room snapshot.
+# TYPE regatta_public_room_view_payload_bytes histogram
+regatta_public_room_view_payload_bytes_bucket{le="0.0"} 0.0
+regatta_public_room_view_payload_bytes_bucket{le="512.0"} 0.0
+regatta_public_room_view_payload_bytes_bucket{le="2048.0"} 8.0
+regatta_public_room_view_payload_bytes_bucket{le="8192.0"} 831.0
+regatta_public_room_view_payload_bytes_bucket{le="32768.0"} 854.0
+regatta_public_room_view_payload_bytes_bucket{le="131072.0"} 854.0
+regatta_public_room_view_payload_bytes_bucket{le="524288.0"} 854.0
+regatta_public_room_view_payload_bytes_bucket{le="+Inf"} 854.0
+regatta_public_room_view_payload_bytes_count 854.0
+regatta_public_room_view_payload_bytes_sum 2.420799e+06
+# HELP regatta_public_room_view_payload_bytes_created Payload size of a public room snapshot.
+# TYPE regatta_public_room_view_payload_bytes_created gauge
+regatta_public_room_view_payload_bytes_created 1.7746909982523248e+09
+# HELP regatta_game_state_validation_duration_seconds Time spent validating incoming game state payloads.
+# TYPE regatta_game_state_validation_duration_seconds histogram
+regatta_game_state_validation_duration_seconds_bucket{le="0.0005"} 190.0
+regatta_game_state_validation_duration_seconds_bucket{le="0.001"} 190.0
+regatta_game_state_validation_duration_seconds_bucket{le="0.005"} 190.0
+regatta_game_state_validation_duration_seconds_bucket{le="0.01"} 190.0
+regatta_game_state_validation_duration_seconds_bucket{le="0.025"} 190.0
+regatta_game_state_validation_duration_seconds_bucket{le="0.05"} 190.0
+regatta_game_state_validation_duration_seconds_bucket{le="0.1"} 190.0
+regatta_game_state_validation_duration_seconds_bucket{le="0.25"} 190.0
+regatta_game_state_validation_duration_seconds_bucket{le="+Inf"} 190.0
+regatta_game_state_validation_duration_seconds_count 190.0
+regatta_game_state_validation_duration_seconds_sum 0.013734557665884495
+# HELP regatta_game_state_validation_duration_seconds_created Time spent validating incoming game state payloads.
+# TYPE regatta_game_state_validation_duration_seconds_created gauge
+regatta_game_state_validation_duration_seconds_created 1.7746909982523494e+09
+# HELP regatta_game_state_payload_bytes Size of validated game state payloads.
+# TYPE regatta_game_state_payload_bytes histogram
+regatta_game_state_payload_bytes_bucket{le="0.0"} 0.0
+regatta_game_state_payload_bytes_bucket{le="512.0"} 0.0
+regatta_game_state_payload_bytes_bucket{le="2048.0"} 72.0
+regatta_game_state_payload_bytes_bucket{le="8192.0"} 186.0
+regatta_game_state_payload_bytes_bucket{le="32768.0"} 190.0
+regatta_game_state_payload_bytes_bucket{le="131072.0"} 190.0
+regatta_game_state_payload_bytes_bucket{le="524288.0"} 190.0
+regatta_game_state_payload_bytes_bucket{le="+Inf"} 190.0
+regatta_game_state_payload_bytes_count 190.0
+regatta_game_state_payload_bytes_sum 616721.0
+# HELP regatta_game_state_payload_bytes_created Size of validated game state payloads.
+# TYPE regatta_game_state_payload_bytes_created gauge
+regatta_game_state_payload_bytes_created 1.7746909982523768e+09
+# HELP regatta_errors_total Application errors by source and kind.
+# TYPE regatta_errors_total counter
+regatta_errors_total{kind="room_error",source="socket"} 2.0
+# HELP regatta_errors_created Application errors by source and kind.
+# TYPE regatta_errors_created gauge
+regatta_errors_created{kind="room_error",source="socket"} 1.7746911913172092e+09
+# HELP regatta_client_telemetry_events_total Client telemetry events accepted by event name.
+# TYPE regatta_client_telemetry_events_total counter
+# HELP regatta_client_telemetry_duration_seconds Client-reported durations by event name.
+# TYPE regatta_client_telemetry_duration_seconds histogram

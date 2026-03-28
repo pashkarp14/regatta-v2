@@ -1,0 +1,18 @@
+[
+  {
+    "source": "socket",
+    "event": "connect",
+    "error": "Timed out connecting Socket.IO client.",
+    "user_id": "Skipper-1-7",
+    "room_code": "X2ZXVP",
+    "ts": "2026-03-28T10:32:17.575Z"
+  },
+  {
+    "source": "socket",
+    "event": "connect",
+    "error": "Timed out connecting Socket.IO client.",
+    "user_id": "Skipper-1-9",
+    "room_code": "X2ZXVP",
+    "ts": "2026-03-28T10:32:17.575Z"
+  }
+]
