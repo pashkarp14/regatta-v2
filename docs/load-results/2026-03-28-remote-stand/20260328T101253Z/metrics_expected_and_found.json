@@ -1,0 +1,15 @@
+[
+  "regatta_errors_total",
+  "regatta_http_request_bytes_total",
+  "regatta_http_requests_total",
+  "regatta_http_response_bytes_total",
+  "regatta_realtime_loops_active",
+  "regatta_realtime_tick_changed_total",
+  "regatta_realtime_tick_noop_total",
+  "regatta_realtime_ticks_total",
+  "regatta_room_store_operations_total",
+  "regatta_rooms_total",
+  "regatta_socket_connected_clients",
+  "regatta_socket_events_total",
+  "regatta_socket_payload_bytes_total"
+]

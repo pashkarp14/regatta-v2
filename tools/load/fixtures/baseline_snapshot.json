@@ -1,0 +1,165 @@
+{
+  "boats": [
+    {
+      "collisions": 0,
+      "color": "#ff595e",
+      "currentSpeedUnitsPerSec": 0,
+      "distance": 0,
+      "falseStartDeltaMs": null,
+      "finished": false,
+      "hasHeading": false,
+      "heading": 0,
+      "lastPenaltyAt": 0,
+      "lastPenaltyKey": "",
+      "lastPenaltyReason": "",
+      "nextMark": 0,
+      "penalties": 0,
+      "penaltySlowUntil": 0,
+      "place": null,
+      "roundInZone": false,
+      "roundSweep": 0,
+      "speedCoeff": 1,
+      "startDeltaMs": null,
+      "tack": 0,
+      "turns": 0,
+      "x": 16.8,
+      "y": 10
+    },
+    {
+      "collisions": 0,
+      "color": "#ffca3a",
+      "currentSpeedUnitsPerSec": 0,
+      "distance": 0,
+      "falseStartDeltaMs": null,
+      "finished": false,
+      "hasHeading": false,
+      "heading": 0,
+      "lastPenaltyAt": 0,
+      "lastPenaltyKey": "",
+      "lastPenaltyReason": "",
+      "nextMark": 0,
+      "penalties": 0,
+      "penaltySlowUntil": 0,
+      "place": null,
+      "roundInZone": false,
+      "roundSweep": 0,
+      "speedCoeff": 1,
+      "startDeltaMs": null,
+      "tack": 0,
+      "turns": 0,
+      "x": 23.6,
+      "y": 10
+    },
+    {
+      "collisions": 0,
+      "color": "#1982c4",
+      "currentSpeedUnitsPerSec": 0,
+      "distance": 0,
+      "falseStartDeltaMs": null,
+      "finished": false,
+      "hasHeading": false,
+      "heading": 0,
+      "lastPenaltyAt": 0,
+      "lastPenaltyKey": "",
+      "lastPenaltyReason": "",
+      "nextMark": 0,
+      "penalties": 0,
+      "penaltySlowUntil": 0,
+      "place": null,
+      "roundInZone": false,
+      "roundSweep": 0,
+      "speedCoeff": 1,
+      "startDeltaMs": null,
+      "tack": 0,
+      "turns": 0,
+      "x": 30.4,
+      "y": 10
+    },
+    {
+      "collisions": 0,
+      "color": "#6a4c93",
+      "currentSpeedUnitsPerSec": 0,
+      "distance": 0,
+      "falseStartDeltaMs": null,
+      "finished": false,
+      "hasHeading": false,
+      "heading": 0,
+      "lastPenaltyAt": 0,
+      "lastPenaltyKey": "",
+      "lastPenaltyReason": "",
+      "nextMark": 0,
+      "penalties": 0,
+      "penaltySlowUntil": 0,
+      "place": null,
+      "roundInZone": false,
+      "roundSweep": 0,
+      "speedCoeff": 1,
+      "startDeltaMs": null,
+      "tack": 0,
+      "turns": 0,
+      "x": 37.2,
+      "y": 10
+    }
+  ],
+  "course": {
+    "finishA": {
+      "x": 10,
+      "y": 10
+    },
+    "finishB": {
+      "x": 44,
+      "y": 10
+    },
+    "gustRect": null,
+    "markCount": 3,
+    "marks": [
+      {
+        "x": 27,
+        "y": 58
+      },
+      {
+        "x": 16,
+        "y": 36
+      },
+      {
+        "x": 9,
+        "y": 4
+      }
+    ],
+    "startA": {
+      "x": 10,
+      "y": 10
+    },
+    "startB": {
+      "x": 44,
+      "y": 10
+    }
+  },
+  "race": {
+    "gustExpiresAt": 0,
+    "nextAutoGustAt": 0,
+    "phase": "countdown",
+    "raceFinishedCount": 0,
+    "realtimeCountdownEndsAt": 0
+  },
+  "settings": {
+    "autoFullscreenMode": "off",
+    "autoGustDurationSec": 6,
+    "autoGustIntervalSec": 10,
+    "autoGustsEnabled": false,
+    "deadZoneDeg": 40,
+    "finishSeparate": false,
+    "interactionMode": "contact",
+    "playMode": "realtime",
+    "realtimePrepSeconds": 18,
+    "roundingSide": "port",
+    "snapThreshold": 0.8,
+    "tackPenaltyFactor": 0.95,
+    "windAngleDeg": 0
+  },
+  "version": 2,
+  "world": {
+    "height": 72,
+    "width": 54
+  }
+}

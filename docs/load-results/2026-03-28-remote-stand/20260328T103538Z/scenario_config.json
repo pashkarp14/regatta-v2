@@ -1,0 +1,17 @@
+{
+  "scenario": "live_race",
+  "base_url": "http://158.160.217.19:5001",
+  "users": 8,
+  "rooms": 1,
+  "users_per_room": 8,
+  "duration_seconds": 30,
+  "baseline_snapshot_source": {
+    "strategy": "remote_library",
+    "record_id": "std-training-bay",
+    "record_name": "Тренировочная бухта",
+    "record_scope": "standard"
+  },
+  "started_at": "2026-03-28T10:35:42.472Z",
+  "error": "",
+  "finished_at": "2026-03-28T10:36:12.485Z"
+}

@@ -1,0 +1,15 @@
+[
+  "regatta_client_telemetry_duration_seconds",
+  "regatta_client_telemetry_events_total",
+  "regatta_game_state_payload_bytes",
+  "regatta_game_state_validation_duration_seconds",
+  "regatta_http_request_duration_seconds",
+  "regatta_public_room_view_duration_seconds",
+  "regatta_public_room_view_payload_bytes",
+  "regatta_realtime_tick_drift_seconds",
+  "regatta_realtime_tick_duration_seconds",
+  "regatta_room_players_histogram",
+  "regatta_room_store_duration_seconds",
+  "regatta_room_store_payload_bytes",
+  "regatta_socket_event_duration_seconds"
+]

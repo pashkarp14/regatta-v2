@@ -1,0 +1,17 @@
+{
+  "url": "http://158.160.217.19:5001api/bootstrap",
+  "path": "/api/bootstrap",
+  "method": "GET",
+  "status": 200,
+  "duration_ms": 18.39,
+  "response_bytes": 144,
+  "body": {
+    "asset_version": "2.0.0-1774690970000000000",
+    "display_name": "",
+    "observability": {
+      "client_telemetry_enabled": true
+    },
+    "room": null,
+    "version": "2.0.0"
+  }
+}

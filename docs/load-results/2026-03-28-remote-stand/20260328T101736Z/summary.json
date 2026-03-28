@@ -1,0 +1,382 @@
+{
+  "scenario": "join_storm_1x20",
+  "base_url": "http://158.160.217.19:5001",
+  "rooms": 1,
+  "users": 10,
+  "duration_seconds": 15,
+  "started_at": "2026-03-28T10:17:39.926Z",
+  "finished_at": "2026-03-28T10:22:51.992Z",
+  "runner": {
+    "http": {
+      "POST /api/rooms": {
+        "count": 1,
+        "avg": 45.44,
+        "p50": 45.44,
+        "p95": 45.44,
+        "p99": 45.44,
+        "max": 45.44,
+        "error_rate": 0.0
+      },
+      "POST /api/rooms/join": {
+        "count": 9,
+        "avg": 155.91,
+        "p50": 178.76,
+        "p95": 284.66,
+        "p99": 284.66,
+        "max": 284.66,
+        "error_rate": 0.0
+      }
+    },
+    "socket": {
+      "connect": {
+        "count": 10,
+        "avg": 60069.71,
+        "p50": 26.51,
+        "p95": 300241.65,
+        "p99": 300241.65,
+        "max": 300241.65
+      },
+      "room:join_socket": {
+        "count": 8,
+        "avg": 0.03,
+        "p50": 0.03,
+        "p95": 0.05,
+        "p99": 0.05,
+        "max": 0.05
+      }
+    },
+    "socket_event_counts": {
+      "connect": 10,
+      "room:join_socket": 8,
+      "room:snapshot": 8,
+      "room:presence": 45
+    },
+    "join_socket_to_snapshot": {
+      "count": 8,
+      "avg": 25.38,
+      "p50": 25.0,
+      "p95": 41.0,
+      "p99": 41.0,
+      "max": 41.0
+    },
+    "control_to_revision": {
+      "count": 0,
+      "avg": 0.0,
+      "p50": 0.0,
+      "p95": 0.0,
+      "p99": 0.0,
+      "max": 0.0
+    },
+    "disconnect_rate": 0.0,
+    "error_rate": 0.0247,
+    "errors_total": 2,
+    "top_errors": [
+      {
+        "error": "socket connect ",
+        "count": 2
+      }
+    ]
+  },
+  "metrics": {
+    "used_metric_names": [
+      "regatta_errors_total",
+      "regatta_http_request_bytes_total",
+      "regatta_http_requests_total",
+      "regatta_http_response_bytes_total",
+      "regatta_realtime_loops_active",
+      "regatta_realtime_tick_changed_total",
+      "regatta_realtime_tick_noop_total",
+      "regatta_realtime_ticks_total",
+      "regatta_room_store_operations_total",
+      "regatta_rooms_total",
+      "regatta_socket_connected_clients",
+      "regatta_socket_events_total",
+      "regatta_socket_payload_bytes_total"
+    ],
+    "expected_but_missing": [
+      "regatta_client_telemetry_duration_seconds",
+      "regatta_client_telemetry_events_total",
+      "regatta_game_state_payload_bytes",
+      "regatta_game_state_validation_duration_seconds",
+      "regatta_http_request_duration_seconds",
+      "regatta_public_room_view_duration_seconds",
+      "regatta_public_room_view_payload_bytes",
+      "regatta_realtime_tick_drift_seconds",
+      "regatta_realtime_tick_duration_seconds",
+      "regatta_room_players_histogram",
+      "regatta_room_store_duration_seconds",
+      "regatta_room_store_payload_bytes",
+      "regatta_socket_event_duration_seconds"
+    ],
+    "found_but_undocumented": [
+      "process_cpu_seconds_total",
+      "process_max_fds",
+      "process_open_fds",
+      "process_resident_memory_bytes",
+      "process_start_time_seconds",
+      "process_virtual_memory_bytes",
+      "python_gc_collections_total",
+      "python_gc_objects_collected_total",
+      "python_gc_objects_uncollectable_total",
+      "python_info",
+      "regatta_errors_created",
+      "regatta_game_state_payload_bytes_bucket",
+      "regatta_game_state_payload_bytes_count",
+      "regatta_game_state_payload_bytes_created",
+      "regatta_game_state_payload_bytes_sum",
+      "regatta_game_state_validation_duration_seconds_bucket",
+      "regatta_game_state_validation_duration_seconds_count",
+      "regatta_game_state_validation_duration_seconds_created",
+      "regatta_game_state_validation_duration_seconds_sum",
+      "regatta_http_request_bytes_created",
+      "regatta_http_request_duration_seconds_bucket",
+      "regatta_http_request_duration_seconds_count",
+      "regatta_http_request_duration_seconds_created",
+      "regatta_http_request_duration_seconds_sum",
+      "regatta_http_requests_created",
+      "regatta_http_response_bytes_created",
+      "regatta_public_room_view_duration_seconds_bucket",
+      "regatta_public_room_view_duration_seconds_count",
+      "regatta_public_room_view_duration_seconds_created",
+      "regatta_public_room_view_duration_seconds_sum",
+      "regatta_public_room_view_payload_bytes_bucket",
+      "regatta_public_room_view_payload_bytes_count",
+      "regatta_public_room_view_payload_bytes_created",
+      "regatta_public_room_view_payload_bytes_sum",
+      "regatta_realtime_tick_changed_created",
+      "regatta_realtime_tick_drift_seconds_bucket",
+      "regatta_realtime_tick_drift_seconds_count",
+      "regatta_realtime_tick_drift_seconds_created",
+      "regatta_realtime_tick_drift_seconds_sum",
+      "regatta_realtime_tick_duration_seconds_bucket",
+      "regatta_realtime_tick_duration_seconds_count",
+      "regatta_realtime_tick_duration_seconds_created",
+      "regatta_realtime_tick_duration_seconds_sum",
+      "regatta_realtime_tick_noop_created",
+      "regatta_realtime_ticks_created",
+      "regatta_room_players_histogram_bucket",
+      "regatta_room_players_histogram_count",
+      "regatta_room_players_histogram_created",
+      "regatta_room_players_histogram_sum",
+      "regatta_room_store_duration_seconds_bucket",
+      "regatta_room_store_duration_seconds_count",
+      "regatta_room_store_duration_seconds_created",
+      "regatta_room_store_duration_seconds_sum",
+      "regatta_room_store_operations_created",
+      "regatta_room_store_payload_bytes_bucket",
+      "regatta_room_store_payload_bytes_count",
+      "regatta_room_store_payload_bytes_created",
+      "regatta_room_store_payload_bytes_sum",
+      "regatta_socket_event_duration_seconds_bucket",
+      "regatta_socket_event_duration_seconds_count",
+      "regatta_socket_event_duration_seconds_created",
+      "regatta_socket_event_duration_seconds_sum",
+      "regatta_socket_events_created",
+      "regatta_socket_payload_bytes_created"
+    ],
+    "histograms": {
+      "regatta_http_request_duration_seconds": {
+        "endpoint=/metrics,method=GET,status=200": {
+          "count": 1,
+          "avg": 0.0078,
+          "p50": 0.01,
+          "p95": 0.01,
+          "p99": 0.01,
+          "max": 5.0
+        },
+        "endpoint=/api/library/maps,method=GET,status=200": {
+          "count": 1,
+          "avg": 0.0015,
+          "p50": 0.005,
+          "p95": 0.005,
+          "p99": 0.005,
+          "max": 5.0
+        },
+        "endpoint=/api/library/maps/<record_id>,method=GET,status=200": {
+          "count": 1,
+          "avg": 0.0012,
+          "p50": 0.005,
+          "p95": 0.005,
+          "p99": 0.005,
+          "max": 5.0
+        },
+        "endpoint=/api/rooms,method=POST,status=200": {
+          "count": 1,
+          "avg": 0.0044,
+          "p50": 0.005,
+          "p95": 0.005,
+          "p99": 0.005,
+          "max": 5.0
+        },
+        "endpoint=/api/rooms/join,method=POST,status=200": {
+          "count": 9,
+          "avg": 0.0782,
+          "p50": 0.2,
+          "p95": 0.4,
+          "p99": 0.4,
+          "max": 5.0
+        }
+      },
+      "regatta_socket_event_duration_seconds": {
+        "event=disconnect,result=ok": {
+          "count": 8,
+          "avg": 0.0048,
+          "p50": 0.005,
+          "p95": 0.01,
+          "p99": 0.01,
+          "max": 1.0
+        },
+        "event=room:join_socket,result=ok": {
+          "count": 8,
+          "avg": 0.0276,
+          "p50": 0.05,
+          "p95": 0.05,
+          "p99": 0.05,
+          "max": 1.0
+        }
+      },
+      "regatta_room_players_histogram": {
+        "default": {
+          "count": 26,
+          "avg": 8.2692,
+          "p50": 12.0,
+          "p95": 12.0,
+          "p99": 12.0,
+          "max": 24.0
+        }
+      },
+      "regatta_room_store_duration_seconds": {
+        "backend=redis,operation=get_room,result=ok": {
+          "count": 26,
+          "avg": 0.0031,
+          "p50": 0.005,
+          "p95": 0.01,
+          "p99": 0.025,
+          "max": 1.0
+        },
+        "backend=redis,operation=save_room,result=ok": {
+          "count": 10,
+          "avg": 0.0014,
+          "p50": 0.005,
+          "p95": 0.005,
+          "p99": 0.005,
+          "max": 1.0
+        }
+      },
+      "regatta_room_store_payload_bytes": {
+        "backend=redis,operation=save_room": {
+          "count": 10,
+          "avg": 9745.0,
+          "p50": 16384.0,
+          "p95": 16384.0,
+          "p99": 16384.0,
+          "max": 1048576.0
+        },
+        "backend=redis,operation=get_room": {
+          "count": 25,
+          "avg": 13337.8,
+          "p50": 16384.0,
+          "p95": 16384.0,
+          "p99": 16384.0,
+          "max": 1048576.0
+        }
+      },
+      "regatta_public_room_view_duration_seconds": {
+        "default": {
+          "count": 26,
+          "avg": 0.0003,
+          "p50": 0.0005,
+          "p95": 0.0005,
+          "p99": 0.0005,
+          "max": 0.25
+        }
+      },
+      "regatta_public_room_view_payload_bytes": {
+        "default": {
+          "count": 26,
+          "avg": 5340.3462,
+          "p50": 8192.0,
+          "p95": 8192.0,
+          "p99": 8192.0,
+          "max": 524288.0
+        }
+      },
+      "regatta_game_state_validation_duration_seconds": {
+        "default": {
+          "count": 33,
+          "avg": 0.0001,
+          "p50": 0.0005,
+          "p95": 0.0005,
+          "p99": 0.0005,
+          "max": 0.25
+        }
+      },
+      "regatta_game_state_payload_bytes": {
+        "default": {
+          "count": 33,
+          "avg": 2810.2727,
+          "p50": 8192.0,
+          "p95": 8192.0,
+          "p99": 8192.0,
+          "max": 524288.0
+        }
+      }
+    },
+    "counters": {
+      "python_gc_objects_collected_total": {
+        "generation=0": 462.0
+      },
+      "python_gc_collections_total": {
+        "generation=0": 6.0
+      },
+      "process_virtual_memory_bytes": {
+        "default": 16818176.0
+      },
+      "process_resident_memory_bytes": {
+        "default": 655360.0
+      },
+      "process_cpu_seconds_total": {
+        "default": 0.34
+      },
+      "regatta_http_requests_total": {
+        "endpoint=/metrics,method=GET,status=200": 1.0,
+        "endpoint=/api/library/maps,method=GET,status=200": 1.0,
+        "endpoint=/api/library/maps/<record_id>,method=GET,status=200": 1.0,
+        "endpoint=/api/rooms,method=POST,status=200": 1.0,
+        "endpoint=/api/rooms/join,method=POST,status=200": 9.0
+      },
+      "regatta_http_request_bytes_total": {
+        "endpoint=/api/rooms,method=POST": 4634.0,
+        "endpoint=/api/rooms/join,method=POST": 459.0
+      },
+      "regatta_http_response_bytes_total": {
+        "endpoint=/metrics,method=GET,status=200": 58718.0,
+        "endpoint=/api/library/maps,method=GET,status=200": 2845.0,
+        "endpoint=/api/library/maps/<record_id>,method=GET,status=200": 3218.0,
+        "endpoint=/api/rooms,method=POST,status=200": 1648.0,
+        "endpoint=/api/rooms/join,method=POST,status=200": 37766.0
+      },
+      "regatta_socket_events_total": {
+        "event=disconnect,result=ok": 8.0,
+        "event=room:join_socket,result=ok": 8.0
+      },
+      "regatta_socket_payload_bytes_total": {
+        "direction=in,event=room:join_socket": 176.0,
+        "direction=out,event=room:presence": 49776.0
+      },
+      "regatta_rooms_total": {
+        "status=lobby": 1.0
+      },
+      "regatta_room_store_operations_total": {
+        "backend=redis,operation=get_room,result=ok": 26.0,
+        "backend=redis,operation=save_room,result=ok": 10.0
+      }
+    }
+  },
+  "bottleneck": "No single dominant bottleneck stood out in this run; the system remained mostly balanced at the measured level.",
+  "next_steps": [
+    "Compare `public_room_view` payload size against the measured socket latency and trim repeated room fields before increasing concurrency again.",
+    "Profile `room_store.get_room` and `room_store.save_room` under the same scenario, because join/start flows depend on them directly.",
+    "Re-run the same scenario after any change and compare the new `/metrics` histogram deltas against this baseline instead of relying on single-run intuition."
+  ]
+}

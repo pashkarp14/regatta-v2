@@ -1,0 +1,11 @@
+[
+  {
+    "source": "http",
+    "path": "/api/rooms/7R3DOK",
+    "status": 0,
+    "error": "",
+    "user_id": "Skipper-1-0",
+    "room_code": "7R3DOK",
+    "ts": "2026-03-28T10:36:12.441Z"
+  }
+]
