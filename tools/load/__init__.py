@@ -15,6 +15,7 @@ from .run import (
     run_join_storm,
     run_live_race,
     run_mixed_chaos,
+    run_observer_burst,
     run_smoke,
 )
 
@@ -33,5 +34,6 @@ __all__ = [
     "run_join_storm",
     "run_live_race",
     "run_mixed_chaos",
+    "run_observer_burst",
     "run_smoke",
 ]

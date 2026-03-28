@@ -26,6 +26,8 @@ ROOM_PREFIX = "regatta:v2:room:"
 ROOM_CODE_ALPHABET = string.ascii_uppercase + string.digits
 MAX_GAME_STATE_BYTES = 500_000
 MAX_ROOM_PLAYERS = 20
+MAX_ROOM_OBSERVERS = 80
+MAX_TOTAL_ROOM_USERS = MAX_ROOM_PLAYERS + MAX_ROOM_OBSERVERS
 BOAT_COLORS = [
     "#e53935",
     "#1e88e5",
@@ -143,9 +145,29 @@ def room_joined_racer_count(room: dict[str, Any]) -> int:
     return room_racer_slot_count(room)
 
 
+def room_joined_observer_count(room: dict[str, Any]) -> int:
+    return sum(1 for player in room.get("players", []) if player_is_observer(player))
+
+
+def room_max_racers(room: dict[str, Any]) -> int:
+    configured = room.get("max_racers")
+    if isinstance(configured, int) and configured > 0:
+        return configured
+    legacy = room.get("max_players")
+    if isinstance(legacy, int) and legacy > 0:
+        return max(legacy, room_joined_racer_count(room))
+    return max(room_joined_racer_count(room), 1)
+
+
+def room_max_observers(room: dict[str, Any]) -> int:
+    configured = room.get("max_observers")
+    if isinstance(configured, int) and configured >= 0:
+        return configured
+    return max(0, MAX_TOTAL_ROOM_USERS - room_max_racers(room))
+
+
 def room_total_capacity(room: dict[str, Any]) -> int:
-    host_player = room_host_player(room)
-    return MAX_ROOM_PLAYERS + (1 if player_is_observer(host_player) else 0)
+    return room_max_racers(room) + room_max_observers(room)
 
 
 def room_can_start(room: dict[str, Any]) -> bool:
@@ -183,13 +205,19 @@ def _public_room_base_view(
     host_player = room_host_player(room)
     players = sorted(room.get("players", []), key=_player_sort_key)
     boat_count = _room_boat_count(room)
+    observer_count = room_joined_observer_count(room)
+    max_racers = room_max_racers(room)
+    max_observers = room_max_observers(room)
     snapshot = {
         "code": room["code"],
         "status": room["status"],
         "server_time_ms": now_ms(),
-        "max_players": boat_count,
+        "max_players": max_racers,
+        "max_racers": max_racers,
+        "max_observers": max_observers,
         "joined_count": len(players),
         "joined_racers_count": boat_count,
+        "joined_observers_count": observer_count,
         "capacity": room_total_capacity(room),
         "start_ready": room_can_start(room),
         "can_start": room_can_start(room),
@@ -438,7 +466,9 @@ def reshape_room_player_states(room: dict[str, Any]) -> dict[str, Any]:
         if isinstance(snapshot, dict):
             room[state_key] = reshape_game_state_for_players(snapshot, old_ids, new_ids)
     room["racer_player_ids"] = new_ids
-    room["max_players"] = len(new_ids)
+    room["max_racers"] = room_max_racers(room)
+    room["max_observers"] = room_max_observers(room)
+    room["max_players"] = room["max_racers"]
     return room
 
 
@@ -557,6 +587,10 @@ class RoomStore:
                 raise RoomValidationError(f"Room size cannot exceed {MAX_ROOM_PLAYERS} boats.")
 
             source_state = validate_game_state_shape(deepcopy(game_state))
+            requested_racer_slots = int(max_players) if isinstance(max_players, int) and max_players > 0 else max(
+                1,
+                min(len(source_state.get("boats") or []), MAX_ROOM_PLAYERS),
+            )
             for _ in range(12):
                 room_code = make_room_code()
                 if self.get_room(room_code) is None:
@@ -570,7 +604,9 @@ class RoomStore:
             room = {
                 "code": room_code,
                 "status": "lobby",
-                "max_players": 0,
+                "max_players": requested_racer_slots,
+                "max_racers": requested_racer_slots,
+                "max_observers": max(0, MAX_TOTAL_ROOM_USERS - requested_racer_slots),
                 "host_token": player_token,
                 "revision": 1,
                 "created_at": now_ts(),
@@ -623,8 +659,9 @@ class RoomStore:
 
             if room["status"] != "lobby":
                 raise RoomForbidden("The match is already running.")
-            if room_joined_racer_count(room) >= MAX_ROOM_PLAYERS:
+            if len(room.get("players", [])) >= room_total_capacity(room):
                 raise RoomFull("Room is already full.")
+            join_as_observer = room_joined_racer_count(room) >= room_max_racers(room)
 
             room["players"].append(
                 {
@@ -632,7 +669,7 @@ class RoomStore:
                     "token": make_player_token(),
                     "name": normalize_name(player_name),
                     "seat_index": None,
-                    "is_observer": False,
+                    "is_observer": join_as_observer,
                     "joined_at": now_ts(),
                 }
             )

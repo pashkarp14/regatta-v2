@@ -29,7 +29,7 @@ from .observability import (
     set_realtime_loops_active,
 )
 from .realtime_engine import simulate_realtime_tick, simulate_weather_tick
-from .room_events import broadcast_room_presence, broadcast_room_state, serialize_room
+from .room_events import broadcast_room_presence, broadcast_room_state, serialize_room, serialize_room_presence
 from .room_store import (
     RoomForbidden,
     RoomStoreError,
@@ -400,7 +400,7 @@ def register_socket_handlers() -> None:
                     emit("room:snapshot", serialize_room(room, player_token))
                 if room_requires_live_loop(room):
                     ensure_realtime_room_loop(room["code"])
-                broadcast_room_presence(room)
+                emit("room:presence", serialize_room_presence(room))
             except RoomStoreError as exc:
                 result = "rejected"
                 error_kind = type(exc).__name__

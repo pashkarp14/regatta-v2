@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from regatta_app import factory as factory_module
 from regatta_app import sockets as realtime_sockets
 from regatta_app.api import rooms as rooms_api
 from regatta_app.factory import create_app
@@ -170,6 +171,34 @@ def test_structured_logs_attach_event_and_request_id(app, caplog):
     assert getattr(matching[0], "request_id", "")
 
 
+def test_create_app_uses_socketio_message_queue_from_config(tmp_path: Path, monkeypatch):
+    library_dir = tmp_path / "library"
+    library_dir.mkdir()
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(factory_module.session_ext, "init_app", lambda app: None)
+
+    def fake_init_app(app, **kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(factory_module.socketio, "init_app", fake_init_app)
+
+    create_app(
+        {
+            "TESTING": True,
+            "SECRET_KEY": "test-secret",
+            "SESSION_TYPE": "filesystem",
+            "LIBRARY_DIR": str(library_dir),
+            "ROOM_TTL_SECONDS": 3600,
+            "REDIS_URL": "redis://redis:6380/0",
+            "SOCKETIO_MESSAGE_QUEUE": "redis://redis:6380/1",
+        }
+    )
+
+    assert captured.get("message_queue") == "redis://redis:6380/1"
+    assert captured.get("async_mode") == "threading"
+
+
 def test_socket_join_records_metrics(app):
     host = app.test_client()
     guest = app.test_client()
@@ -234,6 +263,43 @@ def test_socket_join_logs_snapshot_sent_flag(app, caplog):
     ]
     assert matching
     assert matching[-1].event_fields.get("snapshot_sent") is False
+
+
+def test_room_join_logs_observer_capacity_fields(app, caplog):
+    host = app.test_client()
+    guest_one = app.test_client()
+    guest_two = app.test_client()
+    room_code = _create_room(host)
+
+    first_join = guest_one.post(
+        "/api/rooms/join",
+        json={
+            "display_name": "Guest One",
+            "room_code": room_code,
+        },
+    )
+    assert first_join.status_code == 200, first_join.get_json()
+
+    with caplog.at_level(logging.INFO, logger=app.logger.name):
+        second_join = guest_two.post(
+            "/api/rooms/join",
+            json={
+                "display_name": "Guest Two",
+                "room_code": room_code,
+            },
+        )
+
+    assert second_join.status_code == 200, second_join.get_json()
+    matching = [
+        record
+        for record in caplog.records
+        if getattr(record, "event_name", "") == "room.join.response"
+    ]
+    assert matching
+    assert matching[-1].event_fields.get("joined_racers_count") == 2
+    assert matching[-1].event_fields.get("joined_observers_count") == 1
+    assert matching[-1].event_fields.get("max_racers") == 2
+    assert matching[-1].event_fields.get("max_observers") == 98
 
 
 def test_live_room_loop_checkpoints_instead_of_saving_every_changed_tick(app, monkeypatch):

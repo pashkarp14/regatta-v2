@@ -146,7 +146,7 @@ def _derive_join_socket_to_snapshot(socket_rows: list[dict[str, Any]]) -> dict[s
         ts = _parse_ts(row.get("ts"))
         if event == "room:join_socket" and row.get("direction") == "out":
             outbound[key] = ts
-        elif event == "room:snapshot" and row.get("direction") == "in":
+        elif event in {"room:keyframe", "room:snapshot"} and row.get("direction") == "in":
             started_at = outbound.get(key)
             if started_at:
                 values.append(round((ts - started_at) * 1000.0, 2))
@@ -285,10 +285,12 @@ def generate_report(input_dir: Path | str) -> dict[str, Any]:
     socket_rows = _read_jsonl(input_path / "socket_events.jsonl")
     revisions = _read_jsonl(input_path / "room_revisions.jsonl")
     errors = _read_json(input_path / "errors.json", [])
+    blocking_issue = _read_json(input_path / "blocking_issue.json", {})
     metrics_initial = parse_prometheus_text((input_path / "metrics_initial.txt").read_text(encoding="utf-8") if (input_path / "metrics_initial.txt").exists() else "")
     metrics_final = parse_prometheus_text((input_path / "metrics_final.txt").read_text(encoding="utf-8") if (input_path / "metrics_final.txt").exists() else "")
 
     runner_socket, socket_event_counts = _summarize_socket(socket_rows)
+    join_socket_to_keyframe = _derive_join_socket_to_snapshot(socket_rows)
     summary = {
         "scenario": scenario_config.get("scenario"),
         "base_url": environment.get("base_url") or scenario_config.get("base_url"),
@@ -301,13 +303,15 @@ def generate_report(input_dir: Path | str) -> dict[str, Any]:
             "http": _summarize_http(requests),
             "socket": runner_socket,
             "socket_event_counts": socket_event_counts,
-            "join_socket_to_snapshot": _derive_join_socket_to_snapshot(socket_rows),
+            "join_socket_to_keyframe": join_socket_to_keyframe,
+            "join_socket_to_snapshot": join_socket_to_keyframe,
             "control_to_revision": _summarize_control_to_revision(revisions),
             "disconnect_rate": round(socket_event_counts.get("disconnect", 0) / max(runner_socket.get("connect", {}).get("count", 0), 1), 4),
             "error_rate": round(len(errors) / max(len(requests) + len(socket_rows), 1), 4),
             "errors_total": len(errors),
             "top_errors": _top_errors(errors),
         },
+        "blocking_issue": blocking_issue if isinstance(blocking_issue, dict) and blocking_issue else None,
         "metrics": {
             "used_metric_names": _read_json(input_path / "metrics_expected_and_found.json", []),
             "expected_but_missing": _read_json(input_path / "metrics_expected_but_missing.json", []),
@@ -341,7 +345,7 @@ def _write_summary_and_report(input_path: Path, summary: dict[str, Any], environ
         "| Metric | Count | P50 ms | P95 ms | P99 ms | Max ms |",
         "| --- | ---: | ---: | ---: | ---: | ---: |",
         f"| socket connect | {summary['runner']['socket'].get('connect', {}).get('count', 0)} | {summary['runner']['socket'].get('connect', {}).get('p50', 0.0)} | {summary['runner']['socket'].get('connect', {}).get('p95', 0.0)} | {summary['runner']['socket'].get('connect', {}).get('p99', 0.0)} | {summary['runner']['socket'].get('connect', {}).get('max', 0.0)} |",
-        f"| join_socket -> snapshot | {summary['runner']['join_socket_to_snapshot'].get('count', 0)} | {summary['runner']['join_socket_to_snapshot'].get('p50', 0.0)} | {summary['runner']['join_socket_to_snapshot'].get('p95', 0.0)} | {summary['runner']['join_socket_to_snapshot'].get('p99', 0.0)} | {summary['runner']['join_socket_to_snapshot'].get('max', 0.0)} |",
+        f"| join_socket -> keyframe | {summary['runner']['join_socket_to_keyframe'].get('count', 0)} | {summary['runner']['join_socket_to_keyframe'].get('p50', 0.0)} | {summary['runner']['join_socket_to_keyframe'].get('p95', 0.0)} | {summary['runner']['join_socket_to_keyframe'].get('p99', 0.0)} | {summary['runner']['join_socket_to_keyframe'].get('max', 0.0)} |",
         f"| control -> revision | {summary['runner']['control_to_revision'].get('count', 0)} | {summary['runner']['control_to_revision'].get('p50', 0.0)} | {summary['runner']['control_to_revision'].get('p95', 0.0)} | {summary['runner']['control_to_revision'].get('p99', 0.0)} | {summary['runner']['control_to_revision'].get('max', 0.0)} |",
     ]
 
@@ -361,10 +365,19 @@ def _write_summary_and_report(input_path: Path, summary: dict[str, Any], environ
 
     runner_lines = ["Findings from load runner", ""]
     runner_lines.append(f"- Socket connect count: {summary['runner']['socket'].get('connect', {}).get('count', 0)}")
-    runner_lines.append(f"- join_socket -> snapshot p95: {summary['runner']['join_socket_to_snapshot'].get('p95', 0.0)} ms")
+    runner_lines.append(f"- join_socket -> keyframe p95: {summary['runner']['join_socket_to_keyframe'].get('p95', 0.0)} ms")
     runner_lines.append(f"- control -> revision p95: {summary['runner']['control_to_revision'].get('p95', 0.0)} ms")
     runner_lines.append(f"- Disconnect rate: {summary['runner']['disconnect_rate']}")
     runner_lines.append(f"- Error rate: {summary['runner']['error_rate']}")
+
+    blocking_lines: list[str] = []
+    if summary.get("blocking_issue"):
+        blocking_lines = [
+            "",
+            "## Blocking issue",
+            f"- Message: {summary['blocking_issue'].get('message', '')}",
+            f"- Details: {json.dumps(summary['blocking_issue'].get('details', {}), ensure_ascii=False)}",
+        ]
 
     report = "\n".join(
         [
@@ -389,6 +402,7 @@ def _write_summary_and_report(input_path: Path, summary: dict[str, Any], environ
             "",
             "## Socket",
             *socket_lines,
+            *blocking_lines,
             "",
             "## Findings from /metrics",
             *metrics_lines[2:],

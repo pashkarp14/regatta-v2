@@ -206,6 +206,9 @@ def create_room_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
         host_role=host_role,
         joined_players=len(room.get("players", [])),
         joined_racers=len(room.get("racer_player_ids", [])),
+        joined_observers=sum(1 for player in room.get("players", []) if player.get("is_observer")),
+        max_racers=room.get("max_racers"),
+        max_observers=room.get("max_observers"),
         room_boats=_boat_count(room.get("game_state")),
     )
     return public_room_view(room, player_token)
@@ -240,6 +243,9 @@ def join_room_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
         room_code=room.get("code"),
         joined_players=len(room.get("players", [])),
         joined_racers=len(room.get("racer_player_ids", [])),
+        joined_observers=sum(1 for player in room.get("players", []) if player.get("is_observer")),
+        max_racers=room.get("max_racers"),
+        max_observers=room.get("max_observers"),
     )
     return public_room_view(room, player_token)
 
@@ -308,6 +314,7 @@ def start_room_match(
         room_code=room.get("code"),
         revision=room.get("revision"),
         joined_racers=len(room.get("racer_player_ids", [])),
+        joined_observers=sum(1 for player in room.get("players", []) if player.get("is_observer")),
     )
     return room, player_token
 
