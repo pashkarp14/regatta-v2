@@ -5,6 +5,7 @@ import threading
 import time
 
 from regatta_app.locked_room_store import LockedRoomStore
+from regatta_app.room_store import room_joined_racer_count
 
 
 def make_realtime_state(boat_count: int = 20) -> dict:
@@ -93,7 +94,7 @@ def test_concurrent_join_room_preserves_full_roster():
 
     final_room = store.get_room(room_code)
     assert final_room is not None
-    assert final_room["joined_racers_count"] == 20
+    assert room_joined_racer_count(final_room) == 20
     assert len(final_room["players"]) == 20
     assert len(final_room["racer_player_ids"]) == 20
     assert len(final_room["game_state"]["boats"]) == 20

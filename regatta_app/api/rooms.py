@@ -6,6 +6,7 @@ from flask import Blueprint, current_app, request
 
 from ..app_state import room_store
 from ..game_state import room_requires_live_loop
+from ..observability import log_event, payload_bytes
 from ..room_events import broadcast_room_snapshot, serialize_room
 from ..room_service import (
     create_room_from_payload,
@@ -44,29 +45,42 @@ def remote_addr_label() -> str:
 @bp.post("/api/rooms")
 def create_room():
     payload = json_payload()
-    current_app.logger.info(
-        "room.create.request remote_addr=%s content_length=%s display_name=%r host_role=%s requested_max_players=%s game_state_boats=%s",
-        remote_addr_label(),
-        request.content_length or 0,
-        payload.get("display_name"),
-        payload.get("host_role"),
-        payload.get("max_players"),
-        payload_boat_count(payload),
+    log_event(
+        current_app.logger,
+        "room.create.request",
+        remote_addr=remote_addr_label(),
+        content_length=request.content_length or 0,
+        display_name=payload.get("display_name"),
+        host_role=payload.get("host_role"),
+        requested_max_players=payload.get("max_players"),
+        game_state_boats=payload_boat_count(payload),
     )
     room = create_room_from_payload(payload)
-    current_app.logger.info(
-        "room.create.response room_code=%s status=%s joined_count=%s joined_racers_count=%s",
-        room.get("code"),
-        room.get("status"),
-        room.get("joined_count"),
-        room.get("joined_racers_count"),
+    log_event(
+        current_app.logger,
+        "room.create.response",
+        room_code=room.get("code"),
+        status=room.get("status"),
+        joined_count=room.get("joined_count"),
+        joined_racers_count=room.get("joined_racers_count"),
+        payload_bytes=payload_bytes({"room": room}),
     )
     return {"room": room}
 
 
 @bp.post("/api/rooms/join")
 def join_room():
-    return {"room": join_room_from_payload(json_payload())}
+    payload = json_payload()
+    room = join_room_from_payload(payload)
+    log_event(
+        current_app.logger,
+        "room.join.response",
+        room_code=room.get("code"),
+        joined_count=room.get("joined_count"),
+        joined_racers_count=room.get("joined_racers_count"),
+        payload_bytes=payload_bytes({"room": room}),
+    )
+    return {"room": room}
 
 
 @bp.post("/api/rooms/leave")
@@ -94,6 +108,12 @@ def leave_room():
         if room_requires_live_loop(room):
             ensure_realtime_room_loop(room["code"])
         broadcast_room_snapshot(room)
+    log_event(
+        current_app.logger,
+        "room.leave.response",
+        room_code=room_code or "-",
+        room_present=room is not None,
+    )
     return {"room": None}
 
 
@@ -114,6 +134,13 @@ def start_room(room_code: str):
     if room_requires_live_loop(room):
         ensure_realtime_room_loop(room["code"])
     broadcast_room_snapshot(room)
+    log_event(
+        current_app.logger,
+        "room.start.response",
+        room_code=room.get("code"),
+        revision=room.get("revision"),
+        payload_bytes=payload_bytes({"room": room}),
+    )
     return serialize_room(room, player_token)
 
 
@@ -122,6 +149,7 @@ def edit_room(room_code: str):
     room, player_token = edit_room_match(room_code)
     pop_realtime_control(room["code"])
     broadcast_room_snapshot(room)
+    log_event(current_app.logger, "room.edit.response", room_code=room.get("code"), revision=room.get("revision"))
     return serialize_room(room, player_token)
 
 
@@ -130,6 +158,7 @@ def reset_lobby(room_code: str):
     room, player_token = reset_room_lobby(room_code)
     pop_realtime_control(room["code"])
     broadcast_room_snapshot(room)
+    log_event(current_app.logger, "room.reset_lobby.response", room_code=room.get("code"), revision=room.get("revision"))
     return serialize_room(room, player_token)
 
 
@@ -142,4 +171,12 @@ def kick_room(room_code: str):
     if room_requires_live_loop(room):
         ensure_realtime_room_loop(room["code"])
     broadcast_room_snapshot(room)
+    log_event(
+        current_app.logger,
+        "room.kick.response",
+        room_code=room.get("code"),
+        kicked_token_present=bool(kicked_token),
+        old_racers=len(old_racer_ids),
+        new_racers=len(new_racer_ids),
+    )
     return serialize_room(room, player_token)

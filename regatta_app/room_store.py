@@ -12,6 +12,14 @@ from typing import Any
 from redis import Redis
 
 from .game_state import normalize_lobby_preview_state as build_lobby_preview_state
+from .observability import (
+    observe_game_state_validation,
+    observe_public_room_view,
+    observe_room_store_operation,
+    payload_bytes,
+    remove_room_status,
+    update_room_status,
+)
 
 
 ROOM_PREFIX = "regatta:v2:room:"
@@ -165,11 +173,12 @@ def _player_sort_key(player: dict[str, Any]) -> tuple[int, int, str]:
 
 
 def public_room_view(room: dict[str, Any], player_token: str | None) -> dict[str, Any]:
+    started_at = time.perf_counter()
     viewer = player_for_token(room, player_token)
     host_player = room_host_player(room)
     players = sorted(room.get("players", []), key=_player_sort_key)
     boat_count = _room_boat_count(room)
-    return {
+    snapshot = {
         "code": room["code"],
         "status": room["status"],
         "server_time_ms": now_ms(),
@@ -203,9 +212,16 @@ def public_room_view(room: dict[str, Any], player_token: str | None) -> dict[str
             "token_present": viewer is not None,
         },
     }
+    observe_public_room_view(
+        time.perf_counter() - started_at,
+        payload_bytes(snapshot),
+        len(players),
+    )
+    return snapshot
 
 
 def validate_game_state_shape(game_state: Any) -> dict[str, Any]:
+    started_at = time.perf_counter()
     if not isinstance(game_state, dict):
         raise RoomValidationError("Game state must be a JSON object.")
 
@@ -223,6 +239,7 @@ def validate_game_state_shape(game_state: Any) -> dict[str, Any]:
     if len(boats) > MAX_ROOM_PLAYERS:
         raise RoomValidationError(f"Boat count cannot exceed {MAX_ROOM_PLAYERS}.")
 
+    observe_game_state_validation(time.perf_counter() - started_at, len(encoded.encode("utf-8")))
     return game_state
 
 
@@ -429,42 +446,85 @@ class RoomStore:
         self._memory_rooms[room["code"]] = deepcopy(room)
 
     def get_room(self, room_code: str) -> dict[str, Any] | None:
+        backend = "redis" if self.redis is not None else "memory"
+        started_at = time.perf_counter()
+        result = "ok"
+        payload_size = 0
         room_code = normalize_room_code(room_code)
         if not room_code:
+            observe_room_store_operation("get_room", backend, started_at, result=result, payload_size=payload_size)
             return None
 
-        if self.redis is not None:
-            raw = self.redis.get(self._key(room_code))
-            if raw is None:
-                return None
-            return json.loads(raw)
+        try:
+            if self.redis is not None:
+                raw = self.redis.get(self._key(room_code))
+                if raw is None:
+                    return None
+                room = json.loads(raw)
+                payload_size = len(raw)
+                return room
 
-        with self._lock:
-            return self._load_memory(room_code)
+            with self._lock:
+                room = self._load_memory(room_code)
+            payload_size = payload_bytes(room)
+            return room
+        except RoomStoreError:
+            result = "rejected"
+            raise
+        except Exception:
+            result = "error"
+            raise
+        finally:
+            observe_room_store_operation("get_room", backend, started_at, result=result, payload_size=payload_size)
 
     def save_room(self, room: dict[str, Any]) -> dict[str, Any]:
+        backend = "redis" if self.redis is not None else "memory"
+        started_at = time.perf_counter()
+        result = "ok"
         room = deepcopy(room)
         room["updated_at"] = now_ts()
-        if self.redis is not None:
-            self.redis.setex(
-                self._key(room["code"]),
-                self.ttl_seconds,
-                json.dumps(room, separators=(",", ":"), ensure_ascii=False),
-            )
+        payload_size = payload_bytes(room)
+        try:
+            if self.redis is not None:
+                self.redis.setex(
+                    self._key(room["code"]),
+                    self.ttl_seconds,
+                    json.dumps(room, separators=(",", ":"), ensure_ascii=False),
+                )
+            else:
+                with self._lock:
+                    self._save_memory(room)
+            update_room_status(room["code"], str(room.get("status") or "unknown"))
             return room
-
-        with self._lock:
-            self._save_memory(room)
-        return room
+        except RoomStoreError:
+            result = "rejected"
+            raise
+        except Exception:
+            result = "error"
+            raise
+        finally:
+            observe_room_store_operation("save_room", backend, started_at, result=result, payload_size=payload_size)
 
     def delete_room(self, room_code: str) -> None:
+        backend = "redis" if self.redis is not None else "memory"
+        started_at = time.perf_counter()
+        result = "ok"
         room_code = normalize_room_code(room_code)
-        if self.redis is not None:
-            self.redis.delete(self._key(room_code))
-            return
-
-        with self._lock:
-            self._memory_rooms.pop(room_code, None)
+        try:
+            if self.redis is not None:
+                self.redis.delete(self._key(room_code))
+            else:
+                with self._lock:
+                    self._memory_rooms.pop(room_code, None)
+            remove_room_status(room_code)
+        except RoomStoreError:
+            result = "rejected"
+            raise
+        except Exception:
+            result = "error"
+            raise
+        finally:
+            observe_room_store_operation("delete_room", backend, started_at, result=result)
 
     def create_room(
         self,
@@ -474,123 +534,181 @@ class RoomStore:
         *,
         host_role: str = "player",
     ) -> tuple[dict[str, Any], str]:
-        if isinstance(max_players, int) and max_players > MAX_ROOM_PLAYERS:
-            raise RoomValidationError(f"Room size cannot exceed {MAX_ROOM_PLAYERS} boats.")
+        backend = "redis" if self.redis is not None else "memory"
+        started_at = time.perf_counter()
+        result = "ok"
+        payload_size = 0
+        try:
+            if isinstance(max_players, int) and max_players > MAX_ROOM_PLAYERS:
+                raise RoomValidationError(f"Room size cannot exceed {MAX_ROOM_PLAYERS} boats.")
 
-        source_state = validate_game_state_shape(deepcopy(game_state))
-        for _ in range(12):
-            room_code = make_room_code()
-            if self.get_room(room_code) is None:
-                break
-        else:
-            raise RoomValidationError("Unable to generate a room code. Try again.")
+            source_state = validate_game_state_shape(deepcopy(game_state))
+            for _ in range(12):
+                room_code = make_room_code()
+                if self.get_room(room_code) is None:
+                    break
+            else:
+                raise RoomValidationError("Unable to generate a room code. Try again.")
 
-        player_token = make_player_token()
-        host_is_observer = normalize_host_role(host_role) == "observer"
-        host_player_id = make_player_id()
-        room = {
-            "code": room_code,
-            "status": "lobby",
-            "max_players": 0,
-            "host_token": player_token,
-            "revision": 1,
-            "created_at": now_ts(),
-            "updated_at": now_ts(),
-            "players": [
-                {
-                    "player_id": host_player_id,
-                    "token": player_token,
-                    "name": normalize_name(host_name),
-                    "seat_index": None if host_is_observer else 0,
-                    "is_observer": host_is_observer,
-                    "joined_at": now_ts(),
-                }
-            ],
-            "racer_player_ids": [],
-            "start_state": source_state,
-            "initial_lobby_state": deepcopy(source_state),
-            "game_state": deepcopy(source_state),
-        }
-        reshape_room_player_states(room)
-        room["start_state"] = validate_game_state(room, deepcopy(room["start_state"]))
-        room["initial_lobby_state"] = validate_game_state(room, deepcopy(room["initial_lobby_state"]))
-        room["game_state"] = normalize_lobby_preview_state(room["start_state"])
-        self.save_room(room)
-        return room, player_token
+            player_token = make_player_token()
+            host_is_observer = normalize_host_role(host_role) == "observer"
+            host_player_id = make_player_id()
+            room = {
+                "code": room_code,
+                "status": "lobby",
+                "max_players": 0,
+                "host_token": player_token,
+                "revision": 1,
+                "created_at": now_ts(),
+                "updated_at": now_ts(),
+                "players": [
+                    {
+                        "player_id": host_player_id,
+                        "token": player_token,
+                        "name": normalize_name(host_name),
+                        "seat_index": None if host_is_observer else 0,
+                        "is_observer": host_is_observer,
+                        "joined_at": now_ts(),
+                    }
+                ],
+                "racer_player_ids": [],
+                "start_state": source_state,
+                "initial_lobby_state": deepcopy(source_state),
+                "game_state": deepcopy(source_state),
+            }
+            reshape_room_player_states(room)
+            room["start_state"] = validate_game_state(room, deepcopy(room["start_state"]))
+            room["initial_lobby_state"] = validate_game_state(room, deepcopy(room["initial_lobby_state"]))
+            room["game_state"] = normalize_lobby_preview_state(room["start_state"])
+            payload_size = payload_bytes(room)
+            self.save_room(room)
+            return room, player_token
+        except RoomStoreError:
+            result = "rejected"
+            raise
+        except Exception:
+            result = "error"
+            raise
+        finally:
+            observe_room_store_operation("create_room", backend, started_at, result=result, payload_size=payload_size)
 
     def join_room(self, room_code: str, player_name: str, player_token: str | None = None) -> tuple[dict[str, Any], str]:
-        room = self.get_room(room_code)
-        if room is None:
-            raise RoomNotFound("Room not found.")
+        backend = "redis" if self.redis is not None else "memory"
+        started_at = time.perf_counter()
+        result = "ok"
+        payload_size = 0
+        try:
+            room = self.get_room(room_code)
+            if room is None:
+                raise RoomNotFound("Room not found.")
 
-        existing = player_for_token(room, player_token)
-        if existing is not None:
-            return room, existing["token"]
+            existing = player_for_token(room, player_token)
+            if existing is not None:
+                payload_size = payload_bytes(room)
+                return room, existing["token"]
 
-        if room["status"] != "lobby":
-            raise RoomForbidden("The match is already running.")
-        if room_joined_racer_count(room) >= MAX_ROOM_PLAYERS:
-            raise RoomFull("Room is already full.")
+            if room["status"] != "lobby":
+                raise RoomForbidden("The match is already running.")
+            if room_joined_racer_count(room) >= MAX_ROOM_PLAYERS:
+                raise RoomFull("Room is already full.")
 
-        room["players"].append(
-            {
-                "player_id": make_player_id(),
-                "token": make_player_token(),
-                "name": normalize_name(player_name),
-                "seat_index": None,
-                "is_observer": False,
-                "joined_at": now_ts(),
-            }
-        )
-        reshape_room_player_states(room)
-        room["game_state"] = normalize_lobby_preview_state(room["start_state"])
-        room["revision"] += 1
-        self.save_room(room)
-        newest_player = room["players"][-1]
-        return room, newest_player["token"]
+            room["players"].append(
+                {
+                    "player_id": make_player_id(),
+                    "token": make_player_token(),
+                    "name": normalize_name(player_name),
+                    "seat_index": None,
+                    "is_observer": False,
+                    "joined_at": now_ts(),
+                }
+            )
+            reshape_room_player_states(room)
+            room["game_state"] = normalize_lobby_preview_state(room["start_state"])
+            room["revision"] += 1
+            payload_size = payload_bytes(room)
+            self.save_room(room)
+            newest_player = room["players"][-1]
+            return room, newest_player["token"]
+        except RoomStoreError:
+            result = "rejected"
+            raise
+        except Exception:
+            result = "error"
+            raise
+        finally:
+            observe_room_store_operation("join_room", backend, started_at, result=result, payload_size=payload_size)
 
     def remove_player(self, room_code: str, player_token: str | None) -> dict[str, Any] | None:
-        room = self.get_room(room_code)
-        if room is None or not player_token:
-            return None
+        backend = "redis" if self.redis is not None else "memory"
+        started_at = time.perf_counter()
+        result = "ok"
+        payload_size = 0
+        try:
+            room = self.get_room(room_code)
+            if room is None or not player_token:
+                return None
 
-        remaining = [player for player in room["players"] if player["token"] != player_token]
-        if len(remaining) == len(room["players"]):
-            return room
-        if not remaining:
-            self.delete_room(room["code"])
-            return None
+            remaining = [player for player in room["players"] if player["token"] != player_token]
+            if len(remaining) == len(room["players"]):
+                payload_size = payload_bytes(room)
+                return room
+            if not remaining:
+                self.delete_room(room["code"])
+                return None
 
-        room["players"] = remaining
-        if room["host_token"] == player_token:
-            room["host_token"] = min(
-                remaining,
-                key=lambda item: (
-                    player_is_observer(item),
-                    item["seat_index"] if isinstance(item.get("seat_index"), int) else 10_000,
-                    item.get("joined_at") or 0,
-                ),
-            )["token"]
-        reshape_room_player_states(room)
-        if room["status"] == "lobby":
-            room["game_state"] = normalize_lobby_preview_state(room["start_state"])
-        room["revision"] += 1
-        return self.save_room(room)
+            room["players"] = remaining
+            if room["host_token"] == player_token:
+                room["host_token"] = min(
+                    remaining,
+                    key=lambda item: (
+                        player_is_observer(item),
+                        item["seat_index"] if isinstance(item.get("seat_index"), int) else 10_000,
+                        item.get("joined_at") or 0,
+                    ),
+                )["token"]
+            reshape_room_player_states(room)
+            if room["status"] == "lobby":
+                room["game_state"] = normalize_lobby_preview_state(room["start_state"])
+            room["revision"] += 1
+            payload_size = payload_bytes(room)
+            return self.save_room(room)
+        except RoomStoreError:
+            result = "rejected"
+            raise
+        except Exception:
+            result = "error"
+            raise
+        finally:
+            observe_room_store_operation("remove_player", backend, started_at, result=result, payload_size=payload_size)
 
     def kick_player(self, room_code: str, actor_token: str | None, player_id: str | None) -> dict[str, Any]:
-        room = self.get_room(room_code)
-        if room is None:
-            raise RoomNotFound("Room not found.")
-        if room.get("host_token") != actor_token:
-            raise RoomForbidden("Only the host can kick participants.")
+        backend = "redis" if self.redis is not None else "memory"
+        started_at = time.perf_counter()
+        result = "ok"
+        payload_size = 0
+        try:
+            room = self.get_room(room_code)
+            if room is None:
+                raise RoomNotFound("Room not found.")
+            if room.get("host_token") != actor_token:
+                raise RoomForbidden("Only the host can kick participants.")
 
-        target_player = player_for_id(room, player_id)
-        if target_player is None:
-            raise RoomNotFound("Player not found.")
-        if target_player["token"] == room.get("host_token"):
-            raise RoomForbidden("The host cannot kick themselves.")
+            target_player = player_for_id(room, player_id)
+            if target_player is None:
+                raise RoomNotFound("Player not found.")
+            if target_player["token"] == room.get("host_token"):
+                raise RoomForbidden("The host cannot kick themselves.")
 
-        updated_room = self.remove_player(room_code, target_player["token"])
-        if updated_room is None:
-            raise RoomNotFound("Room not found.")
-        return updated_room
+            updated_room = self.remove_player(room_code, target_player["token"])
+            if updated_room is None:
+                raise RoomNotFound("Room not found.")
+            payload_size = payload_bytes(updated_room)
+            return updated_room
+        except RoomStoreError:
+            result = "rejected"
+            raise
+        except Exception:
+            result = "error"
+            raise
+        finally:
+            observe_room_store_operation("kick_player", backend, started_at, result=result, payload_size=payload_size)

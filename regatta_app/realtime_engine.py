@@ -8,6 +8,8 @@ from typing import Any
 
 from flask import current_app, has_app_context
 
+from .observability import realtime_trace_collisions_enabled
+
 
 MARK_RADIUS = 0.28
 BOAT_RULE_LENGTH = 0.85
@@ -47,6 +49,12 @@ def _realtime_logger() -> logging.Logger:
     return logging.getLogger(__name__)
 
 
+def _realtime_logs_enabled() -> bool:
+    if not has_app_context():
+        return False
+    return realtime_trace_collisions_enabled()
+
+
 def _format_realtime_log_value(value: Any) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
@@ -62,12 +70,15 @@ def _format_realtime_log_value(value: Any) -> str:
 
 
 def _log_realtime_event(event: str, **fields: Any) -> None:
+    logger = _realtime_logger()
+    if not _realtime_logs_enabled() or not logger.isEnabledFor(logging.INFO):
+        return
     details = " ".join(
         f"{key}={_format_realtime_log_value(value)}"
         for key, value in fields.items()
     )
     message = f"{event} {details}".strip()
-    _realtime_logger().info(message)
+    logger.info(message)
 
 
 def _log_mark_collision_detected(

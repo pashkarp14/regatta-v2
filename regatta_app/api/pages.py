@@ -31,17 +31,24 @@ def index():
 def healthz():
     redis = redis_client()
     redis_ok = False
+    redis_backend = "memory"
     if redis is not None:
         try:
             redis_ok = bool(redis.ping())
+            redis_backend = "redis"
         except Exception:
             redis_ok = False
+            redis_backend = "redis"
 
     return {
         "status": "ok",
         "version": current_app.config["APP_VERSION"],
         "redis": redis_ok,
+        "redis_backend": redis_backend,
         "session_backend": current_app.config["SESSION_TYPE"],
+        "metrics_enabled": bool(current_app.config.get("METRICS_ENABLED")),
+        "structured_logs": bool(current_app.config.get("STRUCTURED_LOGS")),
+        "client_telemetry_enabled": bool(current_app.config.get("CLIENT_TELEMETRY_ENABLED")),
     }
 
 
@@ -53,5 +60,8 @@ def bootstrap():
         "version": current_app.config["APP_VERSION"],
         "asset_version": current_app.config["ASSET_VERSION"],
         "display_name": session_state.display_name,
+        "observability": {
+            "client_telemetry_enabled": bool(current_app.config.get("CLIENT_TELEMETRY_ENABLED")),
+        },
         "room": public_room_view(room, session_state.player_token) if room else None,
     }

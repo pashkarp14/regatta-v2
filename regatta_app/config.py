@@ -11,6 +11,12 @@ class BaseConfig:
     APP_NAME = "Парусная регата"
     APP_VERSION = os.getenv("APP_VERSION", "2.0.0")
     APP_LOG_LEVEL = os.getenv("APP_LOG_LEVEL", "INFO")
+    METRICS_ENABLED = os.getenv("METRICS_ENABLED", "0") == "1"
+    STRUCTURED_LOGS = os.getenv("STRUCTURED_LOGS", "0") == "1"
+    CLIENT_TELEMETRY_ENABLED = os.getenv("CLIENT_TELEMETRY_ENABLED", "0") == "1"
+    REALTIME_TRACE_COLLISIONS = os.getenv("REALTIME_TRACE_COLLISIONS", "0") == "1"
+    REALTIME_DEBUG_LOGS = os.getenv("REALTIME_DEBUG_LOGS", "0") == "1"
+    SLOW_TICK_WARN_MS = int(os.getenv("SLOW_TICK_WARN_MS", "40"))
     PORT = int(os.getenv("PORT", "5001"))
     SECRET_KEY = os.getenv("SECRET_KEY", "regatta-v2-dev-secret")
     TESTING = False

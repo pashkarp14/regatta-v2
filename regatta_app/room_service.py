@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import logging
 from typing import Any
 
 from flask import current_app
 
 from .app_state import room_store, socketio_ext
 from .game_state import normalize_lobby_preview_state, normalize_room_start_state, room_requires_live_loop
+from .observability import log_event
 from .room_events import broadcast_room_snapshot
 from .room_store import (
     RoomStoreError,
@@ -48,8 +50,20 @@ def leave_current_room() -> tuple[str | None, dict[str, Any] | None]:
     room_code = session_state.room_code
     updated_room = None
     if session_state.room_code and session_state.player_token:
+        log_event(
+            current_app.logger,
+            "room.leave.begin",
+            room_code=session_state.room_code,
+            player_token_present=bool(session_state.player_token),
+        )
         updated_room = room_store().remove_player(session_state.room_code, session_state.player_token)
     clear_room_session()
+    log_event(
+        current_app.logger,
+        "room.leave.success",
+        room_code=room_code or "-",
+        room_present=updated_room is not None,
+    )
     return room_code, updated_room
 
 
@@ -65,39 +79,47 @@ def _cleanup_previous_room_async(room_code: str | None, player_token: str | None
         return
 
     app = current_app._get_current_object()
-    current_app.logger.info(
-        "room.create.cleanup_previous_room.scheduled previous_room_code=%s",
-        room_code,
+    log_event(
+        current_app.logger,
+        "room.create.cleanup_previous_room.scheduled",
+        previous_room_code=room_code,
     )
 
     def task() -> None:
         with app.app_context():
             try:
-                app.logger.info(
-                    "room.create.cleanup_previous_room.begin previous_room_code=%s",
-                    room_code,
+                log_event(
+                    app.logger,
+                    "room.create.cleanup_previous_room.begin",
+                    previous_room_code=room_code,
                 )
                 updated_room = room_store().remove_player(room_code, player_token)
-                app.logger.info(
-                    "room.create.cleanup_previous_room.done previous_room_code=%s previous_room_still_exists=%s",
-                    room_code,
-                    updated_room is not None,
+                log_event(
+                    app.logger,
+                    "room.create.cleanup_previous_room.done",
+                    previous_room_code=room_code,
+                    previous_room_still_exists=updated_room is not None,
                 )
                 if updated_room is not None:
                     if room_requires_live_loop(updated_room):
                         ensure_realtime_room_loop(updated_room["code"])
                     broadcast_room_snapshot(updated_room)
             except RoomStoreError as exc:
-                app.logger.warning(
-                    "room.create.cleanup_previous_room.rejected previous_room_code=%s error=%s",
-                    room_code,
-                    exc,
+                log_event(
+                    app.logger,
+                    "room.create.cleanup_previous_room.rejected",
+                    level=logging.WARNING,
+                    previous_room_code=room_code,
+                    error=str(exc),
                 )
             except Exception:
-                app.logger.exception(
-                    "room.create.cleanup_previous_room.crashed previous_room_code=%s",
-                    room_code,
+                log_event(
+                    app.logger,
+                    "room.create.cleanup_previous_room.crashed",
+                    level=logging.ERROR,
+                    previous_room_code=room_code,
                 )
+                app.logger.exception("room.create.cleanup_previous_room.crashed previous_room_code=%s", room_code)
 
     socketio_ext().start_background_task(task)
 
@@ -109,21 +131,23 @@ def create_room_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
     host_role = normalize_host_role(payload.get("host_role"))
     player_name = normalize_name(payload.get("display_name") or session_display_name())
 
-    current_app.logger.info(
-        "room.create.begin session_room_code=%s session_has_player=%s display_name=%r host_role=%s requested_max_players=%s game_state_boats=%s",
-        session_state.room_code or "-",
-        bool(session_state.player_token),
-        player_name,
-        host_role,
-        max_players,
-        _boat_count(game_state),
+    log_event(
+        current_app.logger,
+        "room.create.begin",
+        session_room_code=session_state.room_code or "-",
+        session_has_player=bool(session_state.player_token),
+        display_name=player_name,
+        host_role=host_role,
+        requested_max_players=max_players,
+        game_state_boats=_boat_count(game_state),
     )
 
     if session_state.room_code or session_state.player_token:
-        current_app.logger.info(
-            "room.create.session_reset previous_room_code=%s session_had_player=%s",
-            session_state.room_code or "-",
-            bool(session_state.player_token),
+        log_event(
+            current_app.logger,
+            "room.create.session_reset",
+            previous_room_code=session_state.room_code or "-",
+            session_had_player=bool(session_state.player_token),
         )
         clear_room_session()
         _cleanup_previous_room_async(session_state.room_code, session_state.player_token)
@@ -136,16 +160,27 @@ def create_room_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
             host_role=host_role,
         )
     except RoomStoreError as exc:
-        current_app.logger.warning(
-            "room.create.rejected display_name=%r host_role=%s requested_max_players=%s game_state_boats=%s error=%s",
-            player_name,
-            host_role,
-            max_players,
-            _boat_count(game_state),
-            exc,
+        log_event(
+            current_app.logger,
+            "room.create.rejected",
+            level=logging.WARNING,
+            display_name=player_name,
+            host_role=host_role,
+            requested_max_players=max_players,
+            game_state_boats=_boat_count(game_state),
+            error=str(exc),
         )
         raise
     except Exception:
+        log_event(
+            current_app.logger,
+            "room.create.crashed",
+            level=logging.ERROR,
+            display_name=player_name,
+            host_role=host_role,
+            requested_max_players=max_players,
+            game_state_boats=_boat_count(game_state),
+        )
         current_app.logger.exception(
             "room.create.crashed display_name=%r host_role=%s requested_max_players=%s game_state_boats=%s",
             player_name,
@@ -156,13 +191,14 @@ def create_room_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
         raise
 
     bind_room_session(room["code"], player_token, player_name)
-    current_app.logger.info(
-        "room.create.success room_code=%s host_role=%s joined_players=%s joined_racers=%s room_boats=%s",
-        room.get("code"),
-        host_role,
-        len(room.get("players", [])),
-        len(room.get("racer_player_ids", [])),
-        _boat_count(room.get("game_state")),
+    log_event(
+        current_app.logger,
+        "room.create.success",
+        room_code=room.get("code"),
+        host_role=host_role,
+        joined_players=len(room.get("players", [])),
+        joined_racers=len(room.get("racer_player_ids", [])),
+        room_boats=_boat_count(room.get("game_state")),
     )
     return public_room_view(room, player_token)
 
@@ -171,6 +207,14 @@ def join_room_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
     session_state = current_session_state()
     room_code = normalize_room_code(payload.get("room_code"))
     player_name = normalize_name(payload.get("display_name") or session_display_name())
+    log_event(
+        current_app.logger,
+        "room.join.begin",
+        room_code=room_code or "-",
+        display_name=player_name,
+        session_room_code=session_state.room_code or "-",
+        session_has_player=bool(session_state.player_token),
+    )
 
     if session_state.room_code and session_state.room_code != room_code:
         leave_current_room()
@@ -182,6 +226,13 @@ def join_room_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
         session_state.player_token,
     )
     bind_room_session(room["code"], player_token, player_name)
+    log_event(
+        current_app.logger,
+        "room.join.success",
+        room_code=room.get("code"),
+        joined_players=len(room.get("players", [])),
+        joined_racers=len(room.get("racer_player_ids", [])),
+    )
     return public_room_view(room, player_token)
 
 
@@ -213,6 +264,14 @@ def start_room_match(
     game_state: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], str | None]:
     player_token = current_session_state().player_token
+    log_event(
+        current_app.logger,
+        "room.start.begin",
+        room_code=room_code,
+        arm_realtime=arm_realtime,
+        game_state_boats=_boat_count(game_state),
+        player_token_present=bool(player_token),
+    )
     room = room_store().get_room(room_code)
     if room is None:
         raise RoomNotFound("Room not found.")
@@ -235,11 +294,25 @@ def start_room_match(
     room["status"] = "live"
     room["revision"] += 1
     room_store().save_room(room)
+    log_event(
+        current_app.logger,
+        "room.start.success",
+        room_code=room.get("code"),
+        revision=room.get("revision"),
+        joined_racers=len(room.get("racer_player_ids", [])),
+    )
     return room, player_token
 
 
 def kick_room_player(room_code: str, player_id: str | None) -> tuple[dict[str, Any], str | None, str | None, list[str], list[str]]:
     actor_token = current_session_state().player_token
+    log_event(
+        current_app.logger,
+        "room.kick.begin",
+        room_code=room_code,
+        player_id=player_id or "-",
+        actor_token_present=bool(actor_token),
+    )
     room = room_store().get_room(room_code)
     if room is None:
         raise RoomNotFound("Room not found.")
@@ -252,6 +325,14 @@ def kick_room_player(room_code: str, player_id: str | None) -> tuple[dict[str, A
     kicked_token = target_player.get("token")
     updated_room = room_store().kick_player(room_code, actor_token, player_id)
     new_racer_ids = [player["player_id"] for player in updated_room.get("players", []) if not player.get("is_observer")]
+    log_event(
+        current_app.logger,
+        "room.kick.success",
+        room_code=updated_room.get("code"),
+        kicked_token_present=bool(kicked_token),
+        old_racers=len(old_racer_ids),
+        new_racers=len(new_racer_ids),
+    )
     return updated_room, actor_token, kicked_token, old_racer_ids, new_racer_ids
 
 

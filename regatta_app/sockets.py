@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from copy import deepcopy
@@ -16,6 +17,16 @@ from .game_state import (
     normalize_view_settings_payload,
     room_requires_live_loop,
     state_play_mode,
+)
+from .observability import (
+    correlation_scope,
+    log_event,
+    observe_error,
+    observe_realtime_tick,
+    observe_socket_event,
+    payload_bytes,
+    set_connected_clients,
+    set_realtime_loops_active,
 )
 from .realtime_engine import simulate_realtime_tick, simulate_weather_tick
 from .room_events import broadcast_room_presence, broadcast_room_state, serialize_room
@@ -36,6 +47,24 @@ _realtime_loops: set[str] = set()
 _realtime_controls: dict[str, dict[int, dict[str, Any]]] = {}
 _socket_memberships: dict[str, tuple[str, str]] = {}
 _player_socket_ids: dict[str, set[str]] = {}
+
+
+def _socket_event_room_code(payload: dict[str, Any] | None) -> str | None:
+    raw_code = (payload or {}).get("room_code")
+    return str(raw_code).strip().upper() if raw_code else current_session_state().room_code
+
+
+def _log_socket_event_received(event_name: str, payload: dict[str, Any] | None, room_code: str | None) -> int:
+    inbound_bytes = payload_bytes(payload)
+    log_event(
+        current_app.logger,
+        "socket.event.received",
+        socket_event=event_name,
+        room_code=room_code or "-",
+        payload_bytes=inbound_bytes,
+        sid=request.sid,
+    )
+    return inbound_bytes
 
 
 def normalize_control_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
@@ -133,6 +162,7 @@ def register_player_socket(sid: str, room_code: str, player_token: str) -> None:
                     _player_socket_ids.pop(previous_player_token, None)
         _socket_memberships[sid] = (room_code, player_token)
         _player_socket_ids.setdefault(player_token, set()).add(sid)
+        set_connected_clients(len(_socket_memberships))
 
 
 def unregister_player_socket(sid: str) -> tuple[str | None, str | None]:
@@ -147,6 +177,7 @@ def unregister_player_socket(sid: str) -> tuple[str | None, str | None]:
             known_sids.discard(sid)
             if not known_sids:
                 _player_socket_ids.pop(player_token, None)
+        set_connected_clients(len(_socket_memberships))
         return room_code, player_token
 
 
@@ -172,6 +203,7 @@ def ensure_realtime_room_loop(room_code: str) -> None:
         if room_code in _realtime_loops:
             return
         _realtime_loops.add(room_code)
+        set_realtime_loops_active(len(_realtime_loops))
     socketio.start_background_task(run_realtime_room_loop, app, room_code)
 
 
@@ -180,6 +212,7 @@ def run_realtime_room_loop(app, room_code: str) -> None:
     try:
         while True:
             with app.app_context():
+                tick_started_at = time.perf_counter()
                 room = room_store().get_room(room_code)
                 if room is None:
                     break
@@ -190,6 +223,7 @@ def run_realtime_room_loop(app, room_code: str) -> None:
                 now_ms = int(time.time() * 1000)
                 controls = realtime_controls_snapshot(room_code)
                 changed = False
+                simulate_started_at = time.perf_counter()
 
                 if room.get("status") == "lobby":
                     if not any_active_control(controls):
@@ -208,18 +242,46 @@ def run_realtime_room_loop(app, room_code: str) -> None:
                             changed = simulate_realtime_tick(room["game_state"], controls, tick_dt, now_ms)
                     else:
                         changed = simulate_weather_tick(room["game_state"], now_ms)
+                simulate_duration_ms = round((time.perf_counter() - simulate_started_at) * 1000.0, 4)
+                save_duration_ms = 0.0
+                broadcast_duration_ms = 0.0
                 if changed:
                     room["revision"] += 1
+                    save_started_at = time.perf_counter()
                     room_store().save_room(room)
+                    save_duration_ms = round((time.perf_counter() - save_started_at) * 1000.0, 4)
+                    broadcast_started_at = time.perf_counter()
                     broadcast_room_state(room)
+                    broadcast_duration_ms = round((time.perf_counter() - broadcast_started_at) * 1000.0, 4)
+                observe_realtime_tick(
+                    tick_budget_seconds=tick_dt,
+                    started_at=tick_started_at,
+                    changed=changed,
+                    room_code=room_code,
+                    revision=room.get("revision"),
+                )
+                if current_app.logger.isEnabledFor(logging.DEBUG):
+                    log_event(
+                        current_app.logger,
+                        "realtime.loop.tick.parts",
+                        level=logging.DEBUG,
+                        room_code=room_code,
+                        revision=room.get("revision"),
+                        simulate_ms=simulate_duration_ms,
+                        save_ms=save_duration_ms,
+                        broadcast_ms=broadcast_duration_ms,
+                    )
             socketio.sleep(tick_dt)
     finally:
         with _realtime_lock:
             _realtime_loops.discard(room_code)
+            set_realtime_loops_active(len(_realtime_loops))
         pop_realtime_control(room_code)
 
 
 def emit_room_error(message: str) -> None:
+    observe_error("socket", "room_error")
+    log_event(current_app.logger, "socket.room_error", level=logging.WARNING, message_text=message, sid=request.sid)
     emit("room:error", {"error": message})
 
 
@@ -235,129 +297,310 @@ def load_socket_room(payload: dict[str, Any] | None) -> tuple[dict[str, Any] | N
 
 def register_socket_handlers() -> None:
     def on_room_join_socket(payload: dict[str, Any] | None):
-        room, player_token = load_socket_room(payload)
-        if room is None or player_token is None:
-            return
+        with correlation_scope("sock"):
+            started_at = time.perf_counter()
+            room_code = _socket_event_room_code(payload)
+            inbound_bytes = _log_socket_event_received("room:join_socket", payload, room_code)
+            result = "ok"
+            error_kind: str | None = None
+            player_token_present = False
+            revision: int | None = None
+            try:
+                room, player_token = load_socket_room(payload)
+                player_token_present = player_token is not None
+                if room is None or player_token is None:
+                    result = "rejected"
+                    error_kind = "RoomSessionUnavailable"
+                    return
 
-        join_room(room["code"])
-        register_player_socket(request.sid, room["code"], player_token)
-        emit("room:snapshot", serialize_room(room, player_token))
-        broadcast_room_presence(room)
-        if room_requires_live_loop(room):
-            ensure_realtime_room_loop(room["code"])
+                room_code = room["code"]
+                revision = room.get("revision")
+                join_room(room["code"])
+                register_player_socket(request.sid, room["code"], player_token)
+                emit("room:snapshot", serialize_room(room, player_token))
+                if room_requires_live_loop(room):
+                    ensure_realtime_room_loop(room["code"])
+                broadcast_room_presence(room)
+            except RoomStoreError as exc:
+                result = "rejected"
+                error_kind = type(exc).__name__
+                observe_error("socket", error_kind)
+                emit_room_error(str(exc))
+            except Exception as exc:
+                result = "error"
+                error_kind = type(exc).__name__
+                observe_error("socket", error_kind)
+                raise
+            finally:
+                observe_socket_event(
+                    "room:join_socket",
+                    started_at=started_at,
+                    result=result,
+                    payload_size=inbound_bytes,
+                    room_code=room_code,
+                    player_token_present=player_token_present,
+                    error_kind=error_kind,
+                    revision=revision,
+                )
 
     def on_room_push_state(payload: dict[str, Any] | None):
-        room, player_token = load_socket_room(payload)
-        if room is None or player_token is None:
-            return
+        with correlation_scope("sock"):
+            started_at = time.perf_counter()
+            room_code = _socket_event_room_code(payload)
+            inbound_bytes = _log_socket_event_received("room:push_state", payload, room_code)
+            result = "ok"
+            error_kind: str | None = None
+            player_token_present = False
+            revision: int | None = None
+            try:
+                room, player_token = load_socket_room(payload)
+                player_token_present = player_token is not None
+                if room is None or player_token is None:
+                    result = "rejected"
+                    error_kind = "RoomSessionUnavailable"
+                    return
 
-        try:
-            game_state = validate_game_state(room, (payload or {}).get("state"))
-            actor = player_for_token(room, player_token)
+                room_code = room["code"]
+                game_state = validate_game_state(room, (payload or {}).get("state"))
+                actor = player_for_token(room, player_token)
+                if actor is None:
+                    raise RoomForbidden("You are not part of this room.")
 
-            if room["status"] == "lobby":
-                if room["host_token"] != player_token:
-                    raise RoomForbidden("Only the host can edit the course before the start.")
-                room["start_state"] = deepcopy(game_state)
-                room["game_state"] = normalize_lobby_preview_state(game_state)
-            else:
-                raise RoomForbidden("Live rooms use cursor controls instead of snapshot pushes.")
+                if room["status"] == "lobby":
+                    if room["host_token"] != player_token:
+                        raise RoomForbidden("Only the host can edit the course before the start.")
+                    room["start_state"] = deepcopy(game_state)
+                    room["game_state"] = normalize_lobby_preview_state(game_state)
+                else:
+                    raise RoomForbidden("Live rooms use cursor controls instead of snapshot pushes.")
 
-            room["revision"] += 1
-            room_store().save_room(room)
-        except RoomStoreError as exc:
-            emit_room_error(str(exc))
-            return
-
-        if room_requires_live_loop(room):
-            ensure_realtime_room_loop(room["code"])
-        broadcast_room_state(room)
+                room["revision"] += 1
+                revision = room["revision"]
+                room_store().save_room(room)
+                if room_requires_live_loop(room):
+                    ensure_realtime_room_loop(room["code"])
+                broadcast_room_state(room)
+            except RoomStoreError as exc:
+                result = "rejected"
+                error_kind = type(exc).__name__
+                observe_error("socket", error_kind)
+                emit_room_error(str(exc))
+            except Exception as exc:
+                result = "error"
+                error_kind = type(exc).__name__
+                observe_error("socket", error_kind)
+                raise
+            finally:
+                observe_socket_event(
+                    "room:push_state",
+                    started_at=started_at,
+                    result=result,
+                    payload_size=inbound_bytes,
+                    room_code=room_code,
+                    player_token_present=player_token_present,
+                    error_kind=error_kind,
+                    revision=revision,
+                )
 
     def on_room_control(payload: dict[str, Any] | None):
-        room, player_token = load_socket_room(payload)
-        if room is None or player_token is None:
-            return
+        with correlation_scope("sock"):
+            started_at = time.perf_counter()
+            room_code = _socket_event_room_code(payload)
+            inbound_bytes = _log_socket_event_received("room:control", payload, room_code)
+            result = "ok"
+            error_kind: str | None = None
+            player_token_present = False
+            revision: int | None = None
+            try:
+                room, player_token = load_socket_room(payload)
+                player_token_present = player_token is not None
+                if room is None or player_token is None:
+                    result = "rejected"
+                    error_kind = "RoomSessionUnavailable"
+                    return
 
-        actor = player_for_token(room, player_token)
-        if actor is None:
-            emit_room_error("You are not part of this room.")
-            return
-        if player_is_observer(actor) or not isinstance(actor.get("seat_index"), int):
-            return
-        if room.get("status") == "lobby":
-            set_realtime_control(room["code"], actor["seat_index"], payload)
-            ensure_realtime_room_loop(room["code"])
-            return
-        if room.get("status") != "live":
-            return
+                room_code = room["code"]
+                revision = room.get("revision")
+                actor = player_for_token(room, player_token)
+                if actor is None:
+                    result = "rejected"
+                    error_kind = "RoomActorMissing"
+                    emit_room_error("You are not part of this room.")
+                    return
+                if player_is_observer(actor) or not isinstance(actor.get("seat_index"), int):
+                    result = "ignored"
+                    error_kind = "ObserverControlIgnored"
+                    return
+                if room.get("status") == "lobby":
+                    set_realtime_control(room["code"], actor["seat_index"], payload)
+                    ensure_realtime_room_loop(room["code"])
+                    return
+                if room.get("status") != "live":
+                    result = "ignored"
+                    error_kind = "RoomNotLive"
+                    return
 
-        set_realtime_control(room["code"], actor["seat_index"], payload)
-        ensure_realtime_room_loop(room["code"])
+                set_realtime_control(room["code"], actor["seat_index"], payload)
+                ensure_realtime_room_loop(room["code"])
+            except RoomStoreError as exc:
+                result = "rejected"
+                error_kind = type(exc).__name__
+                observe_error("socket", error_kind)
+                emit_room_error(str(exc))
+            except Exception as exc:
+                result = "error"
+                error_kind = type(exc).__name__
+                observe_error("socket", error_kind)
+                raise
+            finally:
+                observe_socket_event(
+                    "room:control",
+                    started_at=started_at,
+                    result=result,
+                    payload_size=inbound_bytes,
+                    room_code=room_code,
+                    player_token_present=player_token_present,
+                    error_kind=error_kind,
+                    revision=revision,
+                )
 
     def on_room_view_settings(payload: dict[str, Any] | None):
-        room, player_token = load_socket_room(payload)
-        if room is None or player_token is None:
-            return
+        with correlation_scope("sock"):
+            started_at = time.perf_counter()
+            room_code = _socket_event_room_code(payload)
+            inbound_bytes = _log_socket_event_received("room:view_settings", payload, room_code)
+            result = "ok"
+            error_kind: str | None = None
+            player_token_present = False
+            revision: int | None = None
+            try:
+                room, player_token = load_socket_room(payload)
+                player_token_present = player_token is not None
+                if room is None or player_token is None:
+                    result = "rejected"
+                    error_kind = "RoomSessionUnavailable"
+                    return
 
-        try:
-            if room.get("host_token") != player_token:
-                raise RoomForbidden("Only the host can change shared room hints.")
-            view_settings = normalize_view_settings_payload(payload)
-            if not view_settings:
-                return
-            if not apply_room_view_settings(room, view_settings):
-                return
-            room["revision"] += 1
-            room_store().save_room(room)
-        except RoomStoreError as exc:
-            emit_room_error(str(exc))
-            return
-
-        broadcast_room_state(room)
+                room_code = room["code"]
+                if room.get("host_token") != player_token:
+                    raise RoomForbidden("Only the host can change shared room hints.")
+                view_settings = normalize_view_settings_payload(payload)
+                if not view_settings:
+                    result = "ignored"
+                    error_kind = "EmptyViewSettings"
+                    return
+                if not apply_room_view_settings(room, view_settings):
+                    result = "ignored"
+                    error_kind = "UnchangedViewSettings"
+                    return
+                room["revision"] += 1
+                revision = room["revision"]
+                room_store().save_room(room)
+                broadcast_room_state(room)
+            except RoomStoreError as exc:
+                result = "rejected"
+                error_kind = type(exc).__name__
+                observe_error("socket", error_kind)
+                emit_room_error(str(exc))
+            except Exception as exc:
+                result = "error"
+                error_kind = type(exc).__name__
+                observe_error("socket", error_kind)
+                raise
+            finally:
+                observe_socket_event(
+                    "room:view_settings",
+                    started_at=started_at,
+                    result=result,
+                    payload_size=inbound_bytes,
+                    room_code=room_code,
+                    player_token_present=player_token_present,
+                    error_kind=error_kind,
+                    revision=revision,
+                )
 
     def on_room_pause(payload: dict[str, Any] | None):
-        room, player_token = load_socket_room(payload)
-        if room is None or player_token is None:
-            return
+        with correlation_scope("sock"):
+            started_at = time.perf_counter()
+            room_code = _socket_event_room_code(payload)
+            inbound_bytes = _log_socket_event_received("room:pause", payload, room_code)
+            result = "ok"
+            error_kind: str | None = None
+            player_token_present = False
+            revision: int | None = None
+            try:
+                room, player_token = load_socket_room(payload)
+                player_token_present = player_token is not None
+                if room is None or player_token is None:
+                    result = "rejected"
+                    error_kind = "RoomSessionUnavailable"
+                    return
 
-        try:
-            if room.get("host_token") != player_token:
-                raise RoomForbidden("Only the host can pause or resume the room.")
-            if room.get("status") != "live":
-                raise RoomForbidden("Pause is only available during a live realtime race.")
+                room_code = room["code"]
+                if room.get("host_token") != player_token:
+                    raise RoomForbidden("Only the host can pause or resume the room.")
+                if room.get("status") != "live":
+                    raise RoomForbidden("Pause is only available during a live realtime race.")
 
-            should_pause = bool((payload or {}).get("paused"))
-            if not apply_realtime_pause(room["game_state"], paused=should_pause, now_ms=int(time.time() * 1000)):
-                return
-            room["revision"] += 1
-            room_store().save_room(room)
-        except RoomStoreError as exc:
-            emit_room_error(str(exc))
-            return
-
-        ensure_realtime_room_loop(room["code"])
-        broadcast_room_state(room)
+                should_pause = bool((payload or {}).get("paused"))
+                if not apply_realtime_pause(room["game_state"], paused=should_pause, now_ms=int(time.time() * 1000)):
+                    result = "ignored"
+                    error_kind = "PauseStateUnchanged"
+                    return
+                room["revision"] += 1
+                revision = room["revision"]
+                room_store().save_room(room)
+                ensure_realtime_room_loop(room["code"])
+                broadcast_room_state(room)
+            except RoomStoreError as exc:
+                result = "rejected"
+                error_kind = type(exc).__name__
+                observe_error("socket", error_kind)
+                emit_room_error(str(exc))
+            except Exception as exc:
+                result = "error"
+                error_kind = type(exc).__name__
+                observe_error("socket", error_kind)
+                raise
+            finally:
+                observe_socket_event(
+                    "room:pause",
+                    started_at=started_at,
+                    result=result,
+                    payload_size=inbound_bytes,
+                    room_code=room_code,
+                    player_token_present=player_token_present,
+                    error_kind=error_kind,
+                    revision=revision,
+                )
 
     def on_disconnect():
-        room_code, player_token = unregister_player_socket(request.sid)
-        if not room_code or not player_token:
-            session_state = current_session_state()
-            room_code = session_state.room_code
-            player_token = session_state.player_token
-        if not room_code or not player_token:
-            return
-
-        room = room_store().get_room(room_code)
-        if room is None:
-            pop_realtime_control(room_code)
-            return
-
-        actor = player_for_token(room, player_token)
-        if actor is None:
-            pop_realtime_control(room_code)
-            return
-        if isinstance(actor.get("seat_index"), int):
-            pop_realtime_control(room_code, actor["seat_index"])
+        with correlation_scope("sock"):
+            started_at = time.perf_counter()
+            inbound_bytes = _log_socket_event_received("disconnect", None, None)
+            room_code, player_token = unregister_player_socket(request.sid)
+            if not room_code or not player_token:
+                session_state = current_session_state()
+                room_code = session_state.room_code
+                player_token = session_state.player_token
+            if room_code and player_token:
+                room = room_store().get_room(room_code)
+                if room is None:
+                    pop_realtime_control(room_code)
+                else:
+                    actor = player_for_token(room, player_token)
+                    if actor is None:
+                        pop_realtime_control(room_code)
+                    elif isinstance(actor.get("seat_index"), int):
+                        pop_realtime_control(room_code, actor["seat_index"])
+            observe_socket_event(
+                "disconnect",
+                started_at=started_at,
+                result="ok",
+                payload_size=inbound_bytes,
+                room_code=room_code,
+                player_token_present=bool(player_token),
+            )
 
     socketio.on_event("room:join_socket", on_room_join_socket)
     socketio.on_event("room:push_state", on_room_push_state)

@@ -16,4 +16,4 @@ COPY static ./static
 
 EXPOSE 5001
 
-CMD ["sh", "-c", "gunicorn --worker-class gthread --threads 8 --bind 0.0.0.0:${PORT:-5001} app:app"]
+CMD ["sh", "-c", "gunicorn --worker-class gthread --threads ${GUNICORN_THREADS:-100} --bind 0.0.0.0:${PORT:-5001} app:app"]
