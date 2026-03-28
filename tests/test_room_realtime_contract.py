@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from regatta_app import sockets as realtime_sockets
+from regatta_app.api import rooms as rooms_api
 from regatta_app.factory import create_app
 from regatta_app.extensions import socketio
 
@@ -318,6 +319,51 @@ def test_http_join_broadcasts_presence_before_guest_socket_connect(app, client_f
     guest_events = guest_socket.get_received()
     assert any(event["name"] == "room:presence" for event in guest_events), guest_events
     assert not any(event["name"] == "room:presence" for event in host_socket.get_received())
+
+
+def test_http_join_skips_presence_broadcast_without_connected_sockets(app, client_factory, monkeypatch):
+    host = client_factory()
+    guest = client_factory()
+
+    room = create_room(host, host_role="player", state=make_realtime_state(2))
+    room_code = room["code"]
+
+    broadcasted_room_codes: list[str] = []
+    monkeypatch.setattr(rooms_api, "room_has_connected_socket", lambda _room_code: False)
+    monkeypatch.setattr(
+        rooms_api,
+        "broadcast_room_presence",
+        lambda room: broadcasted_room_codes.append(room["code"]),
+    )
+
+    joined_room = join_room(guest, room_code, "Guest")
+
+    assert joined_room["code"] == room_code
+    assert broadcasted_room_codes == []
+
+
+def test_join_socket_does_not_broadcast_presence_to_room(app, client_factory, monkeypatch):
+    host = client_factory()
+    guest = client_factory()
+
+    room = create_room(host, host_role="player", state=make_realtime_state(2))
+    room_code = room["code"]
+    joined_room = join_room(guest, room_code, "Guest")
+
+    broadcasted_room_codes: list[str] = []
+    monkeypatch.setattr(
+        realtime_sockets,
+        "broadcast_room_presence",
+        lambda room: broadcasted_room_codes.append(room["code"]),
+    )
+
+    guest_socket = socketio.test_client(app, flask_test_client=guest)
+    assert guest_socket.is_connected()
+    guest_socket.emit("room:join_socket", {"room_code": room_code, "known_revision": joined_room["revision"]})
+
+    guest_events = guest_socket.get_received()
+    assert any(event["name"] == "room:presence" for event in guest_events), guest_events
+    assert broadcasted_room_codes == []
 
 
 def test_room_payload_exposes_split_racer_and_observer_capacity(client_factory):

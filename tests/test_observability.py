@@ -171,6 +171,16 @@ def test_structured_logs_attach_event_and_request_id(app, caplog):
     assert getattr(matching[0], "request_id", "")
 
 
+def test_deployment_defaults_keep_single_worker_and_raise_thread_ceiling():
+    dockerfile = Path("Dockerfile").read_text(encoding="utf-8")
+    compose = Path("docker-compose.yml").read_text(encoding="utf-8")
+
+    assert "${GUNICORN_WORKERS:-1}" in dockerfile
+    assert "${GUNICORN_THREADS:-32}" in dockerfile
+    assert "GUNICORN_WORKERS: ${GUNICORN_WORKERS:-1}" in compose
+    assert "GUNICORN_THREADS: ${GUNICORN_THREADS:-32}" in compose
+
+
 def test_create_app_uses_socketio_message_queue_from_config(tmp_path: Path, monkeypatch):
     library_dir = tmp_path / "library"
     library_dir.mkdir()

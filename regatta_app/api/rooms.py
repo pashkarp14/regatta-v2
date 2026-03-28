@@ -21,7 +21,13 @@ from ..room_service import (
     start_room_match,
 )
 from ..session_state import clear_room_session, current_session_state
-from ..sockets import emit_room_kicked, ensure_realtime_room_loop, pop_realtime_control, remap_realtime_controls
+from ..sockets import (
+    emit_room_kicked,
+    ensure_realtime_room_loop,
+    pop_realtime_control,
+    remap_realtime_controls,
+    room_has_connected_socket,
+)
 
 
 bp = Blueprint("rooms", __name__)
@@ -81,7 +87,7 @@ def join_room():
     payload = json_payload()
     room = join_room_from_payload(payload)
     live_room = current_room() or room_store().get_room(room.get("code", ""))
-    if live_room is not None:
+    if live_room is not None and room_has_connected_socket(live_room["code"]):
         broadcast_room_presence(live_room)
     log_event(
         current_app.logger,

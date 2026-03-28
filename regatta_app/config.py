@@ -34,7 +34,7 @@ class BaseConfig:
     SOCKETIO_MESSAGE_QUEUE = os.getenv("SOCKETIO_MESSAGE_QUEUE", REDIS_URL)
     GUNICORN_WORKER_CLASS = os.getenv("GUNICORN_WORKER_CLASS", "gthread")
     GUNICORN_WORKERS = int(os.getenv("GUNICORN_WORKERS", "1"))
-    GUNICORN_THREADS = int(os.getenv("GUNICORN_THREADS", "16"))
+    GUNICORN_THREADS = int(os.getenv("GUNICORN_THREADS", "32"))
     LIBRARY_DIR = os.getenv("LIBRARY_DIR", str(BASE_DIR / ".regatta_library"))
     STANDARD_MAPS_DIR = os.getenv("STANDARD_MAPS_DIR", str(BASE_DIR / "regatta_app" / "standard_maps"))
 
