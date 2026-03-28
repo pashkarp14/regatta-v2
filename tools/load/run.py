@@ -804,7 +804,7 @@ class VirtualUser:
         deadline = time.perf_counter() + 10.0
         while time.perf_counter() < deadline:
             event, payload, _ = await asyncio.wait_for(self.socket_queue.get(), timeout=10.0)
-            if event in {"room:snapshot", "room:presence"}:
+            if event == "room:snapshot":
                 return
             if event == "room:error":
                 raise RuntimeError(str(payload.get("error") if isinstance(payload, dict) else payload))

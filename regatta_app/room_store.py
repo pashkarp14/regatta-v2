@@ -172,7 +172,12 @@ def _player_sort_key(player: dict[str, Any]) -> tuple[int, int, str]:
     )
 
 
-def public_room_view(room: dict[str, Any], player_token: str | None) -> dict[str, Any]:
+def _public_room_base_view(
+    room: dict[str, Any],
+    player_token: str | None,
+    *,
+    include_game_state: bool,
+) -> dict[str, Any]:
     started_at = time.perf_counter()
     viewer = player_for_token(room, player_token)
     host_player = room_host_player(room)
@@ -203,7 +208,6 @@ def public_room_view(room: dict[str, Any], player_token: str | None) -> dict[str
             }
             for player in players
         ],
-        "game_state": deepcopy(room.get("game_state")),
         "self": {
             "player_id": viewer.get("player_id") if viewer else None,
             "name": viewer["name"] if viewer else None,
@@ -212,12 +216,22 @@ def public_room_view(room: dict[str, Any], player_token: str | None) -> dict[str
             "token_present": viewer is not None,
         },
     }
+    if include_game_state:
+        snapshot["game_state"] = deepcopy(room.get("game_state"))
     observe_public_room_view(
         time.perf_counter() - started_at,
         payload_bytes(snapshot),
         len(players),
     )
     return snapshot
+
+
+def public_room_view(room: dict[str, Any], player_token: str | None) -> dict[str, Any]:
+    return _public_room_base_view(room, player_token, include_game_state=True)
+
+
+def public_room_presence_view(room: dict[str, Any], player_token: str | None) -> dict[str, Any]:
+    return _public_room_base_view(room, player_token, include_game_state=False)
 
 
 def validate_game_state_shape(game_state: Any) -> dict[str, Any]:

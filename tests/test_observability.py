@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from regatta_app import sockets as realtime_sockets
+from regatta_app.api import rooms as rooms_api
 from regatta_app.factory import create_app
 from regatta_app.extensions import socketio
 from regatta_app import sockets as sockets_module
@@ -197,6 +199,112 @@ def test_socket_join_records_metrics(app):
         or 0
     ) >= 1
     assert (_metric_value(metrics_text, "regatta_socket_connected_clients") or 0) >= 1
+
+
+def test_socket_join_logs_snapshot_sent_flag(app, caplog):
+    host = app.test_client()
+    guest = app.test_client()
+    room_code = _create_room(host)
+
+    join_response = guest.post(
+        "/api/rooms/join",
+        json={
+            "display_name": "Guest",
+            "room_code": room_code,
+        },
+    )
+    assert join_response.status_code == 200, join_response.get_json()
+    room_revision = join_response.get_json()["room"]["revision"]
+
+    socket_client = socketio.test_client(app, flask_test_client=guest)
+    assert socket_client.is_connected()
+
+    with caplog.at_level(logging.INFO, logger=app.logger.name):
+        socket_client.emit(
+            "room:join_socket",
+            {"room_code": room_code, "known_revision": room_revision},
+        )
+        socket_client.get_received()
+
+    matching = [
+        record
+        for record in caplog.records
+        if getattr(record, "event_name", "") == "socket.event.handled"
+        and getattr(record, "event_fields", {}).get("socket_event") == "room:join_socket"
+    ]
+    assert matching
+    assert matching[-1].event_fields.get("snapshot_sent") is False
+
+
+def test_live_room_loop_checkpoints_instead_of_saving_every_changed_tick(app, monkeypatch):
+    host = app.test_client()
+    room_code = _create_room(host)
+
+    monkeypatch.setattr(rooms_api, "ensure_realtime_room_loop", lambda _room_code: None)
+    room_snapshot = host.get(f"/api/rooms/{room_code}").get_json()["room"]
+    start_response = host.post(
+        f"/api/rooms/{room_code}/start",
+        json={
+            "arm_realtime": True,
+            "game_state": room_snapshot["game_state"],
+        },
+    )
+    assert start_response.status_code == 200, start_response.get_json()
+
+    class CountingRoomStore:
+        def __init__(self, inner) -> None:
+            self.inner = inner
+            self.save_calls = 0
+
+        def __getattr__(self, name):
+            return getattr(self.inner, name)
+
+        def save_room(self, room):
+            self.save_calls += 1
+            return self.inner.save_room(room)
+
+    class FakeClock:
+        def __init__(self) -> None:
+            self.current = 1_000.0
+
+        def time(self) -> float:
+            return self.current
+
+        def advance(self, seconds: float) -> None:
+            self.current += seconds
+
+    original_store = app.extensions["room_store"]
+    counting_store = CountingRoomStore(original_store)
+    app.extensions["room_store"] = counting_store
+    if "live_runtime" in app.extensions:
+        app.extensions["live_runtime"].drop_room(room_code)
+
+    fake_clock = FakeClock()
+    changed_ticks = {"count": 0}
+    sleep_calls = {"count": 0}
+
+    def changed_tick(game_state, controls, dt_seconds, now_ms):
+        changed_ticks["count"] += 1
+        game_state["boats"][0]["x"] = float(game_state["boats"][0]["x"]) + 0.5
+        return True
+
+    def fake_sleep(seconds):
+        fake_clock.advance(seconds)
+        sleep_calls["count"] += 1
+        if sleep_calls["count"] >= 4:
+            raise RuntimeError("stop loop")
+
+    monkeypatch.setattr(sockets_module, "simulate_realtime_tick", changed_tick)
+    monkeypatch.setattr(sockets_module, "broadcast_room_state", lambda room: None)
+    monkeypatch.setattr(sockets_module, "room_has_connected_socket", lambda _room_code: True)
+    monkeypatch.setattr(sockets_module.socketio, "sleep", fake_sleep)
+    monkeypatch.setattr(sockets_module.time, "time", fake_clock.time)
+
+    with pytest.raises(RuntimeError, match="stop loop"):
+        sockets_module.run_realtime_room_loop(app, room_code)
+
+    assert changed_ticks["count"] >= 4
+    assert counting_store.save_calls < changed_ticks["count"]
 
 
 def test_slow_realtime_tick_logs_warning_and_metric(app, caplog, monkeypatch):

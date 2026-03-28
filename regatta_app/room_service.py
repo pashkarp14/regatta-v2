@@ -6,7 +6,7 @@ from typing import Any
 
 from flask import current_app
 
-from .app_state import room_store, socketio_ext
+from .app_state import live_runtime, room_store, socketio_ext
 from .game_state import normalize_lobby_preview_state, normalize_room_start_state, room_requires_live_loop
 from .observability import log_event
 from .room_events import broadcast_room_snapshot
@@ -18,6 +18,7 @@ from .room_store import (
     normalize_host_role,
     normalize_name,
     normalize_room_code,
+    now_ms,
     player_for_id,
     player_for_token,
     public_room_view,
@@ -50,6 +51,7 @@ def leave_current_room() -> tuple[str | None, dict[str, Any] | None]:
     room_code = session_state.room_code
     updated_room = None
     if session_state.room_code and session_state.player_token:
+        live_runtime().flush_now(session_state.room_code, now_ms())
         log_event(
             current_app.logger,
             "room.leave.begin",
@@ -88,6 +90,7 @@ def _cleanup_previous_room_async(room_code: str | None, player_token: str | None
     def task() -> None:
         with app.app_context():
             try:
+                live_runtime().flush_now(room_code, now_ms())
                 log_event(
                     app.logger,
                     "room.create.cleanup_previous_room.begin",
@@ -102,8 +105,13 @@ def _cleanup_previous_room_async(room_code: str | None, player_token: str | None
                 )
                 if updated_room is not None:
                     if room_requires_live_loop(updated_room):
+                        live_runtime().replace_room(updated_room, now_ms())
                         ensure_realtime_room_loop(updated_room["code"])
+                    else:
+                        live_runtime().drop_room(room_code)
                     broadcast_room_snapshot(updated_room)
+                else:
+                    live_runtime().drop_room(room_code)
             except RoomStoreError as exc:
                 log_event(
                     app.logger,
@@ -293,7 +301,7 @@ def start_room_match(
     )
     room["status"] = "live"
     room["revision"] += 1
-    room_store().save_room(room)
+    room = room_store().save_room(room)
     log_event(
         current_app.logger,
         "room.start.success",
@@ -313,6 +321,7 @@ def kick_room_player(room_code: str, player_id: str | None) -> tuple[dict[str, A
         player_id=player_id or "-",
         actor_token_present=bool(actor_token),
     )
+    live_runtime().flush_now(room_code, now_ms())
     room = room_store().get_room(room_code)
     if room is None:
         raise RoomNotFound("Room not found.")
@@ -338,6 +347,7 @@ def kick_room_player(room_code: str, player_id: str | None) -> tuple[dict[str, A
 
 def edit_room_match(room_code: str) -> tuple[dict[str, Any], str | None]:
     player_token = current_session_state().player_token
+    live_runtime().flush_now(room_code, now_ms())
     room = room_store().get_room(room_code)
     if room is None:
         raise RoomNotFound("Room not found.")
@@ -352,12 +362,13 @@ def edit_room_match(room_code: str) -> tuple[dict[str, Any], str | None]:
     room["game_state"] = normalize_lobby_preview_state(start_snapshot)
     room["status"] = "lobby"
     room["revision"] += 1
-    room_store().save_room(room)
+    room = room_store().save_room(room)
     return room, player_token
 
 
 def reset_room_lobby(room_code: str) -> tuple[dict[str, Any], str | None]:
     player_token = current_session_state().player_token
+    live_runtime().flush_now(room_code, now_ms())
     room = room_store().get_room(room_code)
     if room is None:
         raise RoomNotFound("Room not found.")
@@ -375,5 +386,5 @@ def reset_room_lobby(room_code: str) -> tuple[dict[str, Any], str | None]:
     room["game_state"] = normalize_lobby_preview_state(baseline_snapshot)
     room["status"] = "lobby"
     room["revision"] += 1
-    room_store().save_room(room)
+    room = room_store().save_room(room)
     return room, player_token

@@ -9,7 +9,7 @@ from typing import Any
 from flask import current_app, request
 from flask_socketio import emit, join_room
 
-from .app_state import room_store
+from .app_state import live_runtime, room_store
 from .extensions import socketio
 from .game_state import (
     apply_realtime_pause,
@@ -42,6 +42,7 @@ from .session_state import current_session_state
 
 
 REALTIME_TICK_HZ = 12
+RUNTIME_CHECKPOINT_INTERVAL_MS = 250
 _realtime_lock = threading.Lock()
 _realtime_loops: set[str] = set()
 _realtime_controls: dict[str, dict[int, dict[str, Any]]] = {}
@@ -65,6 +66,29 @@ def _log_socket_event_received(event_name: str, payload: dict[str, Any] | None, 
         sid=request.sid,
     )
     return inbound_bytes
+
+
+def _now_ms() -> int:
+    return int(time.time() * 1000)
+
+
+def _payload_known_revision(payload: dict[str, Any] | None) -> int | None:
+    raw_revision = (payload or {}).get("known_revision")
+    if isinstance(raw_revision, bool):
+        return None
+    if isinstance(raw_revision, int):
+        return raw_revision
+    if isinstance(raw_revision, float) and raw_revision.is_integer():
+        return int(raw_revision)
+    if isinstance(raw_revision, str):
+        cleaned = raw_revision.strip()
+        if not cleaned:
+            return None
+        try:
+            return int(cleaned)
+        except ValueError:
+            return None
+    return None
 
 
 def normalize_control_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
@@ -207,20 +231,49 @@ def ensure_realtime_room_loop(room_code: str) -> None:
     socketio.start_background_task(run_realtime_room_loop, app, room_code)
 
 
+def _load_loop_room(room_code: str, now_ms: int) -> tuple[dict[str, Any] | None, bool]:
+    persisted_room = room_store().get_room(room_code)
+    if persisted_room is None:
+        return None, False
+    if persisted_room.get("status") != "live":
+        return persisted_room, False
+
+    runtime_room = live_runtime().get_room(room_code)
+    if runtime_room is None:
+        runtime_room = live_runtime().ensure_room(persisted_room, now_ms)
+    return runtime_room, True
+
+
+def _persist_runtime_boundary_room(room: dict[str, Any], *, now_ms: int | None = None) -> dict[str, Any]:
+    effective_now_ms = _now_ms() if now_ms is None else now_ms
+    if room.get("status") != "live":
+        return room_store().save_room(room)
+
+    live_runtime().replace_room(room, effective_now_ms)
+    live_runtime().mark_dirty(room["code"])
+    saved_room = live_runtime().flush_now(room["code"], effective_now_ms)
+    return saved_room or room
+
+
 def run_realtime_room_loop(app, room_code: str) -> None:
     tick_dt = 1.0 / REALTIME_TICK_HZ
+    flush_runtime_on_exit = False
     try:
         while True:
             with app.app_context():
                 tick_started_at = time.perf_counter()
-                room = room_store().get_room(room_code)
+                now_ms = _now_ms()
+                room, runtime_backed = _load_loop_room(room_code, now_ms)
                 if room is None:
+                    flush_runtime_on_exit = False
                     break
+                flush_runtime_on_exit = runtime_backed
 
                 if room.get("status") == "live" and not room_has_connected_socket(room_code):
+                    if runtime_backed:
+                        live_runtime().flush_now(room_code, now_ms)
                     break
 
-                now_ms = int(time.time() * 1000)
                 controls = realtime_controls_snapshot(room_code)
                 changed = False
                 simulate_started_at = time.perf_counter()
@@ -248,7 +301,22 @@ def run_realtime_room_loop(app, room_code: str) -> None:
                 if changed:
                     room["revision"] += 1
                     save_started_at = time.perf_counter()
-                    room_store().save_room(room)
+                    if runtime_backed:
+                        live_runtime().replace_room(room, now_ms)
+                        live_runtime().mark_dirty(room_code)
+                        race = (room.get("game_state", {}).get("race") or {})
+                        if race.get("phase") == "finished":
+                            saved_room = live_runtime().flush_now(room_code, now_ms)
+                        else:
+                            saved_room = live_runtime().flush_due(
+                                room_code,
+                                now_ms,
+                                min_interval_ms=RUNTIME_CHECKPOINT_INTERVAL_MS,
+                            )
+                        if saved_room is not None:
+                            room = saved_room
+                    else:
+                        room = room_store().save_room(room)
                     save_duration_ms = round((time.perf_counter() - save_started_at) * 1000.0, 4)
                     broadcast_started_at = time.perf_counter()
                     broadcast_room_state(room)
@@ -273,6 +341,10 @@ def run_realtime_room_loop(app, room_code: str) -> None:
                     )
             socketio.sleep(tick_dt)
     finally:
+        with app.app_context():
+            if flush_runtime_on_exit:
+                live_runtime().flush_now(room_code, _now_ms())
+            live_runtime().drop_room(room_code)
         with _realtime_lock:
             _realtime_loops.discard(room_code)
             set_realtime_loops_active(len(_realtime_loops))
@@ -292,6 +364,10 @@ def load_socket_room(payload: dict[str, Any] | None) -> tuple[dict[str, Any] | N
     if room is None or session_state.player_token is None:
         emit_room_error("Room session is not available.")
         return None, None
+    if room_requires_live_loop(room):
+        runtime_room = live_runtime().get_room(room["code"])
+        if runtime_room is not None:
+            room = runtime_room
     return room, session_state.player_token
 
 
@@ -305,6 +381,7 @@ def register_socket_handlers() -> None:
             error_kind: str | None = None
             player_token_present = False
             revision: int | None = None
+            snapshot_sent: bool | None = None
             try:
                 room, player_token = load_socket_room(payload)
                 player_token_present = player_token is not None
@@ -317,7 +394,10 @@ def register_socket_handlers() -> None:
                 revision = room.get("revision")
                 join_room(room["code"])
                 register_player_socket(request.sid, room["code"], player_token)
-                emit("room:snapshot", serialize_room(room, player_token))
+                known_revision = _payload_known_revision(payload)
+                snapshot_sent = known_revision is None or known_revision < int(room.get("revision") or 0)
+                if snapshot_sent:
+                    emit("room:snapshot", serialize_room(room, player_token))
                 if room_requires_live_loop(room):
                     ensure_realtime_room_loop(room["code"])
                 broadcast_room_presence(room)
@@ -341,6 +421,7 @@ def register_socket_handlers() -> None:
                     player_token_present=player_token_present,
                     error_kind=error_kind,
                     revision=revision,
+                    snapshot_sent=snapshot_sent,
                 )
 
     def on_room_push_state(payload: dict[str, Any] | None):
@@ -376,7 +457,7 @@ def register_socket_handlers() -> None:
 
                 room["revision"] += 1
                 revision = room["revision"]
-                room_store().save_room(room)
+                room = room_store().save_room(room)
                 if room_requires_live_loop(room):
                     ensure_realtime_room_loop(room["code"])
                 broadcast_room_state(room)
@@ -495,7 +576,7 @@ def register_socket_handlers() -> None:
                     return
                 room["revision"] += 1
                 revision = room["revision"]
-                room_store().save_room(room)
+                room = _persist_runtime_boundary_room(room, now_ms=_now_ms())
                 broadcast_room_state(room)
             except RoomStoreError as exc:
                 result = "rejected"
@@ -549,7 +630,7 @@ def register_socket_handlers() -> None:
                     return
                 room["revision"] += 1
                 revision = room["revision"]
-                room_store().save_room(room)
+                room = _persist_runtime_boundary_room(room, now_ms=_now_ms())
                 ensure_realtime_room_loop(room["code"])
                 broadcast_room_state(room)
             except RoomStoreError as exc:

@@ -18,7 +18,7 @@ from tools.load.run import (
     reshape_snapshot_for_players,
     summarize_durations,
 )
-from tools.load.report_load import generate_report
+from tools.load.report_load import _derive_join_socket_to_snapshot, generate_report
 
 
 def test_summarize_durations_reports_percentiles():
@@ -398,6 +398,68 @@ def test_virtual_user_connect_socket_times_out():
     assert time.perf_counter() - started_at < 1
     assert recorder.socket_events[-1].event == "connect"
     assert recorder.socket_events[-1].ok is False
+
+
+def test_virtual_user_connect_socket_waits_for_snapshot_not_presence():
+    recorder = LoadRecorder("join_storm_1x20")
+    user = VirtualUser("http://127.0.0.1:5001", "runner-user", recorder)
+
+    class FakeSocket:
+        connected = False
+
+        async def connect(self, *args, **kwargs) -> None:
+            self.connected = True
+
+    user.socket = FakeSocket()
+    user.room_code = "ROOM01"
+
+    async def fake_emit_event(event: str, payload: dict[str, object]) -> None:
+        await user.socket_queue.put(("room:presence", {"room": {"code": "ROOM01", "revision": 1}}, time.perf_counter()))
+        await user.socket_queue.put(
+            ("room:snapshot", {"room": {"code": "ROOM01", "revision": 1, "game_state": {}}}, time.perf_counter())
+        )
+
+    user.emit_event = fake_emit_event  # type: ignore[method-assign]
+
+    asyncio.run(user.connect_socket("ROOM01"))
+
+    assert user.socket_queue.empty()
+    assert recorder.socket_events[-1].event == "connect"
+    assert recorder.socket_events[-1].ok is True
+
+
+def test_join_socket_latency_ignores_presence_events():
+    stats = _derive_join_socket_to_snapshot(
+        [
+            {
+                "ts": "2026-03-28T09:00:03Z",
+                "scenario": "smoke_1x2",
+                "user_id": "guest",
+                "event": "room:join_socket",
+                "direction": "out",
+                "room_code": "ROOM01",
+            },
+            {
+                "ts": "2026-03-28T09:00:03.010Z",
+                "scenario": "smoke_1x2",
+                "user_id": "guest",
+                "event": "room:presence",
+                "direction": "in",
+                "room_code": "ROOM01",
+            },
+            {
+                "ts": "2026-03-28T09:00:03.025Z",
+                "scenario": "smoke_1x2",
+                "user_id": "guest",
+                "event": "room:snapshot",
+                "direction": "in",
+                "room_code": "ROOM01",
+            },
+        ]
+    )
+
+    assert stats["count"] == 1
+    assert stats["p50"] == 25.0
 
 
 def test_virtual_user_close_disconnects_unconnected_socket():

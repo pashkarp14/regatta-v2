@@ -146,7 +146,7 @@ def _derive_join_socket_to_snapshot(socket_rows: list[dict[str, Any]]) -> dict[s
         ts = _parse_ts(row.get("ts"))
         if event == "room:join_socket" and row.get("direction") == "out":
             outbound[key] = ts
-        elif event in {"room:snapshot", "room:presence"} and row.get("direction") == "in":
+        elif event == "room:snapshot" and row.get("direction") == "in":
             started_at = outbound.get(key)
             if started_at:
                 values.append(round((ts - started_at) * 1000.0, 2))

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from flask import Blueprint, current_app, request
 
-from ..app_state import room_store
+from ..app_state import live_runtime, room_store
 from ..game_state import room_requires_live_loop
 from ..observability import log_event, payload_bytes
 from ..room_events import broadcast_room_snapshot, serialize_room
@@ -24,6 +25,10 @@ from ..sockets import emit_room_kicked, ensure_realtime_room_loop, pop_realtime_
 
 
 bp = Blueprint("rooms", __name__)
+
+
+def runtime_now_ms() -> int:
+    return int(time.time() * 1000)
 
 
 def json_payload() -> dict[str, Any]:
@@ -96,6 +101,7 @@ def leave_room():
             for player in room_before.get("players", [])
             if player.get("token") and player.get("token") != leaving_token
         ]
+        live_runtime().drop_room(room_code)
         room_store().delete_room(room_code)
         clear_room_session()
         pop_realtime_control(room_code)
@@ -106,8 +112,13 @@ def leave_room():
     room_code, room = leave_current_room()
     if room_code and room is not None:
         if room_requires_live_loop(room):
+            live_runtime().replace_room(room, runtime_now_ms())
             ensure_realtime_room_loop(room["code"])
+        else:
+            live_runtime().drop_room(room_code)
         broadcast_room_snapshot(room)
+    elif room_code:
+        live_runtime().drop_room(room_code)
     log_event(
         current_app.logger,
         "room.leave.response",
@@ -132,7 +143,10 @@ def start_room(room_code: str):
         game_state=payload.get("game_state"),
     )
     if room_requires_live_loop(room):
+        live_runtime().replace_room(room, runtime_now_ms())
         ensure_realtime_room_loop(room["code"])
+    else:
+        live_runtime().drop_room(room["code"])
     broadcast_room_snapshot(room)
     log_event(
         current_app.logger,
@@ -147,6 +161,7 @@ def start_room(room_code: str):
 @bp.post("/api/rooms/<room_code>/edit")
 def edit_room(room_code: str):
     room, player_token = edit_room_match(room_code)
+    live_runtime().drop_room(room["code"])
     pop_realtime_control(room["code"])
     broadcast_room_snapshot(room)
     log_event(current_app.logger, "room.edit.response", room_code=room.get("code"), revision=room.get("revision"))
@@ -156,6 +171,7 @@ def edit_room(room_code: str):
 @bp.post("/api/rooms/<room_code>/reset-lobby")
 def reset_lobby(room_code: str):
     room, player_token = reset_room_lobby(room_code)
+    live_runtime().drop_room(room["code"])
     pop_realtime_control(room["code"])
     broadcast_room_snapshot(room)
     log_event(current_app.logger, "room.reset_lobby.response", room_code=room.get("code"), revision=room.get("revision"))
@@ -169,7 +185,10 @@ def kick_room(room_code: str):
     remap_realtime_controls(room_code, old_racer_ids, new_racer_ids)
     emit_room_kicked(room_code, kicked_token)
     if room_requires_live_loop(room):
+        live_runtime().replace_room(room, runtime_now_ms())
         ensure_realtime_room_loop(room["code"])
+    else:
+        live_runtime().drop_room(room["code"])
     broadcast_room_snapshot(room)
     log_event(
         current_app.logger,

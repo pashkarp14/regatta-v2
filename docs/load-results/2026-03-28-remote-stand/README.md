@@ -14,6 +14,11 @@ Useful runs:
 - `20260328T103755Z`: successful `live_race --users 4 --duration-sec 20`
 - `20260328T103538Z`: failed `live_race --users 8 --duration-sec 30` with room view timeout
 
+Recommended benchmark matrix for the next pass after room-sync slimming:
+
+- `1x16` as the shipped single-worker baseline
+- `1x32` as the stretch single-worker experiment
+
 Typical files inside each run folder:
 
 - `summary.json`: aggregated machine-readable result

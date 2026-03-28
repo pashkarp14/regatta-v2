@@ -440,6 +440,7 @@ def observe_socket_event(
     player_token_present: bool | None = None,
     error_kind: str | None = None,
     revision: int | None = None,
+    snapshot_sent: bool | None = None,
 ) -> None:
     duration_seconds = max(time.perf_counter() - started_at, 0.0)
     if metrics_enabled():
@@ -459,6 +460,8 @@ def observe_socket_event(
     }
     if revision is not None:
         fields["revision"] = revision
+    if snapshot_sent is not None:
+        fields["snapshot_sent"] = snapshot_sent
     if error_kind:
         fields["error_kind"] = error_kind
     log_event(logger, event_type, level=log_level, **fields)

@@ -76,6 +76,7 @@ def test_join_storm_smoke_10_users(live_server):
     assert not recorder.errors
     assert any(sample.path == "/api/rooms/join" for sample in recorder.requests)
     assert any(sample.event == "room:join_socket" for sample in recorder.socket_events)
+    assert any(sample.event == "room:snapshot" for sample in recorder.socket_events)
 
 
 def test_smoke_run_does_not_report_cleanup_as_failure(live_server):

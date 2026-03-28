@@ -1160,8 +1160,12 @@ document.addEventListener("DOMContentLoaded", () => {
         telemetryState.socketConnectStartedAt = 0;
       }
       setSyncLabel("Комната подключена", true);
-      roomState.socket.emit("room:join_socket", { room_code: roomState.room.code });
-      void tryPushState(true);
+      const joinPayload = { room_code: roomState.room.code };
+      if (Number.isInteger(roomState.room?.revision)) {
+        joinPayload.known_revision = roomState.room.revision;
+      }
+      roomState.socket.emit("room:join_socket", joinPayload);
+      void tryPushState();
       void trySendRealtimeControl(true);
     });
 
@@ -1180,7 +1184,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     roomState.socket.on("room:presence", (payload) => {
       if (payload?.room) {
-        handleIncomingRoom(payload.room);
+        handleIncomingPresence(payload.room);
       }
     });
 
@@ -1235,13 +1239,27 @@ document.addEventListener("DOMContentLoaded", () => {
     }, Math.max(0, delayMs));
   }
 
-  function handleIncomingRoom(room) {
+  function mergePresenceRoom(room) {
+    if (!room) return null;
+    if (Object.prototype.hasOwnProperty.call(room, "game_state")) {
+      return room;
+    }
+    if (!roomState.room || room.code !== roomState.room.code) {
+      return null;
+    }
+    return {
+      ...room,
+      game_state: roomState.room.game_state,
+    };
+  }
+
+  function applyIncomingRoom(room, { importState = true, telemetryEvent = "client.state.apply_remote" } = {}) {
     if (!room) return;
     const startedAt = perfNow();
     const previousStatus = roomState.room?.status || null;
     const incomingPayloadBytes = telemetryPayloadBytes(room);
 
-    const incomingState = room.game_state;
+    const incomingState = importState ? room.game_state : null;
     if (incomingState) {
       const incomingFingerprint = JSON.stringify(incomingState);
       if (incomingFingerprint !== roomState.lastFingerprint) {
@@ -1261,7 +1279,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     renderRoom(room);
-    queueTelemetry("client.state.apply_remote", {
+    queueTelemetry(telemetryEvent, {
       duration_ms: Number((perfNow() - startedAt).toFixed(2)),
       payload_bytes: incomingPayloadBytes,
       revision: Number.isInteger(room?.revision) ? room.revision : null,
@@ -1279,6 +1297,16 @@ document.addEventListener("DOMContentLoaded", () => {
       telemetryState.pendingControlRevision = null;
       telemetryState.lastControlEmitAt = 0;
     }
+  }
+
+  function handleIncomingRoom(room) {
+    applyIncomingRoom(room, { importState: true, telemetryEvent: "client.state.apply_remote" });
+  }
+
+  function handleIncomingPresence(room) {
+    const mergedRoom = mergePresenceRoom(room);
+    if (!mergedRoom) return;
+    applyIncomingRoom(mergedRoom, { importState: false, telemetryEvent: "client.state.apply_presence" });
   }
 
   async function createRoom(overrides = {}) {

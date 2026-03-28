@@ -12,6 +12,7 @@ from .config import get_config
 from .error_handlers import register_error_handlers
 from .extensions import session_ext, socketio
 from .library_store import LibraryStore
+from .live_runtime import LiveRuntimeRegistry
 from .locked_room_store import LockedRoomStore
 from .observability import configure_json_logging, log_event, register_observability
 from .routes import bp as main_bp
@@ -74,6 +75,7 @@ def create_app(config_overrides: Mapping[str, Any] | None = None) -> Flask:
 
     app.extensions["redis_client"] = redis_client
     app.extensions["room_store"] = LockedRoomStore(redis_client, app.config["ROOM_TTL_SECONDS"])
+    app.extensions["live_runtime"] = LiveRuntimeRegistry()
     app.extensions["library_store"] = LibraryStore(
         app.config["LIBRARY_DIR"],
         app.config["STANDARD_MAPS_DIR"],

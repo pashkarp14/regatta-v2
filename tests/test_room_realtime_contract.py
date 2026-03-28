@@ -236,6 +236,57 @@ def test_kicked_player_receives_room_kicked_socket_event(app, client_factory):
     assert any(event["name"] == "room:kicked" for event in events), events
 
 
+def test_join_socket_skips_snapshot_when_client_revision_is_current(app, client_factory):
+    host = client_factory()
+    guest = client_factory()
+
+    room = create_room(host, host_role="player", state=make_realtime_state(2))
+    room_code = room["code"]
+    joined_room = join_room(guest, room_code, "Guest")
+
+    socket_client = socketio.test_client(app, flask_test_client=guest)
+    assert socket_client.is_connected()
+
+    socket_client.emit(
+        "room:join_socket",
+        {"room_code": room_code, "known_revision": joined_room["revision"]},
+    )
+
+    events = socket_client.get_received()
+    assert not any(event["name"] == "room:snapshot" for event in events), events
+    presence_events = [event for event in events if event["name"] == "room:presence"]
+    assert presence_events, events
+    assert presence_events[-1]["args"][0]["room"]["revision"] == joined_room["revision"]
+
+
+def test_room_presence_payload_omits_game_state_but_keeps_roster_fields(app, client_factory):
+    host = client_factory()
+    guest = client_factory()
+
+    room = create_room(host, host_role="player", state=make_realtime_state(2))
+    room_code = room["code"]
+    join_room(guest, room_code, "Guest")
+
+    socket_client = socketio.test_client(app, flask_test_client=host)
+    assert socket_client.is_connected()
+
+    socket_client.emit("room:join_socket", {"room_code": room_code})
+
+    events = socket_client.get_received()
+    presence_events = [event for event in events if event["name"] == "room:presence"]
+    assert presence_events, events
+    room_payload = presence_events[-1]["args"][0]["room"]
+
+    assert "game_state" not in room_payload
+    assert room_payload["code"] == room_code
+    assert room_payload["status"] == "lobby"
+    assert room_payload["revision"] >= room["revision"]
+    assert room_payload["joined_count"] == 2
+    assert room_payload["joined_racers_count"] == 2
+    assert room_payload["capacity"] == 20
+    assert len(room_payload["players"]) == 2
+
+
 def test_live_room_loop_stops_after_last_socket_disconnect(app, client_factory):
     host = client_factory()
     guest = client_factory()
