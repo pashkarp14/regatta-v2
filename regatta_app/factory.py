@@ -67,10 +67,11 @@ def create_app(config_overrides: Mapping[str, Any] | None = None) -> Flask:
         app.config["SESSION_REDIS"] = redis_client
 
     session_ext.init_app(app)
+    message_queue_url = app.config.get("SOCKETIO_MESSAGE_QUEUE") or None
     socketio.init_app(
         app,
         async_mode=app.config["SOCKETIO_ASYNC_MODE"],
-        message_queue=app.config["REDIS_URL"] or None,
+        message_queue=message_queue_url,
     )
 
     app.extensions["redis_client"] = redis_client
@@ -91,6 +92,8 @@ def create_app(config_overrides: Mapping[str, Any] | None = None) -> Flask:
         "app.startup",
         version=app.config["APP_VERSION"],
         redis_enabled=redis_client is not None,
+        socketio_message_queue=bool(message_queue_url),
+        socketio_async_mode=app.config["SOCKETIO_ASYNC_MODE"],
         metrics_enabled=bool(app.config.get("METRICS_ENABLED")),
         structured_logs=bool(app.config.get("STRUCTURED_LOGS")),
         client_telemetry=bool(app.config.get("CLIENT_TELEMETRY_ENABLED")),

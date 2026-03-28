@@ -96,13 +96,20 @@ def client_factory(app):
     return factory
 
 
-def create_room(client, *, host_role: str = "player", display_name: str = "Host", state: dict | None = None) -> dict:
+def create_room(
+    client,
+    *,
+    host_role: str = "player",
+    display_name: str = "Host",
+    state: dict | None = None,
+    max_players: int = 2,
+) -> dict:
     response = client.post(
         "/api/rooms",
         json={
             "display_name": display_name,
             "host_role": host_role,
-            "max_players": 2,
+            "max_players": max_players,
             "game_state": state or make_realtime_state(),
         },
     )
@@ -134,7 +141,7 @@ def test_player_host_room_exposes_player_ids_and_can_start(client_factory):
     room = create_room(host, host_role="player", state=make_realtime_state(2))
 
     assert room["joined_racers_count"] == 1
-    assert room["max_players"] == 1
+    assert room["max_players"] == 2
     assert room["can_start"] is True
     assert len(room["game_state"]["boats"]) == 1
     assert room["players"][0]["player_id"]
@@ -150,13 +157,13 @@ def test_observer_room_grows_fleet_with_each_join_and_updates_can_start(client_f
     room_code = room["code"]
 
     assert room["joined_racers_count"] == 0
-    assert room["max_players"] == 0
+    assert room["max_players"] == 2
     assert room["can_start"] is False
     assert room["game_state"]["boats"] == []
 
     first_join = join_room(guest_one, room_code, "Guest One")
     assert first_join["joined_racers_count"] == 1
-    assert first_join["max_players"] == 1
+    assert first_join["max_players"] == 2
     assert first_join["can_start"] is True
     assert len(first_join["game_state"]["boats"]) == 1
 
@@ -172,7 +179,7 @@ def test_live_kick_compacts_fleet_and_clears_removed_player_session(client_facto
     guest_one = client_factory()
     guest_two = client_factory()
 
-    room = create_room(host, host_role="player", state=make_realtime_state(2))
+    room = create_room(host, host_role="player", state=make_realtime_state(3), max_players=3)
     room_code = room["code"]
     guest_one_room = join_room(guest_one, room_code, "Guest One")
     guest_two_room = join_room(guest_two, room_code, "Guest Two")
@@ -199,7 +206,7 @@ def test_live_kick_compacts_fleet_and_clears_removed_player_session(client_facto
     kicked_room = kick_response.get_json()["room"]
     assert kicked_room["status"] == "live"
     assert kicked_room["joined_racers_count"] == 2
-    assert kicked_room["max_players"] == 2
+    assert kicked_room["max_players"] == 3
     assert len(kicked_room["game_state"]["boats"]) == 2
 
     remaining_ids = [player["player_id"] for player in kicked_room["players"] if not player["is_observer"]]
@@ -283,8 +290,73 @@ def test_room_presence_payload_omits_game_state_but_keeps_roster_fields(app, cli
     assert room_payload["revision"] >= room["revision"]
     assert room_payload["joined_count"] == 2
     assert room_payload["joined_racers_count"] == 2
-    assert room_payload["capacity"] == 20
+    assert room_payload["capacity"] == 100
     assert len(room_payload["players"]) == 2
+
+
+def test_http_join_broadcasts_presence_before_guest_socket_connect(app, client_factory):
+    host = client_factory()
+    guest = client_factory()
+
+    room = create_room(host, host_role="player", state=make_realtime_state(2))
+    room_code = room["code"]
+
+    host_socket = socketio.test_client(app, flask_test_client=host)
+    assert host_socket.is_connected()
+    host_socket.emit("room:join_socket", {"room_code": room_code, "known_revision": room["revision"]})
+    host_socket.get_received()
+
+    joined_room = join_room(guest, room_code, "Guest")
+    host_events = host_socket.get_received()
+    host_presence = [event for event in host_events if event["name"] == "room:presence"]
+    assert host_presence, host_events
+    assert host_presence[-1]["args"][0]["room"]["joined_count"] == 2
+
+    guest_socket = socketio.test_client(app, flask_test_client=guest)
+    assert guest_socket.is_connected()
+    guest_socket.emit("room:join_socket", {"room_code": room_code, "known_revision": joined_room["revision"]})
+    guest_events = guest_socket.get_received()
+    assert any(event["name"] == "room:presence" for event in guest_events), guest_events
+    assert not any(event["name"] == "room:presence" for event in host_socket.get_received())
+
+
+def test_room_payload_exposes_split_racer_and_observer_capacity(client_factory):
+    host = client_factory()
+
+    room = create_room(host, host_role="player", state=make_realtime_state(2), max_players=2)
+
+    assert room["max_players"] == 2
+    assert room["max_racers"] == 2
+    assert room["max_observers"] == 98
+    assert room["joined_racers_count"] == 1
+    assert room["joined_observers_count"] == 0
+    assert room["capacity"] == 100
+
+
+def test_join_after_racer_capacity_is_reached_becomes_observer(client_factory):
+    host = client_factory()
+    guest_one = client_factory()
+    guest_two = client_factory()
+
+    room = create_room(host, host_role="player", state=make_realtime_state(2), max_players=2)
+    room_code = room["code"]
+
+    first_join = join_room(guest_one, room_code, "Guest One")
+    second_join = join_room(guest_two, room_code, "Guest Two")
+
+    assert first_join["joined_racers_count"] == 2
+    assert first_join["joined_observers_count"] == 0
+    assert len(first_join["game_state"]["boats"]) == 2
+
+    self_player = next(player for player in second_join["players"] if player["is_self"])
+    assert self_player["is_observer"] is True
+    assert self_player["seat_index"] is None
+    assert second_join["joined_racers_count"] == 2
+    assert second_join["joined_observers_count"] == 1
+    assert second_join["max_racers"] == 2
+    assert second_join["max_observers"] == 98
+    assert second_join["capacity"] == 100
+    assert len(second_join["game_state"]["boats"]) == 2
 
 
 def test_live_room_loop_stops_after_last_socket_disconnect(app, client_factory):

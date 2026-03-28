@@ -8,7 +8,7 @@ from flask import Blueprint, current_app, request
 from ..app_state import live_runtime, room_store
 from ..game_state import room_requires_live_loop
 from ..observability import log_event, payload_bytes
-from ..room_events import broadcast_room_snapshot, serialize_room
+from ..room_events import broadcast_room_presence, broadcast_room_snapshot, serialize_room
 from ..room_service import (
     create_room_from_payload,
     current_room,
@@ -68,6 +68,9 @@ def create_room():
         status=room.get("status"),
         joined_count=room.get("joined_count"),
         joined_racers_count=room.get("joined_racers_count"),
+        joined_observers_count=room.get("joined_observers_count"),
+        max_racers=room.get("max_racers"),
+        max_observers=room.get("max_observers"),
         payload_bytes=payload_bytes({"room": room}),
     )
     return {"room": room}
@@ -77,12 +80,18 @@ def create_room():
 def join_room():
     payload = json_payload()
     room = join_room_from_payload(payload)
+    live_room = current_room() or room_store().get_room(room.get("code", ""))
+    if live_room is not None:
+        broadcast_room_presence(live_room)
     log_event(
         current_app.logger,
         "room.join.response",
         room_code=room.get("code"),
         joined_count=room.get("joined_count"),
         joined_racers_count=room.get("joined_racers_count"),
+        joined_observers_count=room.get("joined_observers_count"),
+        max_racers=room.get("max_racers"),
+        max_observers=room.get("max_observers"),
         payload_bytes=payload_bytes({"room": room}),
     )
     return {"room": room}
@@ -153,6 +162,8 @@ def start_room(room_code: str):
         "room.start.response",
         room_code=room.get("code"),
         revision=room.get("revision"),
+        joined_racers_count=room.get("joined_racers_count"),
+        joined_observers_count=room.get("joined_observers_count"),
         payload_bytes=payload_bytes({"room": room}),
     )
     return serialize_room(room, player_token)

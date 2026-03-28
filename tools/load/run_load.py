@@ -70,12 +70,17 @@ def _scenario_params(args: argparse.Namespace) -> tuple[Any, dict[str, Any]]:
 
     preset = dict(SCENARIO_PRESETS[args.scenario])
     runner = preset.pop("runner")
-    return runner, {
+    params = {
         "users": args.users or preset["users"],
         "rooms": args.rooms or preset["rooms"],
         "users_per_room": args.users_per_room or preset["users_per_room"],
         "duration_seconds": args.duration_sec or preset["duration_seconds"],
     }
+    for key, value in preset.items():
+        if key in params:
+            continue
+        params[key] = value
+    return runner, params
 
 
 async def _execute_scenario(
@@ -88,6 +93,7 @@ async def _execute_scenario(
     users_per_room: int,
     duration_seconds: int,
     baseline_snapshot: dict[str, Any],
+    **extra_params: Any,
 ) -> dict[str, Any]:
     if runner is run_live_race:
         return await runner(
@@ -98,6 +104,7 @@ async def _execute_scenario(
             rooms=rooms,
             users_per_room=users_per_room,
             baseline_snapshot=baseline_snapshot,
+            **extra_params,
         )
     return await runner(
         base_url,
@@ -105,6 +112,7 @@ async def _execute_scenario(
         users,
         duration_seconds,
         baseline_snapshot=baseline_snapshot,
+        **extra_params,
     )
 
 
@@ -146,6 +154,11 @@ def main(argv: list[str] | None = None) -> int:
                 users_per_room=params["users_per_room"],
                 duration_seconds=params["duration_seconds"],
                 baseline_snapshot=baseline_snapshot,
+                **{
+                    key: value
+                    for key, value in params.items()
+                    if key not in {"users", "rooms", "users_per_room", "duration_seconds"}
+                },
             )
         )
         scenario_config["result"] = result

@@ -8,6 +8,7 @@ import time
 import pytest
 
 import tools.load.run as load_run
+from tools.load.scenarios import SCENARIO_PRESETS as SCENARIO_EXPORTS
 from tools.load.run import (
     LoadRecorder,
     RequestSample,
@@ -95,6 +96,23 @@ def test_build_metrics_inventory_detects_missing_and_extra_metrics():
     ]
     assert inventory["expected_but_missing"] == ["regatta_realtime_tick_duration_seconds"]
     assert inventory["found_but_undocumented"] == ["custom_metric"]
+
+
+def test_scenario_presets_include_100_user_targets():
+    join_storm = load_run.SCENARIO_PRESETS["join_storm_1x100"]
+    live_room = load_run.SCENARIO_PRESETS["live_race_20r_80o"]
+    observer_burst = load_run.SCENARIO_PRESETS["observer_burst_1x100"]
+
+    assert SCENARIO_EXPORTS is load_run.SCENARIO_PRESETS
+    assert join_storm["users"] == 100
+    assert join_storm["rooms"] == 1
+    assert join_storm["users_per_room"] == 100
+    assert live_room["users"] == 100
+    assert live_room["users_per_room"] == 100
+    assert live_room["racers_per_room"] == 20
+    assert live_room["observers_per_room"] == 80
+    assert observer_burst["users"] == 100
+    assert observer_burst["observers_per_room"] == 80
 
 
 def test_load_recorder_writes_required_jsonl_artifacts(tmp_path: Path):
@@ -428,6 +446,33 @@ def test_virtual_user_connect_socket_waits_for_snapshot_not_presence():
     assert recorder.socket_events[-1].ok is True
 
 
+def test_virtual_user_connect_socket_accepts_keyframe_boundary():
+    recorder = LoadRecorder("join_storm_1x100")
+    user = VirtualUser("http://127.0.0.1:5001", "runner-user", recorder)
+
+    class FakeSocket:
+        connected = False
+
+        async def connect(self, *args, **kwargs) -> None:
+            self.connected = True
+
+    user.socket = FakeSocket()
+    user.room_code = "ROOM01"
+
+    async def fake_emit_event(event: str, payload: dict[str, object]) -> None:
+        await user.socket_queue.put(
+            ("room:keyframe", {"room": {"code": "ROOM01", "revision": 1, "game_state": {}}}, time.perf_counter())
+        )
+
+    user.emit_event = fake_emit_event  # type: ignore[method-assign]
+
+    asyncio.run(user.connect_socket("ROOM01"))
+
+    assert user.socket_queue.empty()
+    assert recorder.socket_events[-1].event == "connect"
+    assert recorder.socket_events[-1].ok is True
+
+
 def test_join_socket_latency_ignores_presence_events():
     stats = _derive_join_socket_to_snapshot(
         [
@@ -460,6 +505,86 @@ def test_join_socket_latency_ignores_presence_events():
 
     assert stats["count"] == 1
     assert stats["p50"] == 25.0
+
+
+def test_join_socket_latency_uses_room_keyframe_when_present():
+    stats = _derive_join_socket_to_snapshot(
+        [
+            {
+                "ts": "2026-03-28T09:00:03Z",
+                "scenario": "join_storm_1x100",
+                "user_id": "guest",
+                "event": "room:join_socket",
+                "direction": "out",
+                "room_code": "ROOM01",
+            },
+            {
+                "ts": "2026-03-28T09:00:03.012Z",
+                "scenario": "join_storm_1x100",
+                "user_id": "guest",
+                "event": "room:keyframe",
+                "direction": "in",
+                "room_code": "ROOM01",
+            },
+        ]
+    )
+
+    assert stats["count"] == 1
+    assert stats["p50"] == 12.0
+
+
+def test_generate_report_surfaces_blocking_issue(tmp_path: Path):
+    (tmp_path / "scenario_config.json").write_text(
+        json.dumps(
+            {
+                "scenario": "join_storm_1x100",
+                "base_url": "http://127.0.0.1:5001",
+                "rooms": 1,
+                "users": 100,
+                "duration_seconds": 20,
+                "started_at": "2026-03-29T09:00:00Z",
+                "finished_at": "2026-03-29T09:00:10Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "environment.json").write_text(
+        json.dumps(
+            {
+                "base_url": "http://127.0.0.1:5001",
+                "healthz": {"session_backend": "redis", "redis": True},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "metrics_expected_and_found.json").write_text("[]", encoding="utf-8")
+    (tmp_path / "metrics_found_but_undocumented.json").write_text("[]", encoding="utf-8")
+    (tmp_path / "metrics_expected_but_missing.json").write_text("[]", encoding="utf-8")
+    (tmp_path / "requests.jsonl").write_text("", encoding="utf-8")
+    (tmp_path / "socket_events.jsonl").write_text("", encoding="utf-8")
+    (tmp_path / "room_revisions.jsonl").write_text("", encoding="utf-8")
+    (tmp_path / "errors.json").write_text("[]", encoding="utf-8")
+    (tmp_path / "metrics_initial.txt").write_text("", encoding="utf-8")
+    (tmp_path / "metrics_final.txt").write_text("", encoding="utf-8")
+    (tmp_path / "blocking_issue.json").write_text(
+        json.dumps(
+            {
+                "ts": "2026-03-29T09:00:10Z",
+                "message": "Scenario execution failed.",
+                "details": {"scenario": "join_storm_1x100", "error": "Timed out connecting Socket.IO client."},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    generate_report(tmp_path)
+
+    summary = json.loads((tmp_path / "summary.json").read_text(encoding="utf-8"))
+    report = (tmp_path / "report.md").read_text(encoding="utf-8")
+
+    assert summary["blocking_issue"]["details"]["error"] == "Timed out connecting Socket.IO client."
+    assert "Blocking issue" in report
+    assert "Timed out connecting Socket.IO client." in report
 
 
 def test_virtual_user_close_disconnects_unconnected_socket():
