@@ -19,6 +19,27 @@ Recommended benchmark matrix for the next pass after room-sync slimming:
 - `1x16` as the shipped single-worker baseline
 - `1x32` as the stretch single-worker experiment
 
+100-user benchmark scenarios for the next architecture pass:
+
+- `join_storm_1x100`
+  - target: `0` socket connect timeouts
+  - gate: socket connect `p95 < 750 ms`
+  - gate: `join_socket -> keyframe p95 < 250 ms`
+- `live_race_20r_80o`
+  - target: `20` racers + `80` observers in one room
+  - gate: `0` `GET /api/rooms/<code>` timeouts
+  - gate: racer `control -> revision p95 < 150 ms`
+  - gate: observer resync rate `< 0.1%`
+- `observer_burst_1x100`
+  - target: late observer joins must not break the live room
+  - gate: observer joins do not push racer control latency above the live-race gate
+
+Reporting notes for these scenarios:
+
+- `room:keyframe` is the primary join-complete event for latency tracking
+- failed socket connects should be treated as blockers and surfaced from `blocking_issue.json`
+- keep the old `join_socket -> snapshot` field only as a compatibility alias in machine-readable summaries
+
 Typical files inside each run folder:
 
 - `summary.json`: aggregated machine-readable result

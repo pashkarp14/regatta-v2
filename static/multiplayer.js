@@ -496,6 +496,21 @@ document.addEventListener("DOMContentLoaded", () => {
       : room.max_players + (room.host_mode === "observe" ? 1 : 0);
   }
 
+  function roomRacerCapacity(room = roomState.room) {
+    if (!room) return pendingDraftMaxPlayers();
+    return Number.isInteger(room.max_racers)
+      ? room.max_racers
+      : (Number.isInteger(room.max_players) ? room.max_players : pendingDraftMaxPlayers());
+  }
+
+  function roomObserverCapacity(room = roomState.room) {
+    if (!room) return pendingDraftHostRole() === "observer" ? 1 : 0;
+    if (Number.isInteger(room.max_observers)) {
+      return room.max_observers;
+    }
+    return Math.max(0, roomHumanCapacity(room) - roomRacerCapacity(room));
+  }
+
   function roomStartReady(room = roomState.room) {
     return !!(room?.can_start ?? room?.start_ready);
   }
@@ -507,13 +522,28 @@ document.addEventListener("DOMContentLoaded", () => {
       : (room.players || []).filter((player) => !player.is_observer && Number.isInteger(player.seat_index)).length;
   }
 
+  function roomObserversJoined(room = roomState.room) {
+    if (!room) return 0;
+    return Number.isInteger(room.joined_observers_count)
+      ? room.joined_observers_count
+      : (room.players || []).filter((player) => !!player.is_observer).length;
+  }
+
   function roomHostObserves(room = roomState.room) {
     return !!room && room.host_mode === "observe";
   }
 
   function roomOccupancyLabel(room = roomState.room) {
     if (!room) return "";
-    return `${roomRacersJoined(room)} лодок`;
+    const racersJoined = roomRacersJoined(room);
+    const racersCapacity = roomRacerCapacity(room);
+    const observersJoined = roomObserversJoined(room);
+    const observersCapacity = roomObserverCapacity(room);
+    const racersLabel = `Гонщики ${racersJoined}/${racersCapacity}`;
+    if (observersCapacity <= 0) {
+      return racersLabel;
+    }
+    return `${racersLabel} · Наблюдатели ${observersJoined}/${observersCapacity}`;
   }
 
   function roomPlayer() {

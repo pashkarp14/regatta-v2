@@ -561,13 +561,30 @@ class VirtualUser:
         self.room_code: str | None = None
         self.socket_connected_at: str | None = None
         self.last_revision: int | None = None
+        self.self_is_observer = False
         self.pending_control_timestamps: deque[float] = deque()
         self.disconnect_count = 0
         self.room_error_count = 0
         self._planned_disconnect = False
         self._install_socket_handlers()
 
+    def _remember_room_self(self, room: dict[str, Any]) -> None:
+        self_payload = room.get("self") if isinstance(room.get("self"), dict) else {}
+        if isinstance(self_payload.get("is_observer"), bool):
+            self.self_is_observer = bool(self_payload["is_observer"])
+            return
+        players = room.get("players") if isinstance(room.get("players"), list) else []
+        self.self_is_observer = any(
+            bool(player.get("is_self")) and bool(player.get("is_observer"))
+            for player in players
+            if isinstance(player, dict)
+        )
+
     def _install_socket_handlers(self) -> None:
+        @self.socket.on("room:keyframe")
+        async def on_keyframe(payload: dict[str, Any]) -> None:
+            await self._record_inbound("room:keyframe", payload, ok=True)
+
         @self.socket.on("room:snapshot")
         async def on_snapshot(payload: dict[str, Any]) -> None:
             await self._record_inbound("room:snapshot", payload, ok=True)
@@ -705,18 +722,26 @@ class VirtualUser:
     def cookie_header(self) -> str:
         return "; ".join(f"{key}={value}" for key, value in self.http.cookies.items())
 
-    async def create_room(self, display_name: str, game_state: dict[str, Any], *, host_role: str = "player") -> dict[str, Any]:
+    async def create_room(
+        self,
+        display_name: str,
+        game_state: dict[str, Any],
+        *,
+        host_role: str = "player",
+        max_players: int | None = None,
+    ) -> dict[str, Any]:
         payload = await self.request(
             "POST",
             "/api/rooms",
             json_body={
                 "display_name": display_name,
                 "host_role": host_role,
-                "max_players": len(game_state.get("boats") or []),
+                "max_players": max_players if isinstance(max_players, int) and max_players > 0 else len(game_state.get("boats") or []),
                 "game_state": game_state,
             },
         )
         self.room_code = payload["room"]["code"]
+        self._remember_room_self(payload["room"])
         return payload["room"]
 
     async def join_room(self, room_code: str, display_name: str) -> dict[str, Any]:
@@ -726,6 +751,7 @@ class VirtualUser:
             "/api/rooms/join",
             json_body={"display_name": display_name, "room_code": room_code},
         )
+        self._remember_room_self(payload["room"])
         return payload["room"]
 
     async def room_view(self, room_code: str) -> dict[str, Any]:
@@ -804,11 +830,11 @@ class VirtualUser:
         deadline = time.perf_counter() + 10.0
         while time.perf_counter() < deadline:
             event, payload, _ = await asyncio.wait_for(self.socket_queue.get(), timeout=10.0)
-            if event == "room:snapshot":
+            if event in {"room:keyframe", "room:snapshot"}:
                 return
             if event == "room:error":
                 raise RuntimeError(str(payload.get("error") if isinstance(payload, dict) else payload))
-        raise RuntimeError("Timed out waiting for room:snapshot after room:join_socket.")
+        raise RuntimeError("Timed out waiting for room:keyframe after room:join_socket.")
 
     async def emit_event(self, event: str, payload: dict[str, Any]) -> None:
         started_at = time.perf_counter()
@@ -901,10 +927,12 @@ async def _create_room_stack(
     baseline_snapshot: dict[str, Any],
     *,
     concurrent_join: bool,
+    racer_capacity: int | None = None,
 ) -> tuple[VirtualUser, list[VirtualUser], str]:
     host = VirtualUser(base_url, f"Skipper-{room_index}-0", recorder)
-    room_state = reshape_snapshot_for_players(baseline_snapshot, participant_count)
-    room = await host.create_room(host.user_id, room_state)
+    requested_racer_capacity = max(1, min(racer_capacity or participant_count, MAX_ROOM_PLAYERS))
+    room_state = reshape_snapshot_for_players(baseline_snapshot, requested_racer_capacity)
+    room = await host.create_room(host.user_id, room_state, max_players=requested_racer_capacity)
     room_code = room["code"]
     guests = [VirtualUser(base_url, f"Skipper-{room_index}-{index}", recorder) for index in range(1, participant_count)]
     if concurrent_join:
@@ -969,16 +997,25 @@ async def run_join_storm(
     duration_seconds: int,
     *,
     baseline_snapshot: dict[str, Any] | None = None,
+    users_per_room: int | None = None,
+    racers_per_room: int | None = None,
+    observers_per_room: int | None = None,
+    **_: Any,
 ) -> dict[str, Any]:
     del duration_seconds
     snapshot = baseline_snapshot or load_local_baseline_snapshot()
+    room_target = users_per_room or users
+    if racers_per_room is not None and observers_per_room is not None:
+        room_target = min(room_target, racers_per_room + observers_per_room)
+    participant_count = max(2, min(users, room_target))
     host, guests, room_code = await _create_room_stack(
         base_url,
         recorder,
         1,
-        max(2, min(users, MAX_ROOM_PLAYERS)),
+        participant_count,
         snapshot,
         concurrent_join=True,
+        racer_capacity=racers_per_room,
     )
     sessions = [host, *guests]
     try:
@@ -987,6 +1024,24 @@ async def run_join_storm(
         return {"rooms": 1, "users": len(sessions), "room_codes": [room_code]}
     finally:
         await _close_sessions(sessions)
+
+
+async def run_observer_burst(
+    base_url: str,
+    recorder: LoadRecorder,
+    users: int,
+    duration_seconds: int,
+    *,
+    baseline_snapshot: dict[str, Any] | None = None,
+    **_: Any,
+) -> dict[str, Any]:
+    return await run_join_storm(
+        base_url,
+        recorder,
+        users,
+        duration_seconds,
+        baseline_snapshot=baseline_snapshot,
+    )
 
 
 async def run_live_race(
@@ -998,11 +1053,18 @@ async def run_live_race(
     rooms: int | None = None,
     users_per_room: int = MAX_ROOM_PLAYERS,
     baseline_snapshot: dict[str, Any] | None = None,
+    racers_per_room: int | None = None,
+    observers_per_room: int | None = None,
+    **_: Any,
 ) -> dict[str, Any]:
     snapshot = baseline_snapshot or load_local_baseline_snapshot()
-    users_per_room = max(2, min(users_per_room, MAX_ROOM_PLAYERS))
+    users_per_room = max(2, users_per_room)
+    racer_capacity = max(1, min(racers_per_room or users_per_room, MAX_ROOM_PLAYERS))
+    room_target = users_per_room
+    if observers_per_room is not None:
+        room_target = max(racer_capacity, racer_capacity + max(observers_per_room, 0))
     if rooms is None:
-        rooms = max(1, math.ceil(max(users, 2) / users_per_room))
+        rooms = max(1, math.ceil(max(users, 2) / room_target))
 
     sessions: list[VirtualUser] = []
     room_codes: list[str] = []
@@ -1011,7 +1073,7 @@ async def run_live_race(
     remaining_users = max(users, rooms * 2)
     try:
         for room_index in range(1, rooms + 1):
-            participant_count = max(2, min(users_per_room, remaining_users))
+            participant_count = max(2, min(room_target, remaining_users))
             remaining_users = max(0, remaining_users - participant_count)
             host, guests, room_code = await _create_room_stack(
                 base_url,
@@ -1020,6 +1082,7 @@ async def run_live_race(
                 participant_count,
                 snapshot,
                 concurrent_join=True,
+                racer_capacity=racer_capacity,
             )
             room_codes.append(room_code)
             room_sessions = [host, *guests]
@@ -1029,7 +1092,8 @@ async def run_live_race(
             room_snapshot = await host.room_view(room_code)
             await host.start_room(room_code, room_snapshot["game_state"])
             for seed, session in enumerate(room_sessions, start=1):
-                racers.append((session, room_code, room_index * 100 + seed))
+                if not session.self_is_observer:
+                    racers.append((session, room_code, room_index * 100 + seed))
 
         await asyncio.gather(*(control_loop(session, room_code, duration_seconds, seed) for session, room_code, seed in racers))
         for host, guests in room_groups:
@@ -1109,8 +1173,27 @@ async def run_mixed_chaos(
 SCENARIO_PRESETS: dict[str, dict[str, Any]] = {
     "smoke_1x2": {"runner": run_smoke, "users": 2, "rooms": 1, "users_per_room": 2, "duration_seconds": 45},
     "join_storm_1x20": {"runner": run_join_storm, "users": 20, "rooms": 1, "users_per_room": 20, "duration_seconds": 15},
+    "join_storm_1x100": {"runner": run_join_storm, "users": 100, "rooms": 1, "users_per_room": 100, "duration_seconds": 20},
     "live_race_1x20": {"runner": run_live_race, "users": 20, "rooms": 1, "users_per_room": 20, "duration_seconds": 180},
+    "live_race_20r_80o": {
+        "runner": run_live_race,
+        "users": 100,
+        "rooms": 1,
+        "users_per_room": 100,
+        "racers_per_room": 20,
+        "observers_per_room": 80,
+        "duration_seconds": 180,
+    },
     "live_race_3x20": {"runner": run_live_race, "users": 60, "rooms": 3, "users_per_room": 20, "duration_seconds": 240},
     "live_race_5x20": {"runner": run_live_race, "users": 100, "rooms": 5, "users_per_room": 20, "duration_seconds": 300},
+    "observer_burst_1x100": {
+        "runner": run_observer_burst,
+        "users": 100,
+        "rooms": 1,
+        "users_per_room": 100,
+        "racers_per_room": 20,
+        "observers_per_room": 80,
+        "duration_seconds": 180,
+    },
     "mixed_chaos_100": {"runner": run_mixed_chaos, "users": 100, "rooms": 5, "users_per_room": 20, "duration_seconds": 240},
 }

@@ -3,7 +3,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 import threading
 
-from .room_store import RoomStore, RoomForbidden, RoomFull, RoomNotFound, RoomValidationError, normalize_lobby_preview_state, normalize_name, normalize_room_code, player_for_id, player_for_token, player_is_observer, reshape_room_player_states, room_joined_racer_count, MAX_ROOM_PLAYERS, make_player_id, make_player_token, make_room_code, now_ts, validate_game_state, validate_game_state_shape
+from .room_store import RoomStore, RoomForbidden, RoomFull, RoomNotFound, RoomValidationError, normalize_lobby_preview_state, normalize_name, normalize_room_code, player_for_id, player_for_token, player_is_observer, reshape_room_player_states, room_joined_racer_count, room_max_racers, room_total_capacity, MAX_ROOM_PLAYERS, MAX_TOTAL_ROOM_USERS, make_player_id, make_player_token, make_room_code, now_ts, validate_game_state, validate_game_state_shape
 
 
 class LockedRoomStore(RoomStore):
@@ -61,6 +61,10 @@ class LockedRoomStore(RoomStore):
 
         with self._named_guard("room:create"):
             source_state = validate_game_state_shape(game_state)
+            requested_racer_slots = int(max_players) if isinstance(max_players, int) and max_players > 0 else max(
+                1,
+                min(len(source_state.get("boats") or []), MAX_ROOM_PLAYERS),
+            )
             for _ in range(12):
                 room_code = make_room_code()
                 if self.get_room(room_code) is None:
@@ -74,7 +78,9 @@ class LockedRoomStore(RoomStore):
             room = {
                 "code": room_code,
                 "status": "lobby",
-                "max_players": 0,
+                "max_players": requested_racer_slots,
+                "max_racers": requested_racer_slots,
+                "max_observers": max(0, MAX_TOTAL_ROOM_USERS - requested_racer_slots),
                 "host_token": player_token,
                 "revision": 1,
                 "created_at": now_ts(),
@@ -114,8 +120,9 @@ class LockedRoomStore(RoomStore):
 
             if room["status"] != "lobby":
                 raise RoomForbidden("The match is already running.")
-            if room_joined_racer_count(room) >= MAX_ROOM_PLAYERS:
+            if len(room.get("players", [])) >= room_total_capacity(room):
                 raise RoomFull("Room is already full.")
+            join_as_observer = room_joined_racer_count(room) >= room_max_racers(room)
 
             room["players"].append(
                 {
@@ -123,7 +130,7 @@ class LockedRoomStore(RoomStore):
                     "token": make_player_token(),
                     "name": normalize_name(player_name),
                     "seat_index": None,
-                    "is_observer": False,
+                    "is_observer": join_as_observer,
                     "joined_at": now_ts(),
                 }
             )
