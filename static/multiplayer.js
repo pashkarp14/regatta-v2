@@ -27,7 +27,12 @@ document.addEventListener("DOMContentLoaded", () => {
   const hostHintOnlyControlIds = ["toggleOptimal", "bestStart"];
   const MIN_ROOM_PLAYERS = 2;
   const MAX_ROOM_PLAYERS = 20;
+  const REALTIME_CONTROL_SEND_INTERVAL_MS = 80;
+  const TELEMETRY_FLUSH_INTERVAL_MS = 5000;
+  const TELEMETRY_MAX_BATCH_SIZE = 40;
+  const TELEMETRY_LONG_FRAME_MS = 120;
   const DEFAULT_ROOM_PANEL_NOTE = "Создание и вход в комнату находятся в главном меню. Здесь остаются только статус лобби, запуск гонки и состав экипажей.";
+  const telemetryEncoder = window.TextEncoder ? new window.TextEncoder() : null;
 
   const originalDisabledState = new WeakMap();
   const originalMovesPerTurnDisabled = !!movesPerTurnInput?.disabled;
@@ -92,9 +97,22 @@ document.addEventListener("DOMContentLoaded", () => {
     selfIsObserver: false,
     lastRealtimeIntentKey: "",
     lastRealtimeIntentSentAt: 0,
+    realtimeIntentFlushTimer: 0,
     lastSharedViewKey: "",
     lastSharedViewSentAt: 0,
     serverClockOffsetMs: 0,
+  };
+  const telemetryState = {
+    enabled: false,
+    queue: [],
+    flushTimer: 0,
+    flushing: false,
+    frameHandle: 0,
+    lastFrameAt: 0,
+    sessionId: Math.random().toString(36).slice(2, 10),
+    socketConnectStartedAt: 0,
+    pendingControlRevision: null,
+    lastControlEmitAt: 0,
   };
   const pendingRoomDraft = {
     active: false,
@@ -127,6 +145,181 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function currentAssetVersion() {
     return document.documentElement?.dataset?.assetVersion || "";
+  }
+
+  function perfNow() {
+    return typeof window.performance?.now === "function"
+      ? window.performance.now()
+      : Date.now();
+  }
+
+  function telemetryPayloadBytes(value) {
+    if (value == null) return 0;
+    try {
+      const encoded = JSON.stringify(value);
+      if (!encoded) return 0;
+      return telemetryEncoder
+        ? telemetryEncoder.encode(encoded).length
+        : encoded.length;
+    } catch (error) {
+      return 0;
+    }
+  }
+
+  function telemetryMeta(fields = {}) {
+    const appMeta = regatta.getMeta?.() || {};
+    return {
+      session_id: telemetryState.sessionId,
+      room_code: roomState.room?.code || null,
+      revision: Number.isInteger(roomState.room?.revision) ? roomState.room.revision : null,
+      phase: appMeta.phase || roomState.room?.status || null,
+      play_mode: appMeta.playMode || roomState.room?.play_mode || null,
+      ...fields,
+    };
+  }
+
+  function scheduleTelemetryFlush(delayMs = TELEMETRY_FLUSH_INTERVAL_MS) {
+    if (!telemetryState.enabled || telemetryState.flushTimer || !telemetryState.queue.length) return;
+    telemetryState.flushTimer = window.setTimeout(() => {
+      telemetryState.flushTimer = 0;
+      void flushTelemetry();
+    }, Math.max(0, delayMs));
+  }
+
+  async function flushTelemetry({ useBeacon = false } = {}) {
+    if (!telemetryState.enabled || telemetryState.flushing || !telemetryState.queue.length) return;
+    const batch = telemetryState.queue.splice(0, TELEMETRY_MAX_BATCH_SIZE);
+    const body = JSON.stringify({ events: batch });
+
+    if (useBeacon && typeof navigator.sendBeacon === "function") {
+      const sent = navigator.sendBeacon(
+        "/api/telemetry",
+        new Blob([body], { type: "application/json" }),
+      );
+      if (!sent) {
+        telemetryState.queue.unshift(...batch);
+      }
+      if (telemetryState.queue.length) scheduleTelemetryFlush();
+      return;
+    }
+
+    telemetryState.flushing = true;
+    try {
+      const response = await fetch("/api/telemetry", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body,
+        keepalive: true,
+      });
+      if (!response.ok) {
+        telemetryState.queue.unshift(...batch);
+      }
+    } catch (error) {
+      telemetryState.queue.unshift(...batch);
+    } finally {
+      telemetryState.flushing = false;
+      if (telemetryState.queue.length) {
+        scheduleTelemetryFlush();
+      }
+    }
+  }
+
+  function queueTelemetry(eventName, fields = {}) {
+    if (!telemetryState.enabled || typeof eventName !== "string" || !eventName) return;
+    telemetryState.queue.push({
+      event: eventName,
+      client_ts: Date.now(),
+      ...telemetryMeta(fields),
+    });
+    if (telemetryState.queue.length >= TELEMETRY_MAX_BATCH_SIZE) {
+      void flushTelemetry();
+      return;
+    }
+    scheduleTelemetryFlush();
+  }
+
+  function queueSampledTelemetry(eventName, sampleRate, fields = {}) {
+    if (Math.random() > sampleRate) return;
+    queueTelemetry(eventName, { sample_rate: sampleRate, ...fields });
+  }
+
+  function timedFingerprintState(reason) {
+    const startedAt = perfNow();
+    const fingerprint = regatta.fingerprintState();
+    const durationMs = perfNow() - startedAt;
+    if (durationMs >= 8) {
+      queueTelemetry("client.state.fingerprint", {
+        reason,
+        duration_ms: Number(durationMs.toFixed(2)),
+      });
+    } else {
+      queueSampledTelemetry("client.state.fingerprint", 0.15, {
+        reason,
+        duration_ms: Number(durationMs.toFixed(2)),
+      });
+    }
+    return fingerprint;
+  }
+
+  function timedImportState(snapshot, reason) {
+    const startedAt = perfNow();
+    regatta.importState(snapshot);
+    const durationMs = perfNow() - startedAt;
+    queueTelemetry("client.state.import", {
+      reason,
+      duration_ms: Number(durationMs.toFixed(2)),
+      payload_bytes: telemetryPayloadBytes(snapshot),
+    });
+    return durationMs;
+  }
+
+  function startLongFrameMonitor() {
+    if (telemetryState.frameHandle) return;
+    telemetryState.lastFrameAt = perfNow();
+    const step = (now) => {
+      if (!telemetryState.enabled) {
+        telemetryState.frameHandle = 0;
+        telemetryState.lastFrameAt = 0;
+        return;
+      }
+      if (telemetryState.lastFrameAt > 0) {
+        const gapMs = now - telemetryState.lastFrameAt;
+        if (gapMs >= TELEMETRY_LONG_FRAME_MS) {
+          queueTelemetry("client.long_frame", {
+            duration_ms: Number(gapMs.toFixed(2)),
+          });
+        }
+      }
+      telemetryState.lastFrameAt = now;
+      telemetryState.frameHandle = window.requestAnimationFrame(step);
+    };
+    telemetryState.frameHandle = window.requestAnimationFrame(step);
+  }
+
+  function setTelemetryEnabled(enabled) {
+    telemetryState.enabled = !!enabled;
+    if (!telemetryState.enabled) {
+      if (telemetryState.flushTimer) {
+        window.clearTimeout(telemetryState.flushTimer);
+        telemetryState.flushTimer = 0;
+      }
+      return;
+    }
+    startLongFrameMonitor();
+    scheduleTelemetryFlush();
+  }
+
+  function telemetryEventForRequest(url, method) {
+    if (method === "GET" && url === "/api/bootstrap") return "client.bootstrap";
+    if (method === "POST" && url === "/api/rooms") return "client.room.create";
+    if (method === "POST" && url === "/api/rooms/join") return "client.room.join";
+    if (method === "POST" && url.endsWith("/start")) return "client.room.start";
+    if (method === "POST" && url === "/api/rooms/leave") return "client.room.leave";
+    if (method === "POST" && url.endsWith("/kick")) return "client.room.kick";
+    return null;
   }
 
   function clearAssetRefreshQuery() {
@@ -564,8 +757,11 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   async function apiRequest(url, options = {}) {
+    const method = options.method || "GET";
+    const startedAt = perfNow();
+    const requestBytes = options.body ? telemetryPayloadBytes(options.body) : 0;
     const response = await fetch(url, {
-      method: options.method || "GET",
+      method,
       credentials: "same-origin",
       headers: {
         "Content-Type": "application/json",
@@ -575,7 +771,26 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     const payload = await response.json();
+    const durationMs = perfNow() - startedAt;
+    const telemetryEvent = Object.prototype.hasOwnProperty.call(options, "telemetryEvent")
+      ? options.telemetryEvent
+      : telemetryEventForRequest(url, method);
+    if (telemetryEvent) {
+      queueTelemetry(telemetryEvent, {
+        duration_ms: Number(durationMs.toFixed(2)),
+        status: response.status,
+        request_bytes: requestBytes,
+        payload_bytes: telemetryPayloadBytes(payload),
+      });
+    }
     if (!response.ok) {
+      queueTelemetry("client.error", {
+        source: "apiRequest",
+        url,
+        duration_ms: Number(durationMs.toFixed(2)),
+        status: response.status,
+        message: payload.error || "Request failed",
+      });
       throw new Error(payload.error || "Request failed");
     }
     return payload;
@@ -932,11 +1147,18 @@ document.addEventListener("DOMContentLoaded", () => {
   function ensureSocket() {
     if (!roomState.room || roomState.socket || typeof window.io !== "function") return;
 
+    telemetryState.socketConnectStartedAt = perfNow();
     roomState.socket = window.io({
       transports: ["websocket", "polling"],
     });
 
     roomState.socket.on("connect", () => {
+      if (telemetryState.socketConnectStartedAt > 0) {
+        queueTelemetry("client.socket.connect", {
+          duration_ms: Number((perfNow() - telemetryState.socketConnectStartedAt).toFixed(2)),
+        });
+        telemetryState.socketConnectStartedAt = 0;
+      }
       setSyncLabel("Комната подключена", true);
       roomState.socket.emit("room:join_socket", { room_code: roomState.room.code });
       void tryPushState(true);
@@ -944,10 +1166,15 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     roomState.socket.on("disconnect", () => {
+      queueTelemetry("client.socket.disconnect");
       setSyncLabel("Соединение потеряно", false);
     });
 
     roomState.socket.on("room:error", (payload) => {
+      queueTelemetry("client.error", {
+        source: "socket",
+        message: payload?.error || "Комната синхронизации недоступна.",
+      });
       setNotice(payload?.error || "Не удалось синхронизировать комнату.", "danger");
     });
 
@@ -966,6 +1193,10 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     roomState.socket.on("room:kicked", (payload) => {
+      queueTelemetry("client.error", {
+        source: "socket",
+        message: "room_kicked",
+      });
       if (typeof payload?.room_code === "string") {
         joinRoomCodeInput.value = payload.room_code;
       }
@@ -984,14 +1215,31 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function disconnectSocket() {
+    clearRealtimeControlFlush();
     if (!roomState.socket) return;
     roomState.socket.disconnect();
     roomState.socket = null;
   }
 
+  function clearRealtimeControlFlush() {
+    if (!roomState.realtimeIntentFlushTimer) return;
+    window.clearTimeout(roomState.realtimeIntentFlushTimer);
+    roomState.realtimeIntentFlushTimer = 0;
+  }
+
+  function scheduleRealtimeControlFlush(delayMs) {
+    if (roomState.realtimeIntentFlushTimer) return;
+    roomState.realtimeIntentFlushTimer = window.setTimeout(() => {
+      roomState.realtimeIntentFlushTimer = 0;
+      void trySendRealtimeControl();
+    }, Math.max(0, delayMs));
+  }
+
   function handleIncomingRoom(room) {
     if (!room) return;
+    const startedAt = perfNow();
     const previousStatus = roomState.room?.status || null;
+    const incomingPayloadBytes = telemetryPayloadBytes(room);
 
     const incomingState = room.game_state;
     if (incomingState) {
@@ -999,13 +1247,13 @@ document.addEventListener("DOMContentLoaded", () => {
       if (incomingFingerprint !== roomState.lastFingerprint) {
         roomState.applyingRemote = true;
         try {
-          regatta.importState(incomingState);
+          timedImportState(incomingState, "remote_room_state");
           if (previousStatus === "live" && room.status === "lobby") {
             regatta.clearRealtimeIntent?.();
             roomState.lastRealtimeIntentKey = "";
             roomState.lastRealtimeIntentSentAt = 0;
           }
-          roomState.lastFingerprint = regatta.fingerprintState();
+          roomState.lastFingerprint = timedFingerprintState("remote_room_state");
         } finally {
           roomState.applyingRemote = false;
         }
@@ -1013,6 +1261,24 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     renderRoom(room);
+    queueTelemetry("client.state.apply_remote", {
+      duration_ms: Number((perfNow() - startedAt).toFixed(2)),
+      payload_bytes: incomingPayloadBytes,
+      revision: Number.isInteger(room?.revision) ? room.revision : null,
+    });
+    if (
+      telemetryState.pendingControlRevision !== null
+      && Number.isInteger(room?.revision)
+      && room.revision > telemetryState.pendingControlRevision
+      && telemetryState.lastControlEmitAt > 0
+    ) {
+      queueTelemetry("client.control.latency", {
+        duration_ms: Number((perfNow() - telemetryState.lastControlEmitAt).toFixed(2)),
+        revision: room.revision,
+      });
+      telemetryState.pendingControlRevision = null;
+      telemetryState.lastControlEmitAt = 0;
+    }
   }
 
   async function createRoom(overrides = {}) {
@@ -1029,11 +1295,14 @@ document.addEventListener("DOMContentLoaded", () => {
         game_state: overrides.game_state || regatta.exportState(),
       },
     });
+    if (payload?.observability) {
+      setTelemetryEnabled(!!payload.observability.client_telemetry_enabled);
+    }
 
     if (payload.room?.game_state) {
       roomState.applyingRemote = true;
       try {
-        regatta.importState(payload.room.game_state);
+        timedImportState(payload.room.game_state, "create_room_response");
       } finally {
         roomState.applyingRemote = false;
       }
@@ -1046,7 +1315,7 @@ document.addEventListener("DOMContentLoaded", () => {
     pendingRoomDraft.source = "map";
     pendingRoomDraft.mode = "edit";
     pendingRoomDraft.hostRole = roomHostRoleEl?.value === "observer" ? "observer" : "player";
-    roomState.lastFingerprint = regatta.fingerprintState();
+    roomState.lastFingerprint = timedFingerprintState("create_room_response");
     renderRoom(payload.room);
     ensureSocket();
     emitRoomDraftChanged();
@@ -1073,8 +1342,8 @@ document.addEventListener("DOMContentLoaded", () => {
     if (payload.room?.game_state) {
       roomState.applyingRemote = true;
       try {
-        regatta.importState(payload.room.game_state);
-        roomState.lastFingerprint = regatta.fingerprintState();
+        timedImportState(payload.room.game_state, "join_room_response");
+        roomState.lastFingerprint = timedFingerprintState("join_room_response");
       } finally {
         roomState.applyingRemote = false;
       }
@@ -1104,13 +1373,13 @@ document.addEventListener("DOMContentLoaded", () => {
     if (payload.room?.game_state) {
       roomState.applyingRemote = true;
       try {
-        regatta.importState(payload.room.game_state);
-        roomState.lastFingerprint = regatta.fingerprintState();
+        timedImportState(payload.room.game_state, "start_room_response");
+        roomState.lastFingerprint = timedFingerprintState("start_room_response");
       } finally {
         roomState.applyingRemote = false;
       }
     } else {
-      roomState.lastFingerprint = regatta.fingerprintState();
+      roomState.lastFingerprint = timedFingerprintState("start_room_response");
     }
     renderRoom(payload.room);
     void trySendRealtimeControl(true);
@@ -1126,9 +1395,9 @@ document.addEventListener("DOMContentLoaded", () => {
     if (payload.room?.game_state) {
       roomState.applyingRemote = true;
       try {
-        regatta.importState(payload.room.game_state);
+        timedImportState(payload.room.game_state, "edit_room_response");
         regatta.clearRealtimeIntent?.();
-        roomState.lastFingerprint = regatta.fingerprintState();
+        roomState.lastFingerprint = timedFingerprintState("edit_room_response");
       } finally {
         roomState.applyingRemote = false;
       }
@@ -1147,9 +1416,9 @@ document.addEventListener("DOMContentLoaded", () => {
     if (payload.room?.game_state) {
       roomState.applyingRemote = true;
       try {
-        regatta.importState(payload.room.game_state);
+        timedImportState(payload.room.game_state, "reset_lobby_response");
         regatta.clearRealtimeIntent?.();
-        roomState.lastFingerprint = regatta.fingerprintState();
+        roomState.lastFingerprint = timedFingerprintState("reset_lobby_response");
       } finally {
         roomState.applyingRemote = false;
       }
@@ -1234,7 +1503,7 @@ document.addEventListener("DOMContentLoaded", () => {
     roomState.selfPlayerId = null;
     roomState.selfSeatIndex = null;
     roomState.selfIsObserver = false;
-    roomState.lastFingerprint = regatta.fingerprintState();
+    roomState.lastFingerprint = timedFingerprintState("leave_room");
     roomState.lastRealtimeIntentKey = "";
     roomState.lastSharedViewKey = "";
     roomStartPending = false;
@@ -1254,7 +1523,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
   async function bootstrapRoom() {
     try {
-      const payload = await apiRequest("/api/bootstrap");
+      const bootstrapStartedAt = perfNow();
+      const payload = await apiRequest("/api/bootstrap", { telemetryEvent: null });
+      setTelemetryEnabled(!!payload?.observability?.client_telemetry_enabled);
+      queueTelemetry("client.bootstrap", {
+        duration_ms: Number((perfNow() - bootstrapStartedAt).toFixed(2)),
+        payload_bytes: telemetryPayloadBytes(payload),
+      });
       if (refreshForAssetMismatch(payload?.asset_version)) {
         return;
       }
@@ -1305,13 +1580,17 @@ document.addEventListener("DOMContentLoaded", () => {
   async function tryPushState(force = false) {
     if (!roomState.socket || !roomState.socket.connected || !canPushState() || roomState.applyingRemote) return;
 
-    const nextFingerprint = regatta.fingerprintState();
+    const nextFingerprint = timedFingerprintState("push_state_check");
     if (!force && nextFingerprint === roomState.lastFingerprint) return;
 
     roomState.lastFingerprint = nextFingerprint;
+    const outboundState = regatta.exportState();
     roomState.socket.emit("room:push_state", {
       room_code: roomState.room.code,
-      state: regatta.exportState(),
+      state: outboundState,
+    });
+    queueSampledTelemetry("client.state.push", 0.2, {
+      payload_bytes: telemetryPayloadBytes(outboundState),
     });
   }
 
@@ -1327,13 +1606,28 @@ document.addEventListener("DOMContentLoaded", () => {
     };
     const key = JSON.stringify(payload);
     const now = Date.now();
-    if (!force && key === roomState.lastRealtimeIntentKey && now - roomState.lastRealtimeIntentSentAt < 250) {
+    if (!force && key === roomState.lastRealtimeIntentKey) {
       return;
     }
+    if (!force) {
+      const timeSinceLastSend = now - roomState.lastRealtimeIntentSentAt;
+      if (timeSinceLastSend < REALTIME_CONTROL_SEND_INTERVAL_MS) {
+        scheduleRealtimeControlFlush(REALTIME_CONTROL_SEND_INTERVAL_MS - timeSinceLastSend);
+        return;
+      }
+    }
 
+    clearRealtimeControlFlush();
     roomState.lastRealtimeIntentKey = key;
     roomState.lastRealtimeIntentSentAt = now;
+    telemetryState.pendingControlRevision = Number.isInteger(roomState.room?.revision)
+      ? roomState.room.revision
+      : null;
+    telemetryState.lastControlEmitAt = perfNow();
     roomState.socket.emit("room:control", payload);
+    queueSampledTelemetry("client.control.emit", 0.25, {
+      payload_bytes: telemetryPayloadBytes(payload),
+    });
   }
 
   async function trySendSharedViewSettings(force = false) {
@@ -1355,6 +1649,9 @@ document.addEventListener("DOMContentLoaded", () => {
     roomState.lastSharedViewKey = key;
     roomState.lastSharedViewSentAt = now;
     roomState.socket.emit("room:view_settings", payload);
+    queueSampledTelemetry("client.state.view_settings", 0.25, {
+      payload_bytes: telemetryPayloadBytes(payload),
+    });
   }
 
   createRoomBtn.addEventListener("click", async () => {
@@ -1441,11 +1738,15 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   window.addEventListener("regatta:realtime-intent", () => {
-    void trySendRealtimeControl(true);
+    void trySendRealtimeControl();
   });
 
   window.addEventListener("regatta:view-settings-changed", () => {
     void trySendSharedViewSettings(true);
+  });
+
+  window.addEventListener("pagehide", () => {
+    void flushTelemetry({ useBeacon: true });
   });
 
   window.RegattaMultiplayer = {

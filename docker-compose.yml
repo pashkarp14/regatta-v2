@@ -9,6 +9,13 @@ services:
       REDIS_URL: redis://redis:6380/0
       PORT: 5001
       APP_VERSION: 2.0.0
+      METRICS_ENABLED: ${METRICS_ENABLED:-1}
+      STRUCTURED_LOGS: ${STRUCTURED_LOGS:-1}
+      CLIENT_TELEMETRY_ENABLED: ${CLIENT_TELEMETRY_ENABLED:-1}
+      REALTIME_TRACE_COLLISIONS: ${REALTIME_TRACE_COLLISIONS:-0}
+      REALTIME_DEBUG_LOGS: ${REALTIME_DEBUG_LOGS:-0}
+      SLOW_TICK_WARN_MS: ${SLOW_TICK_WARN_MS:-40}
+      GUNICORN_THREADS: ${GUNICORN_THREADS:-8}
     logging:
       driver: json-file
       options:
@@ -30,6 +37,35 @@ services:
       options:
         max-size: "10m"
         max-file: "1"
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    profiles: ["observability"]
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      - app
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    profiles: ["observability"]
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GF_SECURITY_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD:-admin}
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/regatta-overview.json
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
     restart: unless-stopped
 
 volumes:

@@ -12,6 +12,7 @@ from .config import get_config
 from .error_handlers import register_error_handlers
 from .extensions import session_ext, socketio
 from .library_store import LibraryStore
+from .observability import configure_json_logging, log_event, register_observability
 from .room_store import RoomStore
 from .routes import bp as main_bp
 from .sockets import register_socket_handlers
@@ -44,8 +45,11 @@ def configure_logging(app: Flask) -> None:
     level_name = str(app.config.get("APP_LOG_LEVEL", "INFO")).upper()
     level = getattr(logging, level_name, logging.INFO)
     app.logger.setLevel(level)
+    if not app.logger.handlers:
+        app.logger.addHandler(logging.StreamHandler())
     for handler in app.logger.handlers:
         handler.setLevel(level)
+    configure_json_logging(app)
 
 
 def create_app(config_overrides: Mapping[str, Any] | None = None) -> Flask:
@@ -77,7 +81,17 @@ def create_app(config_overrides: Mapping[str, Any] | None = None) -> Flask:
     )
     app.extensions["socketio"] = socketio
 
+    register_observability(app)
     register_error_handlers(app)
     app.register_blueprint(main_bp)
     register_socket_handlers()
+    log_event(
+        app.logger,
+        "app.startup",
+        version=app.config["APP_VERSION"],
+        redis_enabled=redis_client is not None,
+        metrics_enabled=bool(app.config.get("METRICS_ENABLED")),
+        structured_logs=bool(app.config.get("STRUCTURED_LOGS")),
+        client_telemetry=bool(app.config.get("CLIENT_TELEMETRY_ENABLED")),
+    )
     return app
