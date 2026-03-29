@@ -2197,7 +2197,7 @@ def simulate_realtime_tick(game_state: dict[str, Any], controls: dict[int, dict[
         phase = "race"
         changed = True
 
-    if phase != "race" and not countdown_active:
+    if phase not in {"race", "countdown"}:
         zeroed_any_speed = False
         for boat in boats:
             if float(boat.get("currentSpeedUnitsPerSec") or 0.0) != 0.0:

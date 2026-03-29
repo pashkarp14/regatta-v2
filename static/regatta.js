@@ -72,8 +72,8 @@ document.addEventListener("DOMContentLoaded", () => {
   // -----------------------------
   // Мир: непрерывные координаты
   // -----------------------------
-  const DEFAULT_WORLD_W = 54;
-  const DEFAULT_WORLD_H = 72;
+  const DEFAULT_WORLD_W = 100;
+  const DEFAULT_WORLD_H = 150;
   const DEFAULT_CANVAS_WIDTH = canvas.width;
   const DEFAULT_CANVAS_HEIGHT = canvas.height;
   const WORLD_MAX = 360;
@@ -288,7 +288,6 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!rgb) return `rgba(30, 136, 229, ${alpha})`;
     return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`;
   }
-
   // -----------------------------
   // Ветер и настройки движения
   // -----------------------------

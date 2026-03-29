@@ -1592,6 +1592,9 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
       }
       clearAssetRefreshQuery();
+      if (roomState.room || hasPendingRoomDraft()) {
+        return;
+      }
       roomStartPending = false;
       if (payload.display_name) {
         displayNameInput.value = payload.display_name;
