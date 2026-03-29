@@ -9,6 +9,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const leaveRoomBtn = document.getElementById("leaveRoom");
   const startRoomBtn = document.getElementById("startRoom");
   const resetLobbyBtn = document.getElementById("resetLobby");
+  const spawnSuperbotBtn = document.getElementById("spawnSuperbot");
   const copyRoomCodeBtn = document.getElementById("copyRoomCode");
   const roomHostRoleEl = document.getElementById("roomHostRole");
   const roomCodeValueEl = document.getElementById("roomCodeValue");
@@ -101,6 +102,7 @@ document.addEventListener("DOMContentLoaded", () => {
     lastSharedViewKey: "",
     lastSharedViewSentAt: 0,
     serverClockOffsetMs: 0,
+    lastBotControlKeys: {},
   };
   const telemetryState = {
     enabled: false,
@@ -555,6 +557,21 @@ document.addEventListener("DOMContentLoaded", () => {
     return roomState.room.players?.find((player) => player.is_self) || null;
   }
 
+  function roomSuperbotPlayer(room = roomState.room) {
+    return (room?.players || []).find((player) => !!player.is_bot && !player.is_observer) || null;
+  }
+
+  function roomSuperbotSeatIndices(room = roomState.room) {
+    return (room?.players || [])
+      .filter((player) => !!player.is_bot && !player.is_observer && Number.isInteger(player.seat_index))
+      .map((player) => player.seat_index)
+      .sort((left, right) => left - right);
+  }
+
+  function roomHasSuperbot(room = roomState.room) {
+    return !!roomSuperbotPlayer(room);
+  }
+
   function isRoomHost() {
     return !!(roomPlayer()?.is_host || roomState.room?.is_host);
   }
@@ -649,6 +666,16 @@ document.addEventListener("DOMContentLoaded", () => {
     return !!(roomState.room && isRoomHost());
   }
 
+  function canSpawnSuperbot() {
+    return !!(
+      roomState.room
+      && isRoomHost()
+      && roomState.room.status === "lobby"
+      && !roomHasSuperbot(roomState.room)
+      && roomRacersJoined(roomState.room) < roomRacerCapacity(roomState.room)
+    );
+  }
+
   function canEditTurnBudget() {
     if (!roomState.room) return true;
     if (roomState.room.status === "lobby") return isRoomHost();
@@ -679,6 +706,20 @@ document.addEventListener("DOMContentLoaded", () => {
       && (roomState.room.status === "lobby" || (isRealtimeRoom() && roomRacePhase() !== "finished"))
       && !isRoomRealtimePaused()
       && !roomState.applyingRemote
+    );
+  }
+
+  function canSendSuperbotControl() {
+    return !!(
+      roomState.room
+      && roomState.socket
+      && roomState.socket.connected
+      && isRoomHost()
+      && roomState.room.status === "live"
+      && roomRacePhase() !== "finished"
+      && !isRoomRealtimePaused()
+      && !roomState.applyingRemote
+      && roomSuperbotSeatIndices(roomState.room).length
     );
   }
 
@@ -847,6 +888,7 @@ document.addEventListener("DOMContentLoaded", () => {
         </strong>
         <span class="room-tags">
           ${player.is_host ? '<span class="room-tag room-tag-host">Host</span>' : ""}
+          ${player.is_bot ? '<span class="room-tag room-tag-bot">Bot</span>' : ""}
           ${player.is_observer ? '<span class="room-tag room-tag-observer">Наблюдает</span>' : ""}
           ${player.is_self ? '<span class="room-tag room-tag-self">Вы</span>' : ""}
         </span>
@@ -999,6 +1041,22 @@ document.addEventListener("DOMContentLoaded", () => {
       resetLobbyBtn.classList.toggle("hidden", !showResetLobby);
       resetLobbyBtn.disabled = !showResetLobby || roomStartPending;
     }
+    if (spawnSuperbotBtn) {
+      const showSpawnSuperbot = !!roomState.room && isRoomHost();
+      spawnSuperbotBtn.classList.toggle("hidden", !showSpawnSuperbot);
+      if (showSpawnSuperbot) {
+        if (roomHasSuperbot(roomState.room)) {
+          spawnSuperbotBtn.textContent = "Супербот уже в комнате";
+        } else if (roomState.room.status !== "lobby") {
+          spawnSuperbotBtn.textContent = "Супербот доступен только в лобби";
+        } else if (roomRacersJoined(roomState.room) >= roomRacerCapacity(roomState.room)) {
+          spawnSuperbotBtn.textContent = "Нет места для супербота";
+        } else {
+          spawnSuperbotBtn.textContent = "Добавить супербота";
+        }
+      }
+      spawnSuperbotBtn.disabled = !showSpawnSuperbot || roomStartPending || !canSpawnSuperbot();
+    }
 
     if (!roomState.room) {
       interactionLockEl.classList.add("hidden");
@@ -1026,6 +1084,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function renderRoom(room) {
     roomState.room = hydrateRoom(room);
+    const superbotSeatIndices = roomState.room ? roomSuperbotSeatIndices(roomState.room) : [];
+    const knownSuperbotSeatKeys = new Set(superbotSeatIndices.map((seatIndex) => String(seatIndex)));
+    roomState.lastBotControlKeys = Object.fromEntries(
+      Object.entries(roomState.lastBotControlKeys).filter(([seatIndex]) => knownSuperbotSeatKeys.has(seatIndex))
+    );
     if (!roomState.room || roomState.room.code !== activeRoomInviteCode) {
       activeRoomInviteCode = "";
       activeRoomInviteMessage = "";
@@ -1036,10 +1099,12 @@ document.addEventListener("DOMContentLoaded", () => {
       observer: !!roomState.selfIsObserver,
       lobbyPreview: !!roomState.room && roomState.room.status === "lobby",
       host: !!roomState.room && isRoomHost(),
+      botSeatIndices: superbotSeatIndices,
     });
     renderRoster(roomState.room);
 
     if (!roomState.room) {
+      roomState.lastBotControlKeys = {};
       const pendingDraft = hasPendingRoomDraft();
       roomState.serverClockOffsetMs = 0;
       roomState.selfPlayerId = null;
@@ -1197,6 +1262,7 @@ document.addEventListener("DOMContentLoaded", () => {
       roomState.socket.emit("room:join_socket", joinPayload);
       void tryPushState();
       void trySendRealtimeControl(true);
+      void trySendSuperbotControl(true);
     });
 
     roomState.socket.on("disconnect", () => {
@@ -1579,6 +1645,14 @@ document.addEventListener("DOMContentLoaded", () => {
     renderRoom(payload.room);
   }
 
+  async function spawnSuperbot() {
+    if (!roomState.room || !isRoomHost()) return;
+    const payload = await apiRequest(`/api/rooms/${roomState.room.code}/superbot`, {
+      method: "POST",
+    });
+    renderRoom(payload.room);
+  }
+
   async function bootstrapRoom() {
     try {
       const bootstrapStartedAt = perfNow();
@@ -1691,6 +1765,31 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  async function trySendSuperbotControl(force = false) {
+    if (!canSendSuperbotControl()) return;
+
+    for (const seatIndex of roomSuperbotSeatIndices(roomState.room)) {
+      const intent = regatta.getMultiplayerBotControl?.(seatIndex) || {};
+      const payload = {
+        room_code: roomState.room.code,
+        seat_index: seatIndex,
+        active: !!intent.active,
+        target: intent.target || null,
+        direction: intent.direction || null,
+      };
+      const key = JSON.stringify(payload);
+      if (!force && key === roomState.lastBotControlKeys[seatIndex]) {
+        continue;
+      }
+      roomState.lastBotControlKeys[seatIndex] = key;
+      roomState.socket.emit("room:control", payload);
+      queueSampledTelemetry("client.control.superbot_emit", 0.25, {
+        payload_bytes: telemetryPayloadBytes(payload),
+        seat_index: seatIndex,
+      });
+    }
+  }
+
   async function trySendSharedViewSettings(force = false) {
     if (!canPushSharedViewSettings()) return;
 
@@ -1755,6 +1854,14 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
+  spawnSuperbotBtn?.addEventListener("click", async () => {
+    try {
+      await spawnSuperbot();
+    } catch (error) {
+      setNotice(error.message, "danger");
+    }
+  });
+
   copyRoomCodeBtn.addEventListener("click", copyRoomCode);
 
   roomPlayersEl?.addEventListener("click", async (event) => {
@@ -1786,6 +1893,10 @@ document.addEventListener("DOMContentLoaded", () => {
   }, 250);
 
   setInterval(() => {
+    void trySendSuperbotControl();
+  }, 120);
+
+  setInterval(() => {
     if (isRealtimeCountdownRoom() && roomState.room) {
       renderRoom(roomState.room);
     }
@@ -1796,6 +1907,7 @@ document.addEventListener("DOMContentLoaded", () => {
       applyPermissions();
     }
     void tryPushState(true);
+    void trySendSuperbotControl();
   });
 
   window.addEventListener("regatta:realtime-intent", () => {
@@ -1817,6 +1929,7 @@ document.addEventListener("DOMContentLoaded", () => {
     startRoom,
     editRoom,
     resetLobby,
+    spawnSuperbot,
     canToggleRoomPause,
     isRoomPaused: isRoomRealtimePaused,
     toggleRoomPause,

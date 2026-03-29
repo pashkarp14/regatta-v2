@@ -4,7 +4,7 @@
 
 - Primary load-test runtime: `docker compose --env-file .env.loadtest.example up --build`
 - Redis-backed path is the reference environment.
-- Optional dashboards: `docker compose --profile observability up prometheus grafana`
+- Prometheus and Grafana now come up with the regular `docker compose up`.
 
 ## Feature Flags
 

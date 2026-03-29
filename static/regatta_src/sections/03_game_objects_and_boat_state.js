@@ -31,6 +31,7 @@
   let multiplayerObserverMode = false;
   let multiplayerHostMode = false;
   let multiplayerLobbyPreview = false;
+  let multiplayerBotSeatIndices = [];
   let localPilotMode = "hotseat";
   const LOCAL_HUMAN_SEAT = 0;
   let botTurnTimer = 0;
@@ -679,6 +680,17 @@
     return isRealtimePlayMode() || isLobbyPreviewMode();
   }
 
+  function normalizeMultiplayerBotSeatIndices(nextSeats=[]){
+    if (!Array.isArray(nextSeats)) return [];
+    return Array.from(new Set(
+      nextSeats.filter((seatIndex) => Number.isInteger(seatIndex) && seatIndex >= 0)
+    )).sort((left, right) => left - right);
+  }
+
+  function isMultiplayerBotBoat(boatIdx){
+    return multiplayerSessionActive && multiplayerBotSeatIndices.includes(boatIdx);
+  }
+
   function isHumanControlledBoat(boatIdx){
     return !isLocalBotsMode() || boatIdx === LOCAL_HUMAN_SEAT;
   }
@@ -692,6 +704,9 @@
   }
 
   function botSkillProfile(boatIdx){
+    if (isMultiplayerBotBoat(boatIdx)){
+      return { ...MULTIPLAYER_SUPERBOT_PROFILE };
+    }
     const baseProfile = currentBotDifficultyProfile();
     const variance = (stableNoise01((boatIdx + 1) * 17.31) - 0.5) * 0.12;
     return {
@@ -945,4 +960,3 @@
       </label>
     `).join("");
   }
-

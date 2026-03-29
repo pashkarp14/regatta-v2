@@ -35,6 +35,7 @@ from .room_store import (
     RoomStoreError,
     normalize_lobby_preview_state,
     player_for_token,
+    player_is_bot,
     player_is_observer,
     validate_game_state,
 )
@@ -118,6 +119,56 @@ def normalize_control_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
         normalized["direction"] is not None or normalized["target"] is not None
     )
     return normalized
+
+
+def payload_seat_index(payload: dict[str, Any] | None) -> int | None:
+    raw_value = (payload or {}).get("seat_index")
+    if isinstance(raw_value, bool):
+        return None
+    if isinstance(raw_value, int):
+        return raw_value if raw_value >= 0 else None
+    if isinstance(raw_value, float):
+        return int(raw_value) if raw_value.is_integer() and raw_value >= 0 else None
+    if isinstance(raw_value, str):
+        cleaned = raw_value.strip()
+        if not cleaned:
+            return None
+        try:
+            parsed = int(cleaned)
+        except ValueError:
+            return None
+        return parsed if parsed >= 0 else None
+    return None
+
+
+def resolve_control_seat_index(
+    room: dict[str, Any],
+    actor: dict[str, Any],
+    player_token: str,
+    payload: dict[str, Any] | None,
+) -> int | None:
+    actor_seat = actor.get("seat_index") if isinstance(actor.get("seat_index"), int) else None
+    requested_seat = payload_seat_index(payload)
+    if requested_seat is None:
+        return None if player_is_observer(actor) else actor_seat
+    if actor_seat is not None and requested_seat == actor_seat and not player_is_observer(actor):
+        return actor_seat
+    if room.get("host_token") != player_token:
+        raise RoomForbidden("Only the room host can direct the superbot.")
+
+    target_player = next(
+        (
+            player
+            for player in room.get("players", [])
+            if isinstance(player.get("seat_index"), int) and player.get("seat_index") == requested_seat
+        ),
+        None,
+    )
+    if target_player is None or player_is_observer(target_player):
+        raise RoomForbidden("Target racer is not available.")
+    if not player_is_bot(target_player):
+        raise RoomForbidden("Only the superbot can be remotely directed.")
+    return requested_seat
 
 
 def set_realtime_control(room_code: str, seat_index: int, payload: dict[str, Any] | None) -> None:
@@ -508,12 +559,13 @@ def register_socket_handlers() -> None:
                     error_kind = "RoomActorMissing"
                     emit_room_error("You are not part of this room.")
                     return
-                if player_is_observer(actor) or not isinstance(actor.get("seat_index"), int):
+                target_seat_index = resolve_control_seat_index(room, actor, player_token, payload)
+                if not isinstance(target_seat_index, int):
                     result = "ignored"
                     error_kind = "ObserverControlIgnored"
                     return
                 if room.get("status") == "lobby":
-                    set_realtime_control(room["code"], actor["seat_index"], payload)
+                    set_realtime_control(room["code"], target_seat_index, payload)
                     ensure_realtime_room_loop(room["code"])
                     return
                 if room.get("status") != "live":
@@ -521,7 +573,7 @@ def register_socket_handlers() -> None:
                     error_kind = "RoomNotLive"
                     return
 
-                set_realtime_control(room["code"], actor["seat_index"], payload)
+                set_realtime_control(room["code"], target_seat_index, payload)
                 ensure_realtime_room_loop(room["code"])
             except RoomStoreError as exc:
                 result = "rejected"

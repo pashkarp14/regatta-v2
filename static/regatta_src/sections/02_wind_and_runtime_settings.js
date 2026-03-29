@@ -56,6 +56,18 @@
       lineMargin: 0.38
     }
   };
+  const MULTIPLAYER_SUPERBOT_PROFILE = {
+    turnRateScale: 1.32,
+    decisionMs: 45,
+    aimJitterDeg: 0,
+    scoreNoise: 0,
+    routeSlack: 0,
+    favoredEndBias: 0.84,
+    clusterWidth: 0.08,
+    earlyDepth: 1.12,
+    lateDepth: 0.18,
+    lineMargin: 0.18
+  };
 
   let snapThreshold = parseFloat(snapThresholdInp.value); // 0..1
   let movesPerTurn  = parseInt(movesPerTurnInp.value,10) || 1;
@@ -168,4 +180,3 @@
     const a = angleBetween(moveVec, uw);
     return a < deadZoneHalfAngleRad();
   }
-

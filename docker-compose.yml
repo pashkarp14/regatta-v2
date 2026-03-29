@@ -47,20 +47,19 @@ services:
 
   prometheus:
     image: prom/prometheus:v2.55.1
-    profiles: ["observability"]
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
     ports:
       - "9090:9090"
     volumes:
       - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
     depends_on:
       - app
     restart: unless-stopped
 
   grafana:
     image: grafana/grafana:11.4.0
-    profiles: ["observability"]
     ports:
       - "3000:3000"
     environment:
@@ -68,6 +67,7 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD:-admin}
       GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/regatta-overview.json
     volumes:
+      - grafana_data:/var/lib/grafana
       - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
     depends_on:
@@ -76,3 +76,5 @@ services:
 
 volumes:
   redis_data:
+  prometheus_data:
+  grafana_data:
