@@ -346,18 +346,6 @@ document.addEventListener("DOMContentLoaded", () => {
       lineMargin: 0.38
     }
   };
-  const MULTIPLAYER_SUPERBOT_PROFILE = {
-    turnRateScale: 1.32,
-    decisionMs: 45,
-    aimJitterDeg: 0,
-    scoreNoise: 0,
-    routeSlack: 0,
-    favoredEndBias: 0.84,
-    clusterWidth: 0.08,
-    earlyDepth: 1.12,
-    lateDepth: 0.18,
-    lineMargin: 0.18
-  };
 
   let snapThreshold = parseFloat(snapThresholdInp.value); // 0..1
   let movesPerTurn  = parseInt(movesPerTurnInp.value,10) || 1;
@@ -470,6 +458,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const a = angleBetween(moveVec, uw);
     return a < deadZoneHalfAngleRad();
   }
+
   // -----------------------------
   // Игровые объекты
   // -----------------------------
@@ -503,7 +492,6 @@ document.addEventListener("DOMContentLoaded", () => {
   let multiplayerObserverMode = false;
   let multiplayerHostMode = false;
   let multiplayerLobbyPreview = false;
-  let multiplayerBotSeatIndices = [];
   let localPilotMode = "hotseat";
   const LOCAL_HUMAN_SEAT = 0;
   let botTurnTimer = 0;
@@ -1152,17 +1140,6 @@ document.addEventListener("DOMContentLoaded", () => {
     return isRealtimePlayMode() || isLobbyPreviewMode();
   }
 
-  function normalizeMultiplayerBotSeatIndices(nextSeats=[]){
-    if (!Array.isArray(nextSeats)) return [];
-    return Array.from(new Set(
-      nextSeats.filter((seatIndex) => Number.isInteger(seatIndex) && seatIndex >= 0)
-    )).sort((left, right) => left - right);
-  }
-
-  function isMultiplayerBotBoat(boatIdx){
-    return multiplayerSessionActive && multiplayerBotSeatIndices.includes(boatIdx);
-  }
-
   function isHumanControlledBoat(boatIdx){
     return !isLocalBotsMode() || boatIdx === LOCAL_HUMAN_SEAT;
   }
@@ -1176,9 +1153,6 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function botSkillProfile(boatIdx){
-    if (isMultiplayerBotBoat(boatIdx)){
-      return { ...MULTIPLAYER_SUPERBOT_PROFILE };
-    }
     const baseProfile = currentBotDifficultyProfile();
     const variance = (stableNoise01((boatIdx + 1) * 17.31) - 0.5) * 0.12;
     return {
@@ -1432,6 +1406,7 @@ document.addEventListener("DOMContentLoaded", () => {
       </label>
     `).join("");
   }
+
   // -----------------------------
   // Геометрия / пересечения
   // -----------------------------
@@ -2509,33 +2484,6 @@ document.addEventListener("DOMContentLoaded", () => {
     candidates.push(direction);
   }
 
-  function realtimeSuperbotPlannerGuideTarget(boat, boatIdx){
-    if (!boat || boat.finished) return null;
-    const planned = planOptimalFrom(
-      { x: boat.x, y: boat.y },
-      clamp(boat.nextMark, 0, markCount),
-      boat.hasHeading ? boat.heading : null,
-      boat.tack,
-      "course",
-      boatIdx,
-      boatSpeedCoeff(boat),
-    );
-    if (!planned?.path?.length) return null;
-
-    const guidePoint = planned.path.find((point, index) => (
-      index > 0
-      && point
-      && Number.isFinite(point.x)
-      && Number.isFinite(point.y)
-      && dist(point, boat) >= 1.05
-    )) || planned.path[Math.min(2, planned.path.length - 1)] || planned.path[planned.path.length - 1];
-    if (!guidePoint || !Number.isFinite(guidePoint.x) || !Number.isFinite(guidePoint.y)) return null;
-    return {
-      x: clamp(guidePoint.x, 0, worldW),
-      y: clamp(guidePoint.y, 0, worldH)
-    };
-  }
-
   function scoreRealtimeBotDirection(boat, direction, directToTarget, target, options={}){
     const position = { x: boat.x, y: boat.y };
     const boatIdx = Number.isInteger(options.boatIdx) ? options.boatIdx : -1;
@@ -2754,10 +2702,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const now = currentRaceTimeMs();
     const profile = botSkillProfile(boatIdx);
-    const superbot = isMultiplayerBotBoat(boatIdx);
     const countdownGuideTarget = realtimeBotCountdownGuideTarget(boat, boatIdx, now);
     const roundingGuideTarget = realtimeBotRoundingGuideTarget(boat);
-    const plannerGuideTarget = superbot ? realtimeSuperbotPlannerGuideTarget(boat, boatIdx) : null;
     const roundingProgressKey = Math.round(roundingProgressForBoat(boat) * 4) / 4;
     const countdownBucket = phase === "countdown"
       ? Math.ceil(Math.max(0, realtimeCountdownEndsAt - now) / 1000)
@@ -2770,7 +2716,6 @@ document.addEventListener("DOMContentLoaded", () => {
       cachedDecision.countdownBucket === countdownBucket &&
       cachedDecision.countdownGuideActive === !!countdownGuideTarget &&
       cachedDecision.guideActive === !!roundingGuideTarget &&
-      cachedDecision.plannerGuideActive === !!plannerGuideTarget &&
       cachedDecision.roundInZone === !!boat.roundInZone &&
       cachedDecision.roundingProgressKey === roundingProgressKey &&
       cachedDecision.refreshAt > now &&
@@ -2779,7 +2724,7 @@ document.addEventListener("DOMContentLoaded", () => {
       return { ...cachedDecision.direction };
     }
 
-    const target = countdownGuideTarget || roundingGuideTarget || plannerGuideTarget || botGoalPointForBoat(boat);
+    const target = countdownGuideTarget || roundingGuideTarget || botGoalPointForBoat(boat);
     if (!target) return null;
 
     const direct = norm({ x: target.x - boat.x, y: target.y - boat.y });
@@ -2787,14 +2732,12 @@ document.addEventListener("DOMContentLoaded", () => {
       return boat.hasHeading ? boatAxisUnit(boat.heading, boat.hasHeading) : null;
     }
 
-    const directDirection = superbot
-      ? { x: direct.x, y: direct.y }
-      : applyBotDirectionBias(
-        { x: direct.x, y: direct.y },
-        boatIdx,
-        now,
-        countdownGuideTarget ? 0.22 : (roundingGuideTarget ? 0.35 : 1)
-      );
+    const directDirection = applyBotDirectionBias(
+      { x: direct.x, y: direct.y },
+      boatIdx,
+      now,
+      countdownGuideTarget ? 0.22 : (roundingGuideTarget ? 0.35 : 1)
+    );
     const candidates = [];
     const upwind = upwindVec();
     const halfDead = deadZoneHalfAngleRad();
@@ -2805,7 +2748,7 @@ document.addEventListener("DOMContentLoaded", () => {
     );
     const currentHeading = boatAxisUnit(boat.heading, boat.hasHeading);
     const needsBeat = angleBetween(directDirection, upwind) < (halfDead + 12 * Math.PI / 180);
-    const beatVariants = superbot ? [0, 4, -4, 8, -8] : [0, 8, -8, 16, -16];
+    const beatVariants = [0, 8, -8, 16, -16];
     const addBeatFamily = (baseDirection) => {
       for (const deg of beatVariants){
         addRealtimeDirectionCandidate(candidates, rotateVec(baseDirection, deg * Math.PI / 180));
@@ -2833,7 +2776,7 @@ document.addEventListener("DOMContentLoaded", () => {
         addRealtimeDirectionCandidate(candidates, currentHeading);
       }
     } else {
-      const courseTweaks = superbot ? [0, 4, -4, 8, -8, 14, -14, 22, -22, 32, -32] : [0, 8, -8, 16, -16, 28, -28, 40, -40];
+      const courseTweaks = [0, 8, -8, 16, -16, 28, -28, 40, -40];
       addRealtimeDirectionCandidate(candidates, directDirection);
       for (const deg of courseTweaks){
         if (!deg) continue;
@@ -2870,7 +2813,6 @@ document.addEventListener("DOMContentLoaded", () => {
       countdownBucket,
       countdownGuideActive: !!countdownGuideTarget,
       guideActive: !!roundingGuideTarget,
-      plannerGuideActive: !!plannerGuideTarget,
       roundInZone: !!boat.roundInZone,
       roundingProgressKey,
       phase,
@@ -3602,6 +3544,7 @@ document.addEventListener("DOMContentLoaded", () => {
     emitStateChanged();
     scheduleLocalBotTurn();
   }
+
   // -----------------------------
   // Постановка лодок: спавн
   // -----------------------------
@@ -6554,7 +6497,7 @@ document.addEventListener("DOMContentLoaded", () => {
         finished: boat.finished,
         place: boat.place,
         selected: index === selectedBoatIndex,
-        controller: (isBotControlledBoat(index) || isMultiplayerBotBoat(index)) ? "bot" : "human",
+        controller: isBotControlledBoat(index) ? "bot" : "human",
       })),
       course: {
         marks: marks.slice(0, markCount).map((mark, index) => ({
@@ -6647,15 +6590,12 @@ document.addEventListener("DOMContentLoaded", () => {
     setServerClockOffset,
     setBoardStartActionOverride,
     triggerBoardStartAction,
-    setMultiplayerContext: ({ active=false, seatIndex=null, observer=false, lobbyPreview=false, host=false, botSeatIndices=[] } = {}) => {
+    setMultiplayerContext: ({ active=false, seatIndex=null, observer=false, lobbyPreview=false, host=false } = {}) => {
       multiplayerSessionActive = !!active;
       multiplayerSeatIndex = multiplayerSessionActive && Number.isInteger(seatIndex) ? seatIndex : null;
       multiplayerObserverMode = multiplayerSessionActive && !!observer;
       multiplayerHostMode = multiplayerSessionActive && !!host;
       multiplayerLobbyPreview = multiplayerSessionActive && !!lobbyPreview;
-      multiplayerBotSeatIndices = multiplayerSessionActive
-        ? normalizeMultiplayerBotSeatIndices(botSeatIndices)
-        : [];
       if (!multiplayerSessionActive){
         multiplayerRealtimePauseStartedAtMs = 0;
       }
@@ -6664,7 +6604,6 @@ document.addEventListener("DOMContentLoaded", () => {
         resetLocalRealtimePauseState();
       }
       clearBotTurnTimer();
-      clearRealtimeBotDecisionCache();
       if (multiplayerObserverMode){
         selectedBoatIndex = null;
       }
@@ -6687,36 +6626,6 @@ document.addEventListener("DOMContentLoaded", () => {
       updateStats();
       render();
       scheduleLocalBotTurn();
-    },
-    getMultiplayerBotControl: (boatIdx) => {
-      const normalizedBoatIdx = Number.isInteger(boatIdx) ? boatIdx : parseInt(boatIdx, 10);
-      if (!Number.isInteger(normalizedBoatIdx) || normalizedBoatIdx < 0 || normalizedBoatIdx >= boats.length){
-        return null;
-      }
-      if (!isMultiplayerBotBoat(normalizedBoatIdx) || phase === "finished"){
-        return {
-          boatIndex: normalizedBoatIdx,
-          active: false,
-          target: null,
-          direction: null,
-        };
-      }
-      const boat = boats[normalizedBoatIdx];
-      if (!boat || boat.finished){
-        return {
-          boatIndex: normalizedBoatIdx,
-          active: false,
-          target: null,
-          direction: null,
-        };
-      }
-      const direction = chooseRealtimeBotDirection(normalizedBoatIdx);
-      return {
-        boatIndex: normalizedBoatIdx,
-        active: !!direction,
-        target: null,
-        direction: direction ? { ...direction } : null,
-      };
     },
     getRealtimeIntent: () => {
       if (!isCursorSteeringMode()) return null;
@@ -6756,6 +6665,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }, 120);
 
   window.requestAnimationFrame(runLocalRealtimeLoop);
+
   // -----------------------------
   // Старт приложения
   // -----------------------------

@@ -395,9 +395,3 @@ def reset_room_lobby(room_code: str) -> tuple[dict[str, Any], str | None]:
     room["revision"] += 1
     room = room_store().save_room(room)
     return room, player_token
-
-
-def spawn_room_superbot(room_code: str) -> tuple[dict[str, Any], str | None]:
-    player_token = current_session_state().player_token
-    room = room_store().add_superbot(room_code, player_token)
-    return room, player_token

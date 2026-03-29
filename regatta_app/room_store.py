@@ -125,20 +125,12 @@ def player_is_observer(player: dict[str, Any] | None) -> bool:
     return bool((player or {}).get("is_observer"))
 
 
-def player_is_bot(player: dict[str, Any] | None) -> bool:
-    return bool((player or {}).get("is_bot"))
-
-
 def normalize_host_role(raw_role: str | None) -> str:
     return "observer" if raw_role == "observer" else "player"
 
 
 def room_host_player(room: dict[str, Any]) -> dict[str, Any] | None:
     return player_for_token(room, room.get("host_token"))
-
-
-def room_superbot_player(room: dict[str, Any]) -> dict[str, Any] | None:
-    return next((player for player in room.get("players", []) if player_is_bot(player)), None)
 
 
 def room_racing_players(room: dict[str, Any]) -> list[dict[str, Any]]:
@@ -241,7 +233,6 @@ def _public_room_base_view(
                 "is_host": player["token"] == room.get("host_token"),
                 "is_self": player["token"] == player_token,
                 "is_observer": player_is_observer(player),
-                "is_bot": player_is_bot(player),
             }
             for player in players
         ],
@@ -627,7 +618,6 @@ class RoomStore:
                         "name": normalize_name(host_name),
                         "seat_index": None if host_is_observer else 0,
                         "is_observer": host_is_observer,
-                        "is_bot": False,
                         "joined_at": now_ts(),
                     }
                 ],
@@ -680,7 +670,6 @@ class RoomStore:
                     "name": normalize_name(player_name),
                     "seat_index": None,
                     "is_observer": join_as_observer,
-                    "is_bot": False,
                     "joined_at": now_ts(),
                 }
             )
@@ -719,13 +708,9 @@ class RoomStore:
                 return None
 
             room["players"] = remaining
-            human_remaining = [player for player in remaining if not player_is_bot(player)]
-            if not human_remaining:
-                self.delete_room(room["code"])
-                return None
             if room["host_token"] == player_token:
                 room["host_token"] = min(
-                    human_remaining,
+                    remaining,
                     key=lambda item: (
                         player_is_observer(item),
                         item["seat_index"] if isinstance(item.get("seat_index"), int) else 10_000,
@@ -778,46 +763,3 @@ class RoomStore:
             raise
         finally:
             observe_room_store_operation("kick_player", backend, started_at, result=result, payload_size=payload_size)
-
-    def add_superbot(self, room_code: str, actor_token: str | None, *, bot_name: str = "Apex Bot") -> dict[str, Any]:
-        backend = "redis" if self.redis is not None else "memory"
-        started_at = time.perf_counter()
-        result = "ok"
-        payload_size = 0
-        try:
-            room = self.get_room(room_code)
-            if room is None:
-                raise RoomNotFound("Room not found.")
-            if room.get("host_token") != actor_token:
-                raise RoomForbidden("Only the room host can spawn the superbot.")
-            if room.get("status") != "lobby":
-                raise RoomForbidden("The superbot can only be added while the room is in the lobby.")
-            if room_superbot_player(room) is not None:
-                raise RoomValidationError("The superbot is already in this room.")
-            if room_joined_racer_count(room) >= room_max_racers(room):
-                raise RoomFull("No free racing slots remain for the superbot.")
-
-            room["players"].append(
-                {
-                    "player_id": make_player_id(),
-                    "token": make_player_token(),
-                    "name": normalize_name(bot_name),
-                    "seat_index": None,
-                    "is_observer": False,
-                    "is_bot": True,
-                    "joined_at": now_ts(),
-                }
-            )
-            reshape_room_player_states(room)
-            room["game_state"] = normalize_lobby_preview_state(room["start_state"])
-            room["revision"] += 1
-            payload_size = payload_bytes(room)
-            return self.save_room(room)
-        except RoomStoreError:
-            result = "rejected"
-            raise
-        except Exception:
-            result = "error"
-            raise
-        finally:
-            observe_room_store_operation("add_superbot", backend, started_at, result=result, payload_size=payload_size)
