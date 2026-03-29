@@ -32,6 +32,8 @@ class BaseConfig:
 
     SOCKETIO_ASYNC_MODE = os.getenv("SOCKETIO_ASYNC_MODE", "threading")
     SOCKETIO_MESSAGE_QUEUE = os.getenv("SOCKETIO_MESSAGE_QUEUE", "")
+    SOCKETIO_PING_INTERVAL = int(os.getenv("SOCKETIO_PING_INTERVAL", "25"))
+    SOCKETIO_PING_TIMEOUT = int(os.getenv("SOCKETIO_PING_TIMEOUT", "60"))
     GUNICORN_WORKER_CLASS = os.getenv("GUNICORN_WORKER_CLASS", "gthread")
     GUNICORN_WORKERS = int(os.getenv("GUNICORN_WORKERS", "1"))
     GUNICORN_THREADS = int(os.getenv("GUNICORN_THREADS", "32"))

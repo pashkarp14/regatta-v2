@@ -16,7 +16,9 @@ from tools.load.run import (
     SocketSample,
     VirtualUser,
     build_metrics_inventory,
+    control_loop,
     reshape_snapshot_for_players,
+    run_live_race,
     summarize_durations,
 )
 from tools.load.report_load import _derive_join_socket_to_snapshot, generate_report
@@ -611,3 +613,82 @@ def test_virtual_user_close_disconnects_unconnected_socket():
     asyncio.run(user.close())
 
     assert socket.disconnect_calls == 1
+
+
+def test_control_loop_stops_after_disconnect():
+    class FakeSocket:
+        connected = False
+
+    class FakeSession:
+        def __init__(self) -> None:
+            self.socket = FakeSocket()
+            self.disconnect_count = 1
+            self.calls = 0
+
+        async def emit_control(self, room_code: str, direction_x: float, direction_y: float) -> None:
+            self.calls += 1
+
+    session = FakeSession()
+
+    asyncio.run(control_loop(session, "ROOM01", 1, 1))
+
+    assert session.calls == 0
+
+
+def test_run_live_race_starts_controls_as_each_room_becomes_live(monkeypatch):
+    recorder = LoadRecorder("live_race")
+    events: list[str] = []
+
+    class FakeSession:
+        def __init__(self, user_id: str) -> None:
+            self.user_id = user_id
+            self.self_is_observer = False
+
+        async def room_view(self, room_code: str) -> dict[str, object]:
+            await asyncio.sleep(0)
+            events.append(f"view:{room_code}")
+            return {"game_state": {"boats": []}}
+
+        async def start_room(self, room_code: str, game_state: dict[str, object]) -> dict[str, object]:
+            await asyncio.sleep(0)
+            events.append(f"start:{room_code}")
+            return {"code": room_code}
+
+        async def close(self) -> None:
+            return None
+
+    async def fake_create_room_stack(base_url: str, recorder: LoadRecorder, room_index: int, *args, **kwargs):
+        await asyncio.sleep(0)
+        room_code = f"ROOM{room_index:02d}"
+        events.append(f"create:{room_code}")
+        return FakeSession(f"host-{room_index}"), [FakeSession(f"guest-{room_index}")], room_code
+
+    async def fake_connect_room_sockets(host, guests, room_code: str) -> None:
+        await asyncio.sleep(0)
+        events.append(f"connect:{room_code}")
+
+    async def fake_control_loop(session, room_code: str, duration_seconds: int, seed: int) -> None:
+        events.append(f"control:{room_code}:{session.user_id}")
+        await asyncio.sleep(0)
+
+    monkeypatch.setattr(load_run, "_create_room_stack", fake_create_room_stack)
+    monkeypatch.setattr(load_run, "_connect_room_sockets", fake_connect_room_sockets)
+    monkeypatch.setattr(load_run, "control_loop", fake_control_loop)
+    monkeypatch.setattr(load_run, "_leave_room_group", lambda host, guests: asyncio.sleep(0))
+    monkeypatch.setattr(load_run, "_close_sessions", lambda sessions: asyncio.sleep(0))
+
+    result = asyncio.run(
+        run_live_race(
+            "http://127.0.0.1:5001",
+            recorder,
+            users=4,
+            duration_seconds=1,
+            rooms=2,
+            users_per_room=2,
+            baseline_snapshot={"boats": []},
+        )
+    )
+
+    assert result["rooms"] == 2
+    assert result["users"] == 4
+    assert events.index("control:ROOM01:host-1") < events.index("create:ROOM02")

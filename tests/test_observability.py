@@ -182,11 +182,15 @@ def test_deployment_defaults_keep_single_worker_and_raise_thread_ceiling():
     assert "${GUNICORN_WORKER_CLASS:-geventwebsocket.gunicorn.workers.GeventWebSocketWorker}" in dockerfile
     assert "SOCKETIO_ASYNC_MODE=${SOCKETIO_ASYNC_MODE:-gevent}" in dockerfile
     assert "SOCKETIO_ASYNC_MODE=${SOCKETIO_ASYNC_MODE:-threading}" in dockerfile
+    assert "SOCKETIO_PING_INTERVAL=${SOCKETIO_PING_INTERVAL:-25}" in dockerfile
+    assert "SOCKETIO_PING_TIMEOUT=${SOCKETIO_PING_TIMEOUT:-60}" in dockerfile
     assert "GUNICORN_WORKERS: ${GUNICORN_WORKERS:-1}" in compose
     assert "GUNICORN_THREADS: ${GUNICORN_THREADS:-32}" in compose
     assert "GUNICORN_WORKER_CLASS: ${GUNICORN_WORKER_CLASS:-geventwebsocket.gunicorn.workers.GeventWebSocketWorker}" in compose
     assert "SOCKETIO_ASYNC_MODE: ${SOCKETIO_ASYNC_MODE:-gevent}" in compose
     assert "SOCKETIO_MESSAGE_QUEUE: ${SOCKETIO_MESSAGE_QUEUE:-}" in compose
+    assert "SOCKETIO_PING_INTERVAL: ${SOCKETIO_PING_INTERVAL:-25}" in compose
+    assert "SOCKETIO_PING_TIMEOUT: ${SOCKETIO_PING_TIMEOUT:-60}" in compose
 
 
 def test_create_app_leaves_socketio_message_queue_disabled_by_default(tmp_path: Path, monkeypatch):
@@ -214,6 +218,8 @@ def test_create_app_leaves_socketio_message_queue_disabled_by_default(tmp_path: 
 
     assert captured.get("message_queue") is None
     assert captured.get("async_mode") == "threading"
+    assert captured.get("ping_interval") == 25
+    assert captured.get("ping_timeout") == 60
 
 
 def test_config_defaults_do_not_enable_socketio_message_queue_from_redis_url(monkeypatch):
@@ -222,10 +228,14 @@ def test_config_defaults_do_not_enable_socketio_message_queue_from_redis_url(mon
             scoped.setenv("REDIS_URL", "redis://redis:6380/0")
             scoped.delenv("SOCKETIO_MESSAGE_QUEUE", raising=False)
             scoped.delenv("SOCKETIO_ASYNC_MODE", raising=False)
+            scoped.delenv("SOCKETIO_PING_INTERVAL", raising=False)
+            scoped.delenv("SOCKETIO_PING_TIMEOUT", raising=False)
             scoped.delenv("GUNICORN_WORKER_CLASS", raising=False)
             importlib.reload(config_module)
             assert config_module.BaseConfig.SOCKETIO_MESSAGE_QUEUE == ""
             assert config_module.BaseConfig.SOCKETIO_ASYNC_MODE == "threading"
+            assert config_module.BaseConfig.SOCKETIO_PING_INTERVAL == 25
+            assert config_module.BaseConfig.SOCKETIO_PING_TIMEOUT == 60
             assert config_module.BaseConfig.GUNICORN_WORKER_CLASS == "gthread"
     finally:
         importlib.reload(config_module)
@@ -253,11 +263,15 @@ def test_create_app_uses_socketio_message_queue_from_config(tmp_path: Path, monk
             "REDIS_URL": "redis://redis:6380/0",
             "SOCKETIO_MESSAGE_QUEUE": "redis://redis:6380/1",
             "SOCKETIO_ASYNC_MODE": "threading",
+            "SOCKETIO_PING_INTERVAL": 15,
+            "SOCKETIO_PING_TIMEOUT": 75,
         }
     )
 
     assert captured.get("message_queue") == "redis://redis:6380/1"
     assert captured.get("async_mode") == "threading"
+    assert captured.get("ping_interval") == 15
+    assert captured.get("ping_timeout") == 75
 
 
 def test_socket_join_records_metrics(app):

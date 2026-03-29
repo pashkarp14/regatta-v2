@@ -947,15 +947,32 @@ async def _connect_room_sockets(host: VirtualUser, guests: list[VirtualUser], ro
     await asyncio.gather(host.connect_socket(room_code), *(guest.connect_socket(room_code) for guest in guests))
 
 
+def _session_socket_connected(session: VirtualUser) -> bool:
+    if getattr(session, "disconnect_count", 0) > 0:
+        return False
+    socket_client = getattr(session, "socket", None)
+    connected = getattr(socket_client, "connected", None)
+    if isinstance(connected, bool):
+        return connected
+    return True
+
+
 async def control_loop(session: VirtualUser, room_code: str, duration_seconds: int, seed: int) -> None:
     rng = random.Random(seed)
     iterations = max(1, int(duration_seconds / REALTIME_CONTROL_INTERVAL_SECONDS))
     for _ in range(iterations):
+        if not _session_socket_connected(session):
+            return
         direction_x = round(rng.uniform(-1.0, 1.0), 3)
         direction_y = round(rng.uniform(-1.0, 1.0), 3)
         if direction_x == 0 and direction_y == 0:
             direction_x = 0.35
-        await session.emit_control(room_code, direction_x, direction_y or 0.2)
+        try:
+            await session.emit_control(room_code, direction_x, direction_y or 0.2)
+        except Exception as exc:
+            if not _session_socket_connected(session) or "not a connected namespace" in str(exc).lower():
+                return
+            raise
         await asyncio.sleep(REALTIME_CONTROL_INTERVAL_SECONDS)
 
 
@@ -1068,8 +1085,8 @@ async def run_live_race(
 
     sessions: list[VirtualUser] = []
     room_codes: list[str] = []
-    racers: list[tuple[VirtualUser, str, int]] = []
     room_groups: list[tuple[VirtualUser, list[VirtualUser]]] = []
+    control_tasks: list[asyncio.Task[None]] = []
     remaining_users = max(users, rooms * 2)
     try:
         for room_index in range(1, rooms + 1):
@@ -1093,13 +1110,23 @@ async def run_live_race(
             await host.start_room(room_code, room_snapshot["game_state"])
             for seed, session in enumerate(room_sessions, start=1):
                 if not session.self_is_observer:
-                    racers.append((session, room_code, room_index * 100 + seed))
+                    control_tasks.append(
+                        asyncio.create_task(
+                            control_loop(session, room_code, duration_seconds, room_index * 100 + seed)
+                        )
+                    )
 
-        await asyncio.gather(*(control_loop(session, room_code, duration_seconds, seed) for session, room_code, seed in racers))
+        if control_tasks:
+            await asyncio.gather(*control_tasks)
         for host, guests in room_groups:
             await _leave_room_group(host, guests)
         return {"rooms": len(room_codes), "users": len(sessions), "room_codes": room_codes, "duration_seconds": duration_seconds}
     finally:
+        for task in control_tasks:
+            if not task.done():
+                task.cancel()
+        if control_tasks:
+            await asyncio.gather(*control_tasks, return_exceptions=True)
         await _close_sessions(sessions)
 
 
