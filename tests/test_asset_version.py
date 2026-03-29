@@ -58,3 +58,26 @@ def test_bootstrap_exposes_asset_version(tmp_path: Path):
     assert response.status_code == 200
     assert payload["version"] == "2.0.0"
     assert payload["asset_version"] == app.config["ASSET_VERSION"]
+
+
+def test_static_css_is_served_without_passthrough_errors(tmp_path: Path):
+    library_dir = tmp_path / "library"
+    library_dir.mkdir()
+
+    app = create_app(
+        {
+            "TESTING": True,
+            "SECRET_KEY": "test-secret",
+            "SESSION_TYPE": "filesystem",
+            "LIBRARY_DIR": str(library_dir),
+            "ROOM_TTL_SECONDS": 3600,
+            "APP_VERSION": "2.0.0",
+        }
+    )
+    client = app.test_client()
+
+    response = client.get("/static/regatta.css")
+
+    assert response.status_code == 200
+    assert response.mimetype == "text/css"
+    assert ":root{" in response.get_data(as_text=True)

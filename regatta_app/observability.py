@@ -223,6 +223,17 @@ def payload_bytes(payload: Any) -> int:
     return len(encoded.encode("utf-8"))
 
 
+def response_payload_bytes(response: Response) -> int:
+    response_bytes = response.calculate_content_length()
+    if response_bytes is not None:
+        return max(response_bytes, 0)
+    # Static files use send_file() with direct passthrough enabled, so reading
+    # the body here raises and breaks asset delivery. Reuse the known length.
+    if response.direct_passthrough:
+        return max(int(response.content_length or 0), 0)
+    return len(response.get_data(as_text=False) or b"")
+
+
 def app_config_bool(key: str, default: bool = False) -> bool:
     if not has_app_context():
         return default
@@ -369,9 +380,7 @@ def register_observability(app: Flask) -> None:
         endpoint = http_endpoint_label()
         method = request.method
         status = str(response.status_code)
-        response_bytes = response.calculate_content_length()
-        if response_bytes is None:
-            response_bytes = len(response.get_data(as_text=False) or b"")
+        response_bytes = response_payload_bytes(response)
         if metrics_enabled():
             HTTP_REQUESTS_TOTAL.labels(endpoint=endpoint, method=method, status=status).inc()
             HTTP_REQUEST_DURATION_SECONDS.labels(endpoint=endpoint, method=method, status=status).observe(duration_seconds)
