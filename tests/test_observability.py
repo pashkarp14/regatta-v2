@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import importlib
 import logging
 import time
 from pathlib import Path
 
 import pytest
 
+from regatta_app import config as config_module
 from regatta_app import factory as factory_module
 from regatta_app import sockets as realtime_sockets
 from regatta_app.api import rooms as rooms_api
@@ -179,6 +181,42 @@ def test_deployment_defaults_keep_single_worker_and_raise_thread_ceiling():
     assert "${GUNICORN_THREADS:-32}" in dockerfile
     assert "GUNICORN_WORKERS: ${GUNICORN_WORKERS:-1}" in compose
     assert "GUNICORN_THREADS: ${GUNICORN_THREADS:-32}" in compose
+    assert "SOCKETIO_MESSAGE_QUEUE: ${SOCKETIO_MESSAGE_QUEUE:-}" in compose
+
+
+def test_create_app_leaves_socketio_message_queue_disabled_by_default(tmp_path: Path, monkeypatch):
+    library_dir = tmp_path / "library"
+    library_dir.mkdir()
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(factory_module.session_ext, "init_app", lambda app: None)
+
+    def fake_init_app(app, **kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(factory_module.socketio, "init_app", fake_init_app)
+
+    create_app(
+        {
+            "TESTING": True,
+            "SECRET_KEY": "test-secret",
+            "SESSION_TYPE": "filesystem",
+            "LIBRARY_DIR": str(library_dir),
+            "ROOM_TTL_SECONDS": 3600,
+            "REDIS_URL": "redis://redis:6380/0",
+        }
+    )
+
+    assert captured.get("message_queue") is None
+
+
+def test_config_defaults_do_not_enable_socketio_message_queue_from_redis_url(monkeypatch):
+    with monkeypatch.context() as scoped:
+        scoped.setenv("REDIS_URL", "redis://redis:6380/0")
+        scoped.delenv("SOCKETIO_MESSAGE_QUEUE", raising=False)
+        importlib.reload(config_module)
+        assert config_module.BaseConfig.SOCKETIO_MESSAGE_QUEUE == ""
+    importlib.reload(config_module)
 
 
 def test_create_app_uses_socketio_message_queue_from_config(tmp_path: Path, monkeypatch):

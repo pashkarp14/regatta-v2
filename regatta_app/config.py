@@ -31,7 +31,7 @@ class BaseConfig:
     SESSION_KEY_PREFIX = "regatta:v2:session:"
 
     SOCKETIO_ASYNC_MODE = os.getenv("SOCKETIO_ASYNC_MODE", "threading")
-    SOCKETIO_MESSAGE_QUEUE = os.getenv("SOCKETIO_MESSAGE_QUEUE", REDIS_URL)
+    SOCKETIO_MESSAGE_QUEUE = os.getenv("SOCKETIO_MESSAGE_QUEUE", "")
     GUNICORN_WORKER_CLASS = os.getenv("GUNICORN_WORKER_CLASS", "gthread")
     GUNICORN_WORKERS = int(os.getenv("GUNICORN_WORKERS", "1"))
     GUNICORN_THREADS = int(os.getenv("GUNICORN_THREADS", "32"))
