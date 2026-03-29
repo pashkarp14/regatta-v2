@@ -417,7 +417,7 @@
         finished: boat.finished,
         place: boat.place,
         selected: index === selectedBoatIndex,
-        controller: (isBotControlledBoat(index) || isMultiplayerBotBoat(index)) ? "bot" : "human",
+        controller: isBotControlledBoat(index) ? "bot" : "human",
       })),
       course: {
         marks: marks.slice(0, markCount).map((mark, index) => ({
@@ -510,15 +510,12 @@
     setServerClockOffset,
     setBoardStartActionOverride,
     triggerBoardStartAction,
-    setMultiplayerContext: ({ active=false, seatIndex=null, observer=false, lobbyPreview=false, host=false, botSeatIndices=[] } = {}) => {
+    setMultiplayerContext: ({ active=false, seatIndex=null, observer=false, lobbyPreview=false, host=false } = {}) => {
       multiplayerSessionActive = !!active;
       multiplayerSeatIndex = multiplayerSessionActive && Number.isInteger(seatIndex) ? seatIndex : null;
       multiplayerObserverMode = multiplayerSessionActive && !!observer;
       multiplayerHostMode = multiplayerSessionActive && !!host;
       multiplayerLobbyPreview = multiplayerSessionActive && !!lobbyPreview;
-      multiplayerBotSeatIndices = multiplayerSessionActive
-        ? normalizeMultiplayerBotSeatIndices(botSeatIndices)
-        : [];
       if (!multiplayerSessionActive){
         multiplayerRealtimePauseStartedAtMs = 0;
       }
@@ -527,7 +524,6 @@
         resetLocalRealtimePauseState();
       }
       clearBotTurnTimer();
-      clearRealtimeBotDecisionCache();
       if (multiplayerObserverMode){
         selectedBoatIndex = null;
       }
@@ -550,36 +546,6 @@
       updateStats();
       render();
       scheduleLocalBotTurn();
-    },
-    getMultiplayerBotControl: (boatIdx) => {
-      const normalizedBoatIdx = Number.isInteger(boatIdx) ? boatIdx : parseInt(boatIdx, 10);
-      if (!Number.isInteger(normalizedBoatIdx) || normalizedBoatIdx < 0 || normalizedBoatIdx >= boats.length){
-        return null;
-      }
-      if (!isMultiplayerBotBoat(normalizedBoatIdx) || phase === "finished"){
-        return {
-          boatIndex: normalizedBoatIdx,
-          active: false,
-          target: null,
-          direction: null,
-        };
-      }
-      const boat = boats[normalizedBoatIdx];
-      if (!boat || boat.finished){
-        return {
-          boatIndex: normalizedBoatIdx,
-          active: false,
-          target: null,
-          direction: null,
-        };
-      }
-      const direction = chooseRealtimeBotDirection(normalizedBoatIdx);
-      return {
-        boatIndex: normalizedBoatIdx,
-        active: !!direction,
-        target: null,
-        direction: direction ? { ...direction } : null,
-      };
     },
     getRealtimeIntent: () => {
       if (!isCursorSteeringMode()) return null;
@@ -619,3 +585,4 @@
   }, 120);
 
   window.requestAnimationFrame(runLocalRealtimeLoop);
+

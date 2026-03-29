@@ -3,7 +3,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 import threading
 
-from .room_store import RoomStore, RoomForbidden, RoomFull, RoomNotFound, RoomValidationError, normalize_lobby_preview_state, normalize_name, normalize_room_code, player_for_id, player_for_token, player_is_bot, player_is_observer, reshape_room_player_states, room_joined_racer_count, room_max_racers, room_superbot_player, room_total_capacity, MAX_ROOM_PLAYERS, MAX_TOTAL_ROOM_USERS, make_player_id, make_player_token, make_room_code, now_ts, validate_game_state, validate_game_state_shape
+from .room_store import RoomStore, RoomForbidden, RoomFull, RoomNotFound, RoomValidationError, normalize_lobby_preview_state, normalize_name, normalize_room_code, player_for_id, player_for_token, player_is_observer, reshape_room_player_states, room_joined_racer_count, room_max_racers, room_total_capacity, MAX_ROOM_PLAYERS, MAX_TOTAL_ROOM_USERS, make_player_id, make_player_token, make_room_code, now_ts, validate_game_state, validate_game_state_shape
 
 
 class LockedRoomStore(RoomStore):
@@ -92,7 +92,6 @@ class LockedRoomStore(RoomStore):
                         "name": normalize_name(host_name),
                         "seat_index": None if host_is_observer else 0,
                         "is_observer": host_is_observer,
-                        "is_bot": False,
                         "joined_at": now_ts(),
                     }
                 ],
@@ -132,7 +131,6 @@ class LockedRoomStore(RoomStore):
                     "name": normalize_name(player_name),
                     "seat_index": None,
                     "is_observer": join_as_observer,
-                    "is_bot": False,
                     "joined_at": now_ts(),
                 }
             )
@@ -152,13 +150,9 @@ class LockedRoomStore(RoomStore):
             return None
 
         room["players"] = remaining
-        human_remaining = [player for player in remaining if not player_is_bot(player)]
-        if not human_remaining:
-            self.delete_room(room["code"])
-            return None
         if room["host_token"] == player_token:
             room["host_token"] = min(
-                human_remaining,
+                remaining,
                 key=lambda item: (
                     player_is_observer(item),
                     item["seat_index"] if isinstance(item.get("seat_index"), int) else 10_000,
@@ -200,34 +194,3 @@ class LockedRoomStore(RoomStore):
             if updated_room is None:
                 raise RoomNotFound("Room not found.")
             return updated_room
-
-    def add_superbot(self, room_code: str, actor_token: str | None, *, bot_name: str = "Apex Bot"):
-        normalized_code = normalize_room_code(room_code)
-        with self._room_guard(normalized_code):
-            room = self.get_room(normalized_code)
-            if room is None:
-                raise RoomNotFound("Room not found.")
-            if room.get("host_token") != actor_token:
-                raise RoomForbidden("Only the room host can spawn the superbot.")
-            if room.get("status") != "lobby":
-                raise RoomForbidden("The superbot can only be added while the room is in the lobby.")
-            if room_superbot_player(room) is not None:
-                raise RoomValidationError("The superbot is already in this room.")
-            if room_joined_racer_count(room) >= room_max_racers(room):
-                raise RoomFull("No free racing slots remain for the superbot.")
-
-            room["players"].append(
-                {
-                    "player_id": make_player_id(),
-                    "token": make_player_token(),
-                    "name": normalize_name(bot_name),
-                    "seat_index": None,
-                    "is_observer": False,
-                    "is_bot": True,
-                    "joined_at": now_ts(),
-                }
-            )
-            reshape_room_player_states(room)
-            room["game_state"] = normalize_lobby_preview_state(room["start_state"])
-            room["revision"] += 1
-            return self.save_room(room)

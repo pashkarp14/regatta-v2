@@ -18,7 +18,6 @@ from ..room_service import (
     leave_current_room,
     reset_room_lobby,
     room_view,
-    spawn_room_superbot,
     start_room_match,
 )
 from ..session_state import clear_room_session, current_session_state
@@ -193,15 +192,6 @@ def reset_lobby(room_code: str):
     pop_realtime_control(room["code"])
     broadcast_room_snapshot(room)
     log_event(current_app.logger, "room.reset_lobby.response", room_code=room.get("code"), revision=room.get("revision"))
-    return serialize_room(room, player_token)
-
-
-@bp.post("/api/rooms/<room_code>/superbot")
-def spawn_superbot(room_code: str):
-    room, player_token = spawn_room_superbot(room_code)
-    live_runtime().drop_room(room["code"])
-    broadcast_room_snapshot(room)
-    log_event(current_app.logger, "room.superbot.response", room_code=room.get("code"), revision=room.get("revision"))
     return serialize_room(room, player_token)
 
 
