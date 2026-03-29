@@ -48,6 +48,29 @@ _realtime_loops: set[str] = set()
 _realtime_controls: dict[str, dict[int, dict[str, Any]]] = {}
 _socket_memberships: dict[str, tuple[str, str]] = {}
 _player_socket_ids: dict[str, set[str]] = {}
+_LOBBY_PREVIEW_BOAT_RUNTIME_KEYS = (
+    "x",
+    "y",
+    "distance",
+    "turns",
+    "penalties",
+    "collisions",
+    "nextMark",
+    "finished",
+    "place",
+    "hasHeading",
+    "heading",
+    "tack",
+    "currentSpeedUnitsPerSec",
+    "penaltySlowUntil",
+    "lastPenaltyAt",
+    "lastPenaltyKey",
+    "lastPenaltyReason",
+    "roundInZone",
+    "roundSweep",
+    "startDeltaMs",
+    "falseStartDeltaMs",
+)
 
 
 def _socket_event_room_code(payload: dict[str, Any] | None) -> str | None:
@@ -167,6 +190,42 @@ def realtime_controls_snapshot(room_code: str) -> dict[int, dict[str, Any]]:
 
 def any_active_control(controls: dict[int, dict[str, Any]]) -> bool:
     return any(control.get("active") for control in controls.values())
+
+
+def _clamp_preview_boat_position(value: Any, upper_bound: float) -> float:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return max(0.0, min(upper_bound, numeric))
+
+
+def preserve_lobby_preview_boats(
+    preview_state: dict[str, Any],
+    current_preview_state: dict[str, Any] | None,
+) -> dict[str, Any]:
+    current_boats = list((current_preview_state or {}).get("boats") or [])
+    preview_boats = list(preview_state.get("boats") or [])
+    if len(current_boats) != len(preview_boats):
+        return preview_state
+
+    world = preview_state.get("world") or {}
+    world_w = float(world.get("width") or 0.0)
+    world_h = float(world.get("height") or 0.0)
+
+    for preview_boat, current_boat in zip(preview_boats, current_boats):
+        if not isinstance(preview_boat, dict) or not isinstance(current_boat, dict):
+            continue
+        for key in _LOBBY_PREVIEW_BOAT_RUNTIME_KEYS:
+            if key in current_boat:
+                preview_boat[key] = deepcopy(current_boat[key])
+        if world_w > 0:
+            preview_boat["x"] = _clamp_preview_boat_position(preview_boat.get("x"), world_w)
+        if world_h > 0:
+            preview_boat["y"] = _clamp_preview_boat_position(preview_boat.get("y"), world_h)
+
+    preview_state["boats"] = preview_boats
+    return preview_state
 
 
 def room_has_connected_socket(room_code: str) -> bool:
@@ -450,8 +509,12 @@ def register_socket_handlers() -> None:
                 if room["status"] == "lobby":
                     if room["host_token"] != player_token:
                         raise RoomForbidden("Only the host can edit the course before the start.")
+                    preserve_preview_boats = bool((payload or {}).get("preserve_lobby_preview_boats"))
+                    previous_preview_state = deepcopy(room.get("game_state")) if preserve_preview_boats else None
                     room["start_state"] = deepcopy(game_state)
                     room["game_state"] = normalize_lobby_preview_state(game_state)
+                    if preserve_preview_boats:
+                        room["game_state"] = preserve_lobby_preview_boats(room["game_state"], previous_preview_state)
                 else:
                     raise RoomForbidden("Live rooms use cursor controls instead of snapshot pushes.")
 

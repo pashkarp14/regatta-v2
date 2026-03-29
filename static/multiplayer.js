@@ -706,6 +706,25 @@ document.addEventListener("DOMContentLoaded", () => {
     return false;
   }
 
+  function currentBoardMode() {
+    return regatta.getMeta?.().mode || "play";
+  }
+
+  function isHostEditingLobbySetup(nextRoom = roomState.room) {
+    return !!(
+      nextRoom
+      && nextRoom.status === "lobby"
+      && isRoomHost()
+      && currentBoardMode() !== "play"
+    );
+  }
+
+  function shouldPreserveLobbyPreviewBoatsOnPush() {
+    if (!isHostEditingLobbySetup()) return false;
+    const mode = currentBoardMode();
+    return mode !== "boats" && mode !== "model";
+  }
+
   function syncBoardStartAction() {
     if (typeof regatta.setBoardStartActionOverride !== "function") return;
 
@@ -1288,9 +1307,10 @@ document.addEventListener("DOMContentLoaded", () => {
     const startedAt = perfNow();
     const previousStatus = roomState.room?.status || null;
     const incomingPayloadBytes = telemetryPayloadBytes(room);
+    const deferHostLobbyImport = importState && isHostEditingLobbySetup(room);
 
     const incomingState = importState ? room.game_state : null;
-    if (incomingState) {
+    if (incomingState && !deferHostLobbyImport) {
       const incomingFingerprint = JSON.stringify(incomingState);
       if (incomingFingerprint !== roomState.lastFingerprint) {
         roomState.applyingRemote = true;
@@ -1646,10 +1666,14 @@ document.addEventListener("DOMContentLoaded", () => {
 
     roomState.lastFingerprint = nextFingerprint;
     const outboundState = regatta.exportState();
-    roomState.socket.emit("room:push_state", {
+    const payload = {
       room_code: roomState.room.code,
       state: outboundState,
-    });
+    };
+    if (shouldPreserveLobbyPreviewBoatsOnPush()) {
+      payload.preserve_lobby_preview_boats = true;
+    }
+    roomState.socket.emit("room:push_state", payload);
     queueSampledTelemetry("client.state.push", 0.2, {
       payload_bytes: telemetryPayloadBytes(outboundState),
     });

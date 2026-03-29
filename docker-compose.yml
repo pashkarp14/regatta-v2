@@ -47,7 +47,6 @@ services:
 
   prometheus:
     image: prom/prometheus:v2.55.1
-    profiles: ["observability"]
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
     ports:
@@ -60,7 +59,6 @@ services:
 
   grafana:
     image: grafana/grafana:11.4.0
-    profiles: ["observability"]
     ports:
       - "3000:3000"
     environment:
