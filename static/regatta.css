@@ -582,6 +582,11 @@ body.menu-open .app-shell{
   color:#baf0ea;
 }
 
+.room-tag-bot{
+  background:rgba(255, 107, 107, 0.18);
+  color:#ffc2c2;
+}
+
 .room-tag-observer{
   background:rgba(180, 205, 255, 0.16);
   color:#d2e2ff;

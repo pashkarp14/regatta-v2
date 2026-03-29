@@ -184,6 +184,7 @@ def test_deployment_defaults_keep_single_worker_and_raise_thread_ceiling():
     assert "SOCKETIO_ASYNC_MODE=${SOCKETIO_ASYNC_MODE:-threading}" in dockerfile
     assert "SOCKETIO_PING_INTERVAL=${SOCKETIO_PING_INTERVAL:-25}" in dockerfile
     assert "SOCKETIO_PING_TIMEOUT=${SOCKETIO_PING_TIMEOUT:-60}" in dockerfile
+    assert 'profiles: ["observability"]' not in compose
     assert "GUNICORN_WORKERS: ${GUNICORN_WORKERS:-1}" in compose
     assert "GUNICORN_THREADS: ${GUNICORN_THREADS:-32}" in compose
     assert "GUNICORN_WORKER_CLASS: ${GUNICORN_WORKER_CLASS:-geventwebsocket.gunicorn.workers.GeventWebSocketWorker}" in compose

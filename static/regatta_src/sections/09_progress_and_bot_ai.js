@@ -235,6 +235,33 @@
     candidates.push(direction);
   }
 
+  function realtimeSuperbotPlannerGuideTarget(boat, boatIdx){
+    if (!boat || boat.finished) return null;
+    const planned = planOptimalFrom(
+      { x: boat.x, y: boat.y },
+      clamp(boat.nextMark, 0, markCount),
+      boat.hasHeading ? boat.heading : null,
+      boat.tack,
+      "course",
+      boatIdx,
+      boatSpeedCoeff(boat),
+    );
+    if (!planned?.path?.length) return null;
+
+    const guidePoint = planned.path.find((point, index) => (
+      index > 0
+      && point
+      && Number.isFinite(point.x)
+      && Number.isFinite(point.y)
+      && dist(point, boat) >= 1.05
+    )) || planned.path[Math.min(2, planned.path.length - 1)] || planned.path[planned.path.length - 1];
+    if (!guidePoint || !Number.isFinite(guidePoint.x) || !Number.isFinite(guidePoint.y)) return null;
+    return {
+      x: clamp(guidePoint.x, 0, worldW),
+      y: clamp(guidePoint.y, 0, worldH)
+    };
+  }
+
   function scoreRealtimeBotDirection(boat, direction, directToTarget, target, options={}){
     const position = { x: boat.x, y: boat.y };
     const boatIdx = Number.isInteger(options.boatIdx) ? options.boatIdx : -1;
@@ -453,8 +480,10 @@
 
     const now = currentRaceTimeMs();
     const profile = botSkillProfile(boatIdx);
+    const superbot = isMultiplayerBotBoat(boatIdx);
     const countdownGuideTarget = realtimeBotCountdownGuideTarget(boat, boatIdx, now);
     const roundingGuideTarget = realtimeBotRoundingGuideTarget(boat);
+    const plannerGuideTarget = superbot ? realtimeSuperbotPlannerGuideTarget(boat, boatIdx) : null;
     const roundingProgressKey = Math.round(roundingProgressForBoat(boat) * 4) / 4;
     const countdownBucket = phase === "countdown"
       ? Math.ceil(Math.max(0, realtimeCountdownEndsAt - now) / 1000)
@@ -467,6 +496,7 @@
       cachedDecision.countdownBucket === countdownBucket &&
       cachedDecision.countdownGuideActive === !!countdownGuideTarget &&
       cachedDecision.guideActive === !!roundingGuideTarget &&
+      cachedDecision.plannerGuideActive === !!plannerGuideTarget &&
       cachedDecision.roundInZone === !!boat.roundInZone &&
       cachedDecision.roundingProgressKey === roundingProgressKey &&
       cachedDecision.refreshAt > now &&
@@ -475,7 +505,7 @@
       return { ...cachedDecision.direction };
     }
 
-    const target = countdownGuideTarget || roundingGuideTarget || botGoalPointForBoat(boat);
+    const target = countdownGuideTarget || roundingGuideTarget || plannerGuideTarget || botGoalPointForBoat(boat);
     if (!target) return null;
 
     const direct = norm({ x: target.x - boat.x, y: target.y - boat.y });
@@ -483,12 +513,14 @@
       return boat.hasHeading ? boatAxisUnit(boat.heading, boat.hasHeading) : null;
     }
 
-    const directDirection = applyBotDirectionBias(
-      { x: direct.x, y: direct.y },
-      boatIdx,
-      now,
-      countdownGuideTarget ? 0.22 : (roundingGuideTarget ? 0.35 : 1)
-    );
+    const directDirection = superbot
+      ? { x: direct.x, y: direct.y }
+      : applyBotDirectionBias(
+        { x: direct.x, y: direct.y },
+        boatIdx,
+        now,
+        countdownGuideTarget ? 0.22 : (roundingGuideTarget ? 0.35 : 1)
+      );
     const candidates = [];
     const upwind = upwindVec();
     const halfDead = deadZoneHalfAngleRad();
@@ -499,7 +531,7 @@
     );
     const currentHeading = boatAxisUnit(boat.heading, boat.hasHeading);
     const needsBeat = angleBetween(directDirection, upwind) < (halfDead + 12 * Math.PI / 180);
-    const beatVariants = [0, 8, -8, 16, -16];
+    const beatVariants = superbot ? [0, 4, -4, 8, -8] : [0, 8, -8, 16, -16];
     const addBeatFamily = (baseDirection) => {
       for (const deg of beatVariants){
         addRealtimeDirectionCandidate(candidates, rotateVec(baseDirection, deg * Math.PI / 180));
@@ -527,7 +559,7 @@
         addRealtimeDirectionCandidate(candidates, currentHeading);
       }
     } else {
-      const courseTweaks = [0, 8, -8, 16, -16, 28, -28, 40, -40];
+      const courseTweaks = superbot ? [0, 4, -4, 8, -8, 14, -14, 22, -22, 32, -32] : [0, 8, -8, 16, -16, 28, -28, 40, -40];
       addRealtimeDirectionCandidate(candidates, directDirection);
       for (const deg of courseTweaks){
         if (!deg) continue;
@@ -564,6 +596,7 @@
       countdownBucket,
       countdownGuideActive: !!countdownGuideTarget,
       guideActive: !!roundingGuideTarget,
+      plannerGuideActive: !!plannerGuideTarget,
       roundInZone: !!boat.roundInZone,
       roundingProgressKey,
       phase,
@@ -1295,4 +1328,3 @@
     emitStateChanged();
     scheduleLocalBotTurn();
   }
-
