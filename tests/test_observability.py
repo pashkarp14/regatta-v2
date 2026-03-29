@@ -179,8 +179,13 @@ def test_deployment_defaults_keep_single_worker_and_raise_thread_ceiling():
 
     assert "${GUNICORN_WORKERS:-1}" in dockerfile
     assert "${GUNICORN_THREADS:-32}" in dockerfile
+    assert "${GUNICORN_WORKER_CLASS:-geventwebsocket.gunicorn.workers.GeventWebSocketWorker}" in dockerfile
+    assert "SOCKETIO_ASYNC_MODE=${SOCKETIO_ASYNC_MODE:-gevent}" in dockerfile
+    assert "SOCKETIO_ASYNC_MODE=${SOCKETIO_ASYNC_MODE:-threading}" in dockerfile
     assert "GUNICORN_WORKERS: ${GUNICORN_WORKERS:-1}" in compose
     assert "GUNICORN_THREADS: ${GUNICORN_THREADS:-32}" in compose
+    assert "GUNICORN_WORKER_CLASS: ${GUNICORN_WORKER_CLASS:-geventwebsocket.gunicorn.workers.GeventWebSocketWorker}" in compose
+    assert "SOCKETIO_ASYNC_MODE: ${SOCKETIO_ASYNC_MODE:-gevent}" in compose
     assert "SOCKETIO_MESSAGE_QUEUE: ${SOCKETIO_MESSAGE_QUEUE:-}" in compose
 
 
@@ -208,15 +213,22 @@ def test_create_app_leaves_socketio_message_queue_disabled_by_default(tmp_path: 
     )
 
     assert captured.get("message_queue") is None
+    assert captured.get("async_mode") == "threading"
 
 
 def test_config_defaults_do_not_enable_socketio_message_queue_from_redis_url(monkeypatch):
-    with monkeypatch.context() as scoped:
-        scoped.setenv("REDIS_URL", "redis://redis:6380/0")
-        scoped.delenv("SOCKETIO_MESSAGE_QUEUE", raising=False)
+    try:
+        with monkeypatch.context() as scoped:
+            scoped.setenv("REDIS_URL", "redis://redis:6380/0")
+            scoped.delenv("SOCKETIO_MESSAGE_QUEUE", raising=False)
+            scoped.delenv("SOCKETIO_ASYNC_MODE", raising=False)
+            scoped.delenv("GUNICORN_WORKER_CLASS", raising=False)
+            importlib.reload(config_module)
+            assert config_module.BaseConfig.SOCKETIO_MESSAGE_QUEUE == ""
+            assert config_module.BaseConfig.SOCKETIO_ASYNC_MODE == "threading"
+            assert config_module.BaseConfig.GUNICORN_WORKER_CLASS == "gthread"
+    finally:
         importlib.reload(config_module)
-        assert config_module.BaseConfig.SOCKETIO_MESSAGE_QUEUE == ""
-    importlib.reload(config_module)
 
 
 def test_create_app_uses_socketio_message_queue_from_config(tmp_path: Path, monkeypatch):
@@ -240,6 +252,7 @@ def test_create_app_uses_socketio_message_queue_from_config(tmp_path: Path, monk
             "ROOM_TTL_SECONDS": 3600,
             "REDIS_URL": "redis://redis:6380/0",
             "SOCKETIO_MESSAGE_QUEUE": "redis://redis:6380/1",
+            "SOCKETIO_ASYNC_MODE": "threading",
         }
     )
 
