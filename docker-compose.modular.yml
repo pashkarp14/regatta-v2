@@ -1,0 +1,53 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment:
+      SECRET_KEY: ${SECRET_KEY:-replace-this-before-deploy}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6380/0}
+      APP_ENV: ${APP_ENV:-production}
+      APP_VERSION: ${APP_VERSION:-3.0.0}
+      FASTAPI_CORS_ALLOW_ORIGINS: ${FASTAPI_CORS_ALLOW_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
+    depends_on:
+      - redis
+    expose:
+      - "8000"
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api/v1}
+        VITE_APP_TITLE: ${VITE_APP_TITLE:-Regatta Control Center}
+        VITE_API_DOCS_URL: ${VITE_API_DOCS_URL:-/api/docs}
+    depends_on:
+      - api
+    expose:
+      - "80"
+    restart: unless-stopped
+
+  gateway:
+    image: caddy:2-alpine
+    depends_on:
+      - api
+      - web
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+    ports:
+      - "5001:80"
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--port", "6380", "--save", "60", "1", "--loglevel", "warning"]
+    ports:
+      - "6380:6380"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+volumes:
+  redis_data:

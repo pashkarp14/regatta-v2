@@ -1,0 +1,8 @@
+:80 {
+  encode gzip zstd
+
+  @api path /api/*
+  reverse_proxy @api api:8000
+
+  reverse_proxy web:80
+}
